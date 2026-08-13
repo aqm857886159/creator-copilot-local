@@ -15,6 +15,8 @@ if (process.platform === "darwin") {
   const resourcesRoot = join(root, "release", "mac-arm64", `${appName}.app`, "Contents", "Resources");
   const workerEntry = join(resourcesRoot, "app.asar.unpacked", "apps", "desktop", "analysis-worker.cjs");
   if (!existsSync(workerEntry)) throw new Error(`打包产物缺少 apps/desktop utility worker：${workerEntry}`);
+  const ocrSidecar = join(resourcesRoot, "app.asar.unpacked", "electron", "sidecars", "apple-vision-ocr.swift");
+  if (!existsSync(ocrSidecar)) throw new Error(`打包产物缺少 Apple Vision OCR sidecar：${ocrSidecar}`);
 }
 
 const child = spawn(executable, ["--smoke", "--no-sandbox"], { cwd: root, env: { ...process.env, ELECTRON_ENABLE_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
