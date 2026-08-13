@@ -198,6 +198,46 @@ describe("SqliteCatalog", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("persists an edit.freeze receipt together with the FrozenEditSpec", () => {
+    const root = mkdtempSync(join(tmpdir(), "creator-copilot-freeze-command-"));
+    const catalog = new SqliteCatalog(join(root, "catalog.sqlite"));
+    const now = "2026-08-14T00:00:00.000Z";
+    catalog.createWorkspace({ id: "workspace-freeze", name: "冻结工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
+    catalog.createProject({ id: "project-freeze", workspaceId: "workspace-freeze", title: "冻结测试", stage: "edit", revision: 1, payload: {}, createdAt: now, updatedAt: now });
+    const proposal = EditProposalSchema.parse({
+      schemaVersion: 1,
+      id: "proposal-freeze",
+      projectId: "project-freeze",
+      basedOn: { scriptRevision: 1, storyboardRevision: 1 },
+      durationMs: 1_000,
+      operations: [{ id: "clip-freeze", sourceAssetId: "asset-freeze", sourceSegment: { startMs: 0, endMs: 1_000 }, timeline: { startMs: 0, endMs: 1_000 }, role: "a_roll", reason: "保留完整口播", evidenceIds: ["evidence-freeze"], confidence: 0.95, status: "accepted" }],
+      subtitles: [{ id: "subtitle-freeze", timeline: { startMs: 0, endMs: 1_000 }, text: "冻结后再渲染。" }],
+      outputProfile: DEFAULT_VERTICAL_PROFILE,
+      rationale: [{ operationId: "clip-freeze", reason: "主线完整", confidence: 0.95 }],
+      status: "adopted",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const frozen = freezeEditProposal({ proposal, assetLocks: [{ assetId: "asset-freeze", contentHash: "sha256:freeze" }], now });
+    const command = { schemaVersion: 1 as const, commandId: "cmd-freeze", name: "edit.freeze", target: { type: "project", id: "project-freeze", expectedRevision: 1 }, actor: { type: "user" as const, id: "desktop" }, idempotencyKey: "edit-freeze-idem", idempotencyScope: "workspace-freeze", correlationId: "corr-freeze", input: { projectId: "project-freeze", proposalId: proposal.id, authoredSpecHash: frozen.authoredSpecHash } };
+    const pending = catalog.executeCommand(command, () => ({ receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "pending", target: command.target, eventIds: [], jobIds: [], artifactIds: [], approvalRequired: false } }));
+    expect(pending.status).toBe("pending");
+    const accepted = catalog.finalizeCommand(command, () => {
+      expect(catalog.saveEditProposal(proposal)).toBe(true);
+      expect(catalog.saveFrozenEditSpec(frozen)).toBe(true);
+      return {
+        receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "accepted", target: command.target, eventIds: ["event-freeze"], jobIds: [], artifactIds: [], approvalRequired: false, errorDetails: { frozenEditSpecId: frozen.id, authoredSpecHash: frozen.authoredSpecHash } },
+        events: [{ id: "event-freeze", aggregateType: "project", aggregateId: "project-freeze", aggregateRevision: 1, type: "edit.freeze.completed", payload: { frozenEditSpecId: frozen.id }, actorType: "system", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: now }],
+      };
+    });
+    expect(accepted.status).toBe("accepted");
+    expect(catalog.getFrozenEditSpec(frozen.id)?.authoredSpecHash).toBe(frozen.authoredSpecHash);
+    expect(catalog.getReceipt("workspace-freeze", command.idempotencyKey)?.receipt.errorDetails).toMatchObject({ frozenEditSpecId: frozen.id });
+    expect(catalog.finalizeCommand(command, () => { throw new Error("不应重复冻结"); }).status).toBe("duplicate");
+    catalog.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("rejects symlink escape and upgrades a legacy v1 lease schema", () => {
     const root = mkdtempSync(join(tmpdir(), "creator-copilot-legacy-"));
     const outside = mkdtempSync(join(tmpdir(), "creator-copilot-outside-"));

@@ -1,7 +1,7 @@
 # V5 Provider 合同与小额联调边界
 
 日期：2026-08-14  
-状态：合同、mock、一次真实 structured proposal smoke 和 proposal UI 调度持久化已完成；freeze 命令、Mastra durable resume 和人工恢复 UI 待继续
+状态：合同、mock、一次真实 structured proposal smoke、proposal UI 调度持久化和 freeze CommandReceipt 已完成；Mastra durable resume 和人工恢复 UI 待继续
 
 ## 1. 目标
 
@@ -60,7 +60,7 @@ AGENT_PROVIDER_LIVE=1 npm run test:agent:live
 ## 5. 下一步
 
 1. 在 main 增加“凭证已配置/余额或用量摘要”只读状态，绝不回传 key；
-2. 将 proposal/freeze/render 写入 CommandReceipt、Job 和 ArtifactManifest；
+2. 将 render 失败重试和人工恢复写入已有 CommandReceipt、Job 和 ArtifactManifest；proposal/freeze 已接入；
 3. 让 AI 粗剪页面显示真实 provider 的候选镜头、证据、置信度、缺口和预计调用成本；
 4. 用户批准后调用 V3 reference render kernel；
 5. 只有上述 UI 闭环通过后，再对一个明确账号做 TikHub 20 条 metadata 小窗口真实联调。

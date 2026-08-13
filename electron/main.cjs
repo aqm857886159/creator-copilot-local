@@ -620,6 +620,8 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
   let renderJobLeaseToken = null;
   let renderWorkspace = null;
   let renderRuntime = null;
+  let freezeReceipt = null;
+  let frozenSpec = null;
   try {
     const workspace = requireWorkspace();
     renderWorkspace = workspace;
@@ -646,11 +648,82 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
       const probe = await new runtime.media.FfmpegToolchain().probe(canonicalAssetPath).catch(() => null);
       assets[operation.sourceAssetId] = { assetId: operation.sourceAssetId, relativePath: artifact.relativePath, absolutePath: canonicalAssetPath, contentHash: artifact.contentHash, durationMs: take.durationMs, hasVideo: true, hasAudio: probe ? probe.streams.some((stream) => stream.kind === "audio") : true };
     }
-    const renderId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
     const assetLocks = Object.values(assets).map((asset) => ({ assetId: asset.assetId, contentHash: asset.contentHash }));
-    const frozen = runtime.exchange.freezeEditProposal({ proposal, assetLocks, now: new Date().toISOString() });
-    if (!workspace.catalog.saveEditProposal(proposal)) throw new Error("剪辑提案版本保存失败");
-    if (!workspace.catalog.saveFrozenEditSpec(frozen)) throw new Error("冻结剪辑规格版本冲突");
+    // The user-facing action is “确认并导出”, but the first durable boundary
+    // is the freeze command.  Rendering may be retried independently after a
+    // crash; the accepted spec and its receipt must already exist.
+    const freezeNow = proposal.updatedAt;
+    const freezeInput = {
+      projectId: raw.projectId,
+      proposalId: proposal.id,
+      proposalUpdatedAt: proposal.updatedAt,
+      operationDecisions: proposal.operations.map((operation) => ({ id: operation.id, status: operation.status })),
+      assetLocks: [...assetLocks].sort((left, right) => left.assetId.localeCompare(right.assetId)),
+      freezeNow,
+    };
+    const freezeFingerprint = createHash("sha256").update(JSON.stringify(freezeInput)).digest("hex").slice(0, 24);
+    const freezeCommand = {
+      schemaVersion: 1,
+      commandId: `command-edit-freeze-${randomUUID()}`,
+      name: "edit.freeze",
+      target: { type: "project", id: raw.projectId, expectedRevision: project.revision },
+      actor: { type: "user", id: "desktop-user", sessionId: "desktop" },
+      idempotencyKey: `edit-freeze:${raw.projectId}:${proposal.id}:${freezeFingerprint}`,
+      idempotencyScope: workspace.workspaceId,
+      correlationId: `run-edit-freeze-${randomUUID()}`,
+      input: freezeInput,
+    };
+    const pendingFreeze = workspace.catalog.executeCommand(freezeCommand, () => ({
+      receipt: { schemaVersion: 1, commandId: freezeCommand.commandId, correlationId: freezeCommand.correlationId, status: "pending", target: freezeCommand.target, eventIds: [`event-${freezeCommand.correlationId}-requested`], jobIds: [], artifactIds: [], approvalRequired: false },
+      events: [{ id: `event-${freezeCommand.correlationId}-requested`, aggregateType: "project", aggregateId: raw.projectId, aggregateRevision: project.revision, type: "edit.freeze.requested", payload: { proposalId: proposal.id, assetCount: assetLocks.length }, actorType: "user", idempotencyKey: freezeCommand.idempotencyKey, correlationId: freezeCommand.correlationId, occurredAt: new Date().toISOString() }],
+    }));
+    const storedFreeze = workspace.catalog.getReceipt(workspace.workspaceId, freezeCommand.idempotencyKey)?.receipt ?? pendingFreeze;
+    if (storedFreeze.status === "accepted") {
+      const storedSpecId = storedFreeze.errorDetails && typeof storedFreeze.errorDetails === "object" ? storedFreeze.errorDetails.frozenEditSpecId : undefined;
+      if (typeof storedSpecId !== "string") throw new Error("冻结回执缺少 FrozenEditSpec 引用");
+      frozenSpec = workspace.catalog.getFrozenEditSpec(storedSpecId);
+      if (!frozenSpec) throw new Error("冻结回执引用的 FrozenEditSpec 不存在");
+      freezeReceipt = storedFreeze;
+    } else if (storedFreeze.status === "rejected") {
+      freezeReceipt = storedFreeze;
+      const details = storedFreeze.errorDetails && typeof storedFreeze.errorDetails === "object" ? storedFreeze.errorDetails.message : undefined;
+      throw Object.assign(new Error(typeof details === "string" ? details : "冻结剪辑规格失败"), { code: storedFreeze.errorCode ?? "EDIT_FREEZE_FAILED" });
+    } else {
+      const commandToFinalize = storedFreeze.status === "pending" && storedFreeze.commandId !== freezeCommand.commandId
+        ? { ...freezeCommand, commandId: storedFreeze.commandId, correlationId: storedFreeze.correlationId }
+        : freezeCommand;
+      try {
+        freezeReceipt = workspace.catalog.finalizeCommand(commandToFinalize, (command, previous) => {
+          const frozen = runtime.exchange.freezeEditProposal({ proposal, assetLocks, now: freezeNow });
+          if (!workspace.catalog.saveEditProposal(proposal)) throw new Error("剪辑提案版本保存失败");
+          if (!workspace.catalog.saveFrozenEditSpec(frozen)) throw new Error("冻结剪辑规格版本冲突");
+          frozenSpec = frozen;
+          return {
+            receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "accepted", target: command.target, eventIds: [`event-${command.correlationId}-completed`], jobIds: [], artifactIds: [], approvalRequired: false, errorDetails: { frozenEditSpecId: frozen.id, sourceProposalId: proposal.id, authoredSpecHash: frozen.authoredSpecHash } },
+            events: [{ id: `event-${command.correlationId}-completed`, aggregateType: "project", aggregateId: raw.projectId, aggregateRevision: project.revision, type: "edit.freeze.completed", payload: { proposalId: proposal.id, frozenEditSpecId: frozen.id, authoredSpecHash: frozen.authoredSpecHash }, actorType: "system", idempotencyKey: freezeCommand.idempotencyKey, correlationId: command.correlationId, causationId: previous.correlationId, occurredAt: new Date().toISOString() }],
+          };
+        });
+        if (freezeReceipt.status === "duplicate") {
+          const duplicateSpecId = freezeReceipt.errorDetails && typeof freezeReceipt.errorDetails === "object" ? freezeReceipt.errorDetails.frozenEditSpecId : undefined;
+          if (typeof duplicateSpecId !== "string") throw new Error("重复冻结回执缺少 FrozenEditSpec 引用");
+          frozenSpec = workspace.catalog.getFrozenEditSpec(duplicateSpecId);
+          if (!frozenSpec) throw new Error("重复冻结回执引用的 FrozenEditSpec 不存在");
+        }
+      } catch (error) {
+        // freezeEditProposal is pure, but persistence can still fail (schema,
+        // revision, disk full). Convert that failure into a durable rejected
+        // receipt while the pending command is still recoverable.
+        const message = error instanceof Error ? error.message : "冻结剪辑规格失败";
+        freezeReceipt = workspace.catalog.finalizeCommand(commandToFinalize, (command, previous) => ({
+          receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "rejected", target: command.target, eventIds: [`event-${command.correlationId}-failed`], jobIds: [], artifactIds: [], approvalRequired: false, errorCode: "EDIT_FREEZE_FAILED", errorDetails: { message, sourceProposalId: proposal.id } },
+          events: [{ id: `event-${command.correlationId}-failed`, aggregateType: "project", aggregateId: raw.projectId, aggregateRevision: project.revision, type: "edit.freeze.failed", payload: { proposalId: proposal.id, message }, actorType: "system", idempotencyKey: freezeCommand.idempotencyKey, correlationId: command.correlationId, causationId: previous.correlationId, occurredAt: new Date().toISOString() }],
+        }));
+        throw Object.assign(new Error(message), { code: "EDIT_FREEZE_FAILED" });
+      }
+    }
+    if (!frozenSpec) throw new Error("冻结剪辑规格没有生成");
+    const renderId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
+    const frozen = frozenSpec;
     renderRunId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
     const renderNow = new Date().toISOString();
     workspace.catalog.saveRenderRun({ schemaVersion: 1, id: renderRunId, projectId: raw.projectId, frozenEditSpecId: frozen.id, state: "running", createdAt: renderNow, updatedAt: renderNow });
@@ -701,7 +774,7 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
     const outputArtifactIds = outputArtifacts.map((artifact) => artifact.artifactId);
     if (!workspace.catalog.transitionJob(renderJobId, "running", "succeeded", renderJobLeaseToken, { artifactIds: outputArtifactIds, checkpoint: { renderRunId, manifestHash: result.manifestHash, outputCount: outputArtifactIds.length } })) throw new Error("渲染任务完成状态未能持久化");
     workspace.catalog.saveRenderRun({ schemaVersion: 1, id: renderRunId, projectId: raw.projectId, frozenEditSpecId: frozen.id, state: "succeeded", manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/"), manifestHash: result.manifestHash, createdAt: renderNow, updatedAt: new Date().toISOString() });
-    return { ok: true, renderId, renderRunId, jobId: renderJobId, artifactIds: outputArtifactIds, manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
+    return { ok: true, freezeReceipt, frozenEditSpecId: frozen.id, renderId, renderRunId, jobId: renderJobId, artifactIds: outputArtifactIds, manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
   } catch (error) {
     if (renderJobId && renderJobLeaseToken && renderWorkspace) {
       try {
@@ -719,7 +792,7 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
         // Preserve the original render error; recovery can inspect a running run after restart.
       }
     }
-    return { ok: false, errorCode: "edit_render_failed", message: error instanceof Error ? error.message : "AI 剪辑导出失败" };
+    return { ok: false, errorCode: error && typeof error === "object" && "code" in error ? String(error.code) : "edit_render_failed", freezeReceipt, message: error instanceof Error ? error.message : "AI 剪辑导出失败" };
   }
 });
 

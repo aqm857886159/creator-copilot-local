@@ -191,6 +191,8 @@ interface EditRenderResult {
   ok: boolean;
   errorCode?: string;
   message?: string;
+  freezeReceipt?: EditProposalResult["receipt"];
+  frozenEditSpecId?: string;
   renderId?: string;
   renderRunId?: string;
   jobId?: string;
