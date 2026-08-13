@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("desktop", {
   getInfo: () => ipcRenderer.invoke("desktop:get-info"),
   chooseWorkspace: () => ipcRenderer.invoke("desktop:choose-workspace"),
   importMedia: () => ipcRenderer.invoke("desktop:import-media"),
+  searchAssets: (query) => ipcRenderer.invoke("desktop:search-assets", query),
   createCaptureWorkflow: (input) => ipcRenderer.invoke("desktop:create-capture-workflow", input),
   importTake: (shootTaskId) => ipcRenderer.invoke("desktop:import-take", shootTaskId),
   selectTake: (input) => ipcRenderer.invoke("desktop:select-take", input),

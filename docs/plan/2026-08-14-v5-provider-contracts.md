@@ -1,7 +1,7 @@
 # V5 Provider 合同与小额联调边界
 
 日期：2026-08-14  
-状态：合同与 mock 已完成；尚未把真实请求接入 UI/调度器
+状态：合同、mock 和一次真实 structured proposal smoke 已完成；正式 UI 调度持久化待继续
 
 ## 1. 目标
 
@@ -20,6 +20,7 @@
 - `ApiMartClient`：官方 `/v1/models?expand=true` 和 `/v1/chat/completions`；
 - `ResearchConnector`：TikHub profile/posts metadata 的中性端口；
 - `TikHubDouyinConnector`：官方 `get_sec_user_id`、App V3 账号资料和用户作品分页，分页数量强制 1–20。
+- `packages/agent-runtime`：`LocalEditAgentRuntime` 和 `ProviderEditAgentRuntime`；模型只能输出受限 draft，随后由本地 materializer 校验素材白名单、时间码和分镜映射。
 
 ## 3. 数据与密钥边界
 
@@ -46,12 +47,20 @@ npm run test:providers:live       # 仅健康/凭证/模型目录，无生成任
 - API key 不出现在请求日志/测试输出；
 - provider 响应包含 `responseHash`，但业务层不接触原始供应商 JSON。
 
+真实结构化提案 smoke：
+
+```bash
+AGENT_PROVIDER_LIVE=1 npm run test:agent:live
+```
+
+本次使用一个虚拟脚本、一个虚拟分镜和一个虚拟已选素材，只执行一次 APIMart `gpt-5-nano` structured chat，不上传视频、不生成媒体、不保存原始响应。结果为 `status=ready`、1 个 operation、0 个缺口；输出只记录 provider/model/response hash，不打印模型文本或 API key。
+
 真实 smoke 仍使用 [Provider-Official-Integration-Research-v0.1.md](../Provider-Official-Integration-Research-v0.1.md) 中的脚本和预算范围；它不是合同测试的替代品。
 
 ## 5. 下一步
 
 1. 在 main 增加“凭证已配置/余额或用量摘要”只读状态，绝不回传 key；
-2. 为 `edit.propose` 增加一个 mock Agent handler，输出严格 `EditProposal`；
-3. 让 AI 粗剪页面显示候选镜头、证据、置信度、缺口和预计调用成本；
+2. 将 proposal/freeze/render 写入 CommandReceipt、Job 和 ArtifactManifest；
+3. 让 AI 粗剪页面显示真实 provider 的候选镜头、证据、置信度、缺口和预计调用成本；
 4. 用户批准后调用 V3 reference render kernel；
 5. 只有上述 UI 闭环通过后，再对一个明确账号做 TikHub 20 条 metadata 小窗口真实联调。

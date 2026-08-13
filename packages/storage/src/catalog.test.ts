@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { SqliteCatalog } from "./catalog";
 import type { JobRecord } from "../../contracts/src/index";
 import { ScriptSchema, createShootTasks, createStoryboard, type Take } from "../../creation/src/index";
+import { DEFAULT_VERTICAL_PROFILE, EditProposalSchema, freezeEditProposal } from "../../exchange/src/index";
+import { transcriptFacts, parseWhisperJson } from "../../analysis/src/index";
 
 function fixtureJob(overrides: Partial<JobRecord> = {}): JobRecord {
   const now = new Date().toISOString();
@@ -36,7 +38,7 @@ describe("SqliteCatalog", () => {
     catalog.createWorkspace({ id: "workspace-1", name: "测试工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
     catalog.createProject({ id: "project-1", workspaceId: "workspace-1", title: "测试项目", stage: "script", revision: 1, payload: { source: "fixture" }, createdAt: now, updatedAt: now });
     catalog.insertArtifact({ schemaVersion: 1, artifactId: "artifact-1", workspaceId: "workspace-1", kind: "proxy", relativePath: "derived/proxy.mp4", mimeType: "video/mp4", contentHash: "sha256:proxy", byteSize: 12, parentArtifactIds: [], validationStatus: "valid" });
-    expect(catalog.schemaVersion()).toBe(3);
+    expect(catalog.schemaVersion()).toBe(5);
     expect(catalog.getProject("project-1")?.payload).toEqual({ source: "fixture" });
     expect(catalog.getArtifact("artifact-1")?.relativePath).toBe("derived/proxy.mp4");
     expect(catalog.updateProject("project-1", 0, { title: "不应覆盖" })).toBe(false);
@@ -166,7 +168,7 @@ describe("SqliteCatalog", () => {
     `);
     legacy.close();
     const catalog = new SqliteCatalog(dbPath);
-    expect(catalog.schemaVersion()).toBe(3);
+    expect(catalog.schemaVersion()).toBe(5);
     catalog.insertJob(fixtureJob({ id: "legacy-job", idempotencyKey: "legacy-job-key" }));
     catalog.enqueueOutbox({ id: "legacy-outbox", kind: "legacy", payload: {}, idempotencyKey: "legacy-outbox-key", idempotencyScope: "workspace-1", state: "queued", attempt: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     catalog.createWorkspace({ id: "workspace-1", name: "工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -201,12 +203,28 @@ describe("SqliteCatalog", () => {
     const selected = catalog.selectTakeForTask(task.id, "take-2");
     expect(selected.takes.find((take) => take.id === "take-2")?.status).toBe("selected");
     expect(catalog.getShootTask(task.id)?.status).toBe("accepted");
+    const proposal = EditProposalSchema.parse({ schemaVersion: 1, id: "proposal-creation", projectId: "project-creation", basedOn: { scriptRevision: 1, storyboardRevision: 1 }, durationMs: 1000, operations: [{ id: "operation-creation", shotId: "shot-creation", sourceAssetId: "artifact-take-2", sourceSegment: { startMs: 0, endMs: 1000 }, timeline: { startMs: 0, endMs: 1000 }, role: "a_roll", reason: "保持口播连续", evidenceIds: ["shot-creation"], confidence: 0.9, status: "suggested" }], subtitles: [{ id: "subtitle-creation", timeline: { startMs: 0, endMs: 1000 }, text: "表达需要画面变化。" }], outputProfile: DEFAULT_VERTICAL_PROFILE, rationale: [{ operationId: "operation-creation", shotId: "shot-creation", reason: "对应口播主线", confidence: 0.9 }], status: "previewed", createdAt: now, updatedAt: now });
+    expect(catalog.saveEditProposal(proposal)).toBe(true);
+    expect(catalog.getEditProposal(proposal.id)?.operations[0].shotId).toBe("shot-creation");
+    const frozen = freezeEditProposal({ proposal, assetLocks: [{ assetId: "artifact-take-2", contentHash: "sha256:take-2" }], now });
+    expect(catalog.saveFrozenEditSpec(frozen)).toBe(true);
+    expect(catalog.getFrozenEditSpec(frozen.id)?.authoredSpecHash).toBe(frozen.authoredSpecHash);
+    catalog.saveRenderRun({ schemaVersion: 1, id: "render-run-creation", projectId: "project-creation", frozenEditSpecId: frozen.id, state: "running", createdAt: now, updatedAt: now });
+    catalog.saveRenderRun({ schemaVersion: 1, id: "render-run-creation", projectId: "project-creation", frozenEditSpecId: frozen.id, state: "succeeded", manifestRelativePath: "exports/render.manifest.json", manifestHash: "sha256:manifest", createdAt: now, updatedAt: now });
+    expect(catalog.getRenderRun("render-run-creation")).toMatchObject({ state: "succeeded", manifestHash: "sha256:manifest" });
+    const analysisSegments = parseWhisperJson({ segments: [{ start: 0, end: 1.2, text: "观点需要画面证据" }, { start: 1.2, end: 2.4, text: "素材库可以搜索" }] });
+    catalog.saveAnalysisFacts(transcriptFacts({ workspaceId: "workspace-creation", artifactId: "artifact-take-2", segments: analysisSegments, providerKey: "whisper.cpp", modelKey: "ggml-small", contentHash: "sha256:take-2", createdAt: now }));
+    expect(catalog.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "素材库" })[0]?.text).toContain("素材库");
+    expect(catalog.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "观点", kind: "transcript" })).toHaveLength(1);
     catalog.close();
     const restored = new SqliteCatalog(dbPath);
     expect(restored.getScript(script.id)?.blocks[0].text).toContain("画面变化");
     expect(restored.getStoryboard(storyboard.id)?.shots[0].selectedTakeId).toBeUndefined();
     expect(restored.getCapturePackage("capture-creation")?.status).toBe("ready");
     expect(restored.getTake("take-2")?.status).toBe("selected");
+    expect(restored.getEditProposal("proposal-creation")?.status).toBe("previewed");
+    expect(restored.getRenderRun("render-run-creation")?.state).toBe("succeeded");
+    expect(restored.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "画面" })).toHaveLength(1);
     restored.close();
     rmSync(root, { recursive: true, force: true });
   });

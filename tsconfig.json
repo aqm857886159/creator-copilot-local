@@ -8,5 +8,7 @@
     ,{ "path": "./tsconfig.creation.json" }
     ,{ "path": "./tsconfig.exchange.json" }
     ,{ "path": "./tsconfig.providers.json" }
+    ,{ "path": "./tsconfig.agent-runtime.json" }
+    ,{ "path": "./tsconfig.analysis.json" }
   ]
 }

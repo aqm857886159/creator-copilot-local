@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve, sep } from "node:path";
 import Database from "better-sqlite3";
+import { z } from "zod";
 import {
   ArtifactManifestSchema,
   CommandEnvelopeSchema,
@@ -16,6 +17,12 @@ import {
   type JobState,
 } from "../../contracts/src/index.js";
 import {
+  EditProposalSchema,
+  FrozenEditSpecSchema,
+  type EditProposal,
+  type FrozenEditSpec,
+} from "../../exchange/src/index.js";
+import {
   CapturePackageSchema,
   ScriptSchema,
   ShootTaskSchema,
@@ -29,8 +36,23 @@ import {
   type Storyboard,
   type Take,
 } from "../../creation/src/index.js";
+import { AnalysisFactSchema, searchQueryForFts, type AnalysisFact } from "../../analysis/src/index.js";
 
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 5;
+
+const RenderRunRecordSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  frozenEditSpecId: z.string().min(1),
+  state: z.enum(["running", "succeeded", "failed", "cancelled"]),
+  manifestRelativePath: z.string().min(1).optional(),
+  manifestHash: z.string().min(1).optional(),
+  error: z.object({ code: z.string().min(1), message: z.string().min(1) }).strict().optional(),
+  createdAt: z.string().datetime({ offset: true }),
+  updatedAt: z.string().datetime({ offset: true }),
+}).strict();
+export type RenderRunRecord = z.infer<typeof RenderRunRecordSchema>;
 
 type WorkspaceRecord = {
   id: string;
@@ -284,6 +306,70 @@ const migrations: Record<number, string> = {
     );
     CREATE INDEX IF NOT EXISTS takes_task_idx ON takes(shoot_task_id, status, created_at);
   `,
+  4: `
+    CREATE TABLE IF NOT EXISTS edit_proposals (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      revision INTEGER NOT NULL CHECK (revision > 0),
+      status TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS edit_proposals_project_idx ON edit_proposals(project_id, updated_at);
+
+    CREATE TABLE IF NOT EXISTS frozen_edit_specs (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      source_proposal_id TEXT REFERENCES edit_proposals(id) ON DELETE RESTRICT,
+      revision INTEGER NOT NULL CHECK (revision > 0),
+      authored_spec_hash TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS frozen_edit_specs_project_idx ON frozen_edit_specs(project_id, updated_at);
+
+    CREATE TABLE IF NOT EXISTS render_runs (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      frozen_edit_spec_id TEXT NOT NULL REFERENCES frozen_edit_specs(id) ON DELETE RESTRICT,
+      state TEXT NOT NULL,
+      manifest_relative_path TEXT,
+      manifest_hash TEXT,
+      error_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS render_runs_project_idx ON render_runs(project_id, updated_at);
+  `,
+  5: `
+    CREATE TABLE IF NOT EXISTS media_analysis_facts (
+      id TEXT PRIMARY KEY NOT NULL,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      artifact_id TEXT NOT NULL REFERENCES artifacts(artifact_id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      start_ms INTEGER NOT NULL CHECK (start_ms >= 0),
+      end_ms INTEGER NOT NULL CHECK (end_ms > start_ms),
+      text TEXT NOT NULL,
+      labels_json TEXT NOT NULL,
+      provider_key TEXT NOT NULL,
+      model_key TEXT,
+      content_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS media_analysis_facts_artifact_idx ON media_analysis_facts(artifact_id, start_ms, end_ms);
+    CREATE INDEX IF NOT EXISTS media_analysis_facts_workspace_idx ON media_analysis_facts(workspace_id, kind, created_at);
+    CREATE VIRTUAL TABLE IF NOT EXISTS media_analysis_fts USING fts5(
+      fact_id UNINDEXED,
+      workspace_id UNINDEXED,
+      artifact_id UNINDEXED,
+      kind UNINDEXED,
+      text,
+      labels,
+      tokenize = 'unicode61'
+    );
+  `,
 };
 
 function parseJson<T>(value: string, label: string): T {
@@ -505,6 +591,110 @@ export class SqliteCatalog {
     return row ? CapturePackageSchema.parse(parseJson(row.payload_json, "capture package")) : undefined;
   }
 
+  saveEditProposal(raw: EditProposal) {
+    const proposal = EditProposalSchema.parse(raw);
+    const current = this.db.prepare("SELECT revision FROM edit_proposals WHERE id = ?").get(proposal.id) as { revision: number } | undefined;
+    if (!current) {
+      this.db.prepare("INSERT INTO edit_proposals(id, project_id, revision, status, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(proposal.id, proposal.projectId, 1, proposal.status, JSON.stringify(proposal), proposal.createdAt, proposal.updatedAt);
+      return true;
+    }
+    const result = this.db.prepare("UPDATE edit_proposals SET revision = ?, status = ?, payload_json = ?, updated_at = ? WHERE id = ? AND revision = ?")
+      .run(current.revision + 1, proposal.status, JSON.stringify(proposal), proposal.updatedAt, proposal.id, current.revision);
+    return result.changes === 1;
+  }
+
+  getEditProposal(id: string): EditProposal | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM edit_proposals WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? EditProposalSchema.parse(parseJson(row.payload_json, "edit proposal")) : undefined;
+  }
+
+  saveFrozenEditSpec(raw: FrozenEditSpec) {
+    const spec = FrozenEditSpecSchema.parse(raw);
+    const current = this.db.prepare("SELECT revision, authored_spec_hash AS authoredSpecHash FROM frozen_edit_specs WHERE id = ?").get(spec.id) as { revision: number; authoredSpecHash: string } | undefined;
+    if (!current) {
+      this.db.prepare("INSERT INTO frozen_edit_specs(id, project_id, source_proposal_id, revision, authored_spec_hash, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(spec.id, spec.projectId, spec.sourceProposalId ?? null, spec.revision, spec.authoredSpecHash, JSON.stringify(spec), spec.createdAt, spec.updatedAt);
+      return true;
+    }
+    if (current.authoredSpecHash === spec.authoredSpecHash && current.revision === spec.revision) return true;
+    if (spec.revision !== current.revision + 1) return false;
+    const result = this.db.prepare("UPDATE frozen_edit_specs SET source_proposal_id = ?, revision = ?, authored_spec_hash = ?, payload_json = ?, updated_at = ? WHERE id = ? AND revision = ?")
+      .run(spec.sourceProposalId ?? null, spec.revision, spec.authoredSpecHash, JSON.stringify(spec), spec.updatedAt, spec.id, current.revision);
+    return result.changes === 1;
+  }
+
+  getFrozenEditSpec(id: string): FrozenEditSpec | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM frozen_edit_specs WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? FrozenEditSpecSchema.parse(parseJson(row.payload_json, "frozen edit spec")) : undefined;
+  }
+
+  saveRenderRun(raw: RenderRunRecord) {
+    const run = RenderRunRecordSchema.parse(raw);
+    this.db.prepare(`INSERT INTO render_runs(id, project_id, frozen_edit_spec_id, state, manifest_relative_path, manifest_hash, error_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET state = excluded.state, manifest_relative_path = excluded.manifest_relative_path, manifest_hash = excluded.manifest_hash, error_json = excluded.error_json, updated_at = excluded.updated_at`)
+      .run(run.id, run.projectId, run.frozenEditSpecId, run.state, run.manifestRelativePath ?? null, run.manifestHash ?? null, run.error ? JSON.stringify(run.error) : null, run.createdAt, run.updatedAt);
+    return run;
+  }
+
+  getRenderRun(id: string): RenderRunRecord | undefined {
+    const row = this.db.prepare("SELECT id, project_id AS projectId, frozen_edit_spec_id AS frozenEditSpecId, state, manifest_relative_path AS manifestRelativePath, manifest_hash AS manifestHash, error_json AS errorJson, created_at AS createdAt, updated_at AS updatedAt FROM render_runs WHERE id = ?").get(id) as (Omit<RenderRunRecord, "error"> & { errorJson?: string | null }) | undefined;
+    if (!row) return undefined;
+    const { errorJson, schemaVersion: _schemaVersion, ...record } = row;
+    return RenderRunRecordSchema.parse({ schemaVersion: 1, ...record, manifestRelativePath: row.manifestRelativePath ?? undefined, manifestHash: row.manifestHash ?? undefined, error: errorJson ? parseJson(errorJson, "render run error") : undefined });
+  }
+
+  saveAnalysisFacts(rawFacts: AnalysisFact[]) {
+    const facts = rawFacts.map((fact) => AnalysisFactSchema.parse(fact));
+    const transaction = this.db.transaction(() => {
+      for (const fact of facts) {
+        const workspace = this.getWorkspace(fact.workspaceId);
+        const artifact = this.getArtifact(fact.artifactId);
+        if (!workspace || !artifact || artifact.workspaceId !== fact.workspaceId) throw new Error(`分析事实引用了不存在或跨工作区素材：${fact.id}`);
+        this.db.prepare("DELETE FROM media_analysis_fts WHERE fact_id = ?").run(fact.id);
+        this.db.prepare(`INSERT INTO media_analysis_facts(id, workspace_id, artifact_id, kind, start_ms, end_ms, text, labels_json, provider_key, model_key, content_hash, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, artifact_id = excluded.artifact_id, kind = excluded.kind, start_ms = excluded.start_ms, end_ms = excluded.end_ms, text = excluded.text, labels_json = excluded.labels_json, provider_key = excluded.provider_key, model_key = excluded.model_key, content_hash = excluded.content_hash, created_at = excluded.created_at`)
+          .run(fact.id, fact.workspaceId, fact.artifactId, fact.kind, fact.startMs, fact.endMs, fact.text, JSON.stringify(fact.labels), fact.providerKey, fact.modelKey ?? null, fact.contentHash, fact.createdAt);
+        this.db.prepare("INSERT INTO media_analysis_fts(fact_id, workspace_id, artifact_id, kind, text, labels) VALUES (?, ?, ?, ?, ?, ?)")
+          .run(fact.id, fact.workspaceId, fact.artifactId, fact.kind, fact.text, fact.labels.join(" "));
+      }
+    }).immediate;
+    transaction();
+    return facts;
+  }
+
+  getAnalysisFact(id: string): AnalysisFact | undefined {
+    const row = this.db.prepare(`SELECT id, workspace_id AS workspaceId, artifact_id AS artifactId, kind, start_ms AS startMs, end_ms AS endMs, text, labels_json AS labelsJson, provider_key AS providerKey, model_key AS modelKey, content_hash AS contentHash, created_at AS createdAt FROM media_analysis_facts WHERE id = ?`).get(id) as (Omit<AnalysisFact, "labels"> & { labelsJson: string }) | undefined;
+    if (!row) return undefined;
+    return AnalysisFactSchema.parse({ schemaVersion: 1, id: row.id, workspaceId: row.workspaceId, artifactId: row.artifactId, kind: row.kind, startMs: row.startMs, endMs: row.endMs, text: row.text, labels: parseJson<string[]>(row.labelsJson, "analysis labels"), providerKey: row.providerKey, modelKey: row.modelKey ?? undefined, contentHash: row.contentHash, createdAt: row.createdAt });
+  }
+
+  searchAnalysisFacts(input: { workspaceId: string; query?: string; kind?: AnalysisFact["kind"]; limit?: number }) {
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    const normalizedQuery = input.query?.trim() ?? "";
+    const rows = normalizedQuery
+      ? this.db.prepare(`SELECT fact_id AS factId FROM media_analysis_fts WHERE media_analysis_fts MATCH ? AND workspace_id = ? LIMIT ?`).all(searchQueryForFts(normalizedQuery), input.workspaceId, limit * 4) as Array<{ factId: string }>
+      : this.db.prepare("SELECT id AS factId FROM media_analysis_facts WHERE workspace_id = ? ORDER BY created_at DESC, id LIMIT ?").all(input.workspaceId, limit * 4) as Array<{ factId: string }>;
+    const results: AnalysisFact[] = [];
+    for (const row of rows) {
+      const fact = this.getAnalysisFact(row.factId);
+      if (!fact || fact.workspaceId !== input.workspaceId || (input.kind && fact.kind !== input.kind)) continue;
+      if (!results.some((candidate) => candidate.id === fact.id)) results.push(fact);
+      if (results.length >= limit) break;
+    }
+    if (results.length === 0 && normalizedQuery) {
+      const like = `%${normalizedQuery.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+      const fallbackRows = this.db.prepare("SELECT id AS factId FROM media_analysis_facts WHERE workspace_id = ? AND text LIKE ? ESCAPE '\\' ORDER BY start_ms, id LIMIT ?").all(input.workspaceId, like, limit) as Array<{ factId: string }>;
+      for (const row of fallbackRows) {
+        const fact = this.getAnalysisFact(row.factId);
+        if (fact && (!input.kind || fact.kind === input.kind)) results.push(fact);
+      }
+    }
+    return results;
+  }
+
   saveCaptureWorkflow(input: { project: ProjectRecord; script: Script; storyboard: Storyboard; tasks: ShootTask[]; capturePackage: CapturePackage }) {
     const transaction = this.db.transaction(() => {
       if (input.script.projectId !== input.project.id || input.storyboard.projectId !== input.project.id || input.capturePackage.projectId !== input.project.id) throw new Error("创作工作流的 projectId 不一致");
@@ -686,6 +876,14 @@ export class SqliteCatalog {
       parentArtifactIds: parseJson(row.parent_artifact_ids_json, "artifact parents"),
       sourceRevision: row.sourceRevision ?? undefined,
       validationStatus: row.validationStatus,
+    });
+  }
+
+  listArtifacts(workspaceId: string) {
+    const rows = this.db.prepare("SELECT artifact_id AS artifactId FROM artifacts WHERE workspace_id = ? ORDER BY created_at DESC, artifact_id").all(workspaceId) as Array<{ artifactId: string }>;
+    return rows.flatMap((row) => {
+      const artifact = this.getArtifact(row.artifactId);
+      return artifact ? [artifact] : [];
     });
   }
 

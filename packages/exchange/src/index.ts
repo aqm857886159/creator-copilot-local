@@ -32,6 +32,7 @@ export type OutputProfile = z.infer<typeof OutputProfileSchema>;
 
 export const SourceClipSchema = z.object({
   id,
+  shotId: id.optional(),
   sourceAssetId: id,
   sourceSegment: TimeRangeSchema,
   timeline: TimeRangeSchema,
@@ -100,6 +101,7 @@ export type FrozenEditSpec = z.infer<typeof FrozenEditSpecSchema>;
 
 export const RenderClipSchema = z.object({
   id,
+  shotId: id.optional(),
   sourceAssetId: id,
   sourceRelativePath: z.string().min(1),
   sourceContentHash: hash,
@@ -176,7 +178,7 @@ export type CaptureAssetFact = {
 export type EditProposalMissingMaterial = {
   shotId: string;
   taskId?: string;
-  reason: "take_not_selected" | "asset_fact_missing";
+  reason: "take_not_selected" | "asset_fact_missing" | "no_suitable_asset";
   instruction: string;
 };
 
@@ -226,7 +228,7 @@ export function proposeEditFromCapture(input: {
     const sourceAssetId = selectedTake.assetId;
     assetLocks.set(sourceAssetId, { assetId: sourceAssetId, contentHash: assetFact.contentHash });
     const role: SourceClip["role"] = shot.mode === "talking_head" ? "a_roll" : shot.mode === "broll" ? "b_roll" : shot.mode === "screen_recording" ? "screen" : shot.mode === "still" ? "still" : "generated";
-    operations.push({ id: `proposal-op-${shot.id}`, sourceAssetId, sourceSegment: { startMs: 0, endMs: durationMs }, timeline: { startMs: cursorMs, endMs: cursorMs + durationMs }, role, reason: shot.actionDescription, evidenceIds: [shot.id, task.id], confidence: selectedTake.status === "selected" ? 0.86 : 0.6, status: "suggested" });
+    operations.push({ id: `proposal-op-${shot.id}`, shotId: shot.id, sourceAssetId, sourceSegment: { startMs: 0, endMs: durationMs }, timeline: { startMs: cursorMs, endMs: cursorMs + durationMs }, role, reason: shot.actionDescription, evidenceIds: [shot.id, task.id], confidence: selectedTake.status === "selected" ? 0.86 : 0.6, status: "suggested" });
     const text = shot.scriptBlockIds.map((blockId) => blockById.get(blockId)?.text).filter((value): value is string => Boolean(value)).join(" ").trim();
     if (text) subtitles.push({ id: `subtitle-${shot.id}`, timeline: { startMs: cursorMs, endMs: cursorMs + durationMs }, text });
     cursorMs += durationMs;
@@ -325,6 +327,7 @@ export function compileFrozenEditSpec(input: { spec: FrozenEditSpec; assets: Rec
       if (clip.sourceSegment.endMs > asset.durationMs) throw new Error(`素材片段超出源素材时长：${clip.id}`);
       return RenderClipSchema.parse({
         id: clip.id,
+        shotId: clip.shotId,
         sourceAssetId: asset.assetId,
         sourceRelativePath: asset.relativePath,
         sourceContentHash: asset.contentHash,

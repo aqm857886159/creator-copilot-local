@@ -13,6 +13,7 @@ export function AiEditWorkbench({ workflow, openProjects }: { workflow: CaptureW
   const [proposal, setProposal] = useState<EditProposal | null>(null);
   const [missing, setMissing] = useState<NonNullable<EditProposalResult["missing"]>>([]);
   const [render, setRender] = useState<EditRenderResult | null>(null);
+  const [provider, setProvider] = useState<EditProposalResult["provider"]>(undefined);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -29,6 +30,7 @@ export function AiEditWorkbench({ workflow, openProjects }: { workflow: CaptureW
       }
       setProposal(result.proposal ?? null);
       setMissing(result.missing ?? []);
+      setProvider(result.provider);
       if (result.status === "needs_material") setMessage("还有镜头没有选定 Take，先补齐素材再生成完整提案。");
     } finally {
       setBusy(false);
@@ -67,7 +69,7 @@ export function AiEditWorkbench({ workflow, openProjects }: { workflow: CaptureW
 
   return <section className="edit-workbench">
     <div className="creation-heading"><div><div className="eyebrow">AI EDIT · HUMAN REVIEW</div><h1>让画面替观点工作。</h1><p>AI 只提出镜头、时间码和理由；你确认后才会生成正式文件。当前先用本地可审计提案器，Provider 接入后沿用同一份合同。</p></div><div className="workspace-state ready"><span />{workflow.projectId}</div></div>
-    <div className="edit-notice"><Sparkles size={17} /><div><strong>先看理由，再决定采用。</strong><p>不满意可以拒绝单个镜头；不完整的素材会显示为缺口，不会被假素材悄悄替代。</p></div><span className="edit-notice-tag">本地提案器</span></div>
+    <div className="edit-notice"><Sparkles size={17} /><div><strong>先看理由，再决定采用。</strong><p>不满意可以拒绝单个镜头；不完整的素材会显示为缺口，不会被假素材悄悄替代。</p></div><span className="edit-notice-tag">{provider?.providerKey === "apimart" ? `APIMart · ${provider.modelKey ?? "model"}` : "本地提案器"}</span></div>
     <div className="edit-toolbar"><div><div className="eyebrow">PROPOSAL</div><h2>{proposal ? "一份待审阅的 AI 剪辑提案" : "还没有生成提案"}</h2></div><div className="edit-toolbar-actions"><button className="secondary-button" onClick={requestProposal} disabled={busy}><RotateCcw size={15} /> {busy ? "分析中…" : proposal ? "重新分析" : "生成 AI 提案"}</button>{proposal && <button className="primary-button" onClick={renderProposal} disabled={busy}><Film size={15} /> {busy ? "导出中…" : "确认并导出"}</button>}</div></div>
     {message && <div className="creation-message error" role="alert"><CircleAlert size={16} />{message}</div>}
     {missing.length > 0 && <section className="edit-missing"><div className="edit-section-heading"><div><div className="eyebrow">MISSING MATERIAL</div><h3>还缺这些镜头</h3></div><span>{missing.length} 个缺口</span></div>{missing.map((item) => <article className="missing-row" key={`${item.shotId}-${item.taskId ?? "none"}`}><CircleAlert size={16} /><div><strong>{item.taskId ? `拍摄任务 ${item.taskId}` : `分镜 ${item.shotId}`}</strong><p>{item.instruction}</p></div></article>)}</section>}

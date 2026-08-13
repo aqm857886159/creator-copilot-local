@@ -18,7 +18,9 @@ async function getDesktopRuntime() {
       import(pathToFileURL(path.join(runtimeRoot, "creation", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "exchange", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "storage", "src", "catalog.js")).href),
-    ]).then(([media, creation, exchange, storage]) => ({ media, creation, exchange, storage, mediaImporter: new media.LocalMediaImporter() }));
+      import(pathToFileURL(path.join(runtimeRoot, "providers", "src", "index.js")).href),
+      import(pathToFileURL(path.join(runtimeRoot, "agent-runtime", "src", "index.js")).href),
+    ]).then(([media, creation, exchange, storage, providers, agentRuntime]) => ({ media, creation, exchange, storage, providers, agentRuntime, mediaImporter: new media.LocalMediaImporter() }));
   }
   return desktopRuntimePromise;
 }
@@ -53,6 +55,15 @@ async function initializeWorkspace(workspacePath) {
 function requireWorkspace() {
   if (!selectedWorkspacePath || !catalog || !workspaceId) throw new Error("请先选择工作区");
   return { workspacePath: selectedWorkspacePath, catalog, workspaceId };
+}
+
+function getEditAgent(runtime) {
+  const providerKey = process.env.AI_EDIT_PROVIDER ?? "local-fallback";
+  if (providerKey === "apimart" && process.env.APIMART_API_KEY) {
+    const provider = new runtime.providers.ApiMartClient({ apiKey: process.env.APIMART_API_KEY, baseUrl: process.env.APIMART_BASE_URL ?? "https://api.apimart.ai" });
+    return new runtime.agentRuntime.ProviderEditAgentRuntime(provider, process.env.AI_EDIT_MODEL ?? "gpt-5-nano");
+  }
+  return new runtime.agentRuntime.LocalEditAgentRuntime();
 }
 
 function createWindow() {
@@ -113,6 +124,8 @@ ipcMain.handle("desktop:import-media", async () => {
   try {
     const runtime = await getDesktopRuntime();
     const imported = await runtime.mediaImporter.import({ workspaceRoot: selectedWorkspacePath, sourcePath: result.filePaths[0] });
+    const workspace = requireWorkspace();
+    workspace.catalog.insertArtifacts([imported.source, imported.proxy, imported.thumbnail].map((artifact) => ({ ...artifact, workspaceId: workspace.workspaceId })));
     return {
       ok: true,
       sourceName: path.basename(result.filePaths[0]),
@@ -122,6 +135,20 @@ ipcMain.handle("desktop:import-media", async () => {
     };
   } catch (error) {
     return { ok: false, errorCode: "media_import_failed", message: error instanceof Error ? error.message : "媒体导入失败" };
+  }
+});
+
+ipcMain.handle("desktop:search-assets", async (_event, rawQuery) => {
+  try {
+    const workspace = requireWorkspace();
+    const query = typeof rawQuery === "string" ? rawQuery.trim() : "";
+    const artifacts = workspace.catalog.listArtifacts(workspace.workspaceId);
+    const facts = workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, query, limit: 50 });
+    const matchingArtifactIds = new Set(facts.map((fact) => fact.artifactId));
+    const visibleArtifacts = query ? artifacts.filter((artifact) => matchingArtifactIds.has(artifact.artifactId) || `${artifact.relativePath} ${artifact.kind} ${artifact.mimeType}`.toLowerCase().includes(query.toLowerCase())) : artifacts;
+    return { ok: true, artifacts: visibleArtifacts, facts };
+  } catch (error) {
+    return { ok: false, errorCode: "asset_search_failed", message: error instanceof Error ? error.message : "素材搜索失败" };
   }
 });
 
@@ -199,7 +226,8 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
       }
     }
     const runtime = await getDesktopRuntime();
-    const result = runtime.exchange.proposeEditFromCapture({ projectId, script, storyboard, tasks, takesByTask, assetFacts, now: new Date().toISOString() });
+    const result = await getEditAgent(runtime).proposeEdit({ projectId, script, storyboard, tasks, takesByTask, assetFacts, now: new Date().toISOString() });
+    if (result.status === "ready" && result.proposal) workspace.catalog.saveEditProposal(result.proposal);
     return { ok: true, ...result, project: { id: project.id, title: project.title } };
   } catch (error) {
     return { ok: false, errorCode: "edit_proposal_failed", message: error instanceof Error ? error.message : "AI 剪辑提案生成失败" };
@@ -207,10 +235,15 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
 });
 
 ipcMain.handle("desktop:render-edit", async (_event, raw) => {
+  let renderRunId = null;
+  let renderWorkspace = null;
+  let renderRuntime = null;
   try {
     const workspace = requireWorkspace();
+    renderWorkspace = workspace;
     if (!raw || typeof raw.projectId !== "string" || !raw.proposal) throw new Error("剪辑提案参数无效");
     const runtime = await getDesktopRuntime();
+    renderRuntime = runtime;
     const proposal = runtime.exchange.EditProposalSchema.parse(raw.proposal);
     const project = workspace.catalog.getProject(raw.projectId);
     if (!project || project.workspaceId !== workspace.workspaceId) throw new Error("项目不存在或不属于当前工作区");
@@ -234,9 +267,24 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
     const renderId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
     const assetLocks = Object.values(assets).map((asset) => ({ assetId: asset.assetId, contentHash: asset.contentHash }));
     const frozen = runtime.exchange.freezeEditProposal({ proposal, assetLocks, now: new Date().toISOString() });
+    if (!workspace.catalog.saveEditProposal(proposal)) throw new Error("剪辑提案版本保存失败");
+    if (!workspace.catalog.saveFrozenEditSpec(frozen)) throw new Error("冻结剪辑规格版本冲突");
+    renderRunId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
+    const renderNow = new Date().toISOString();
+    workspace.catalog.saveRenderRun({ schemaVersion: 1, id: renderRunId, projectId: raw.projectId, frozenEditSpecId: frozen.id, state: "running", createdAt: renderNow, updatedAt: renderNow });
     const result = await runtime.exchange.exportRenderPackage({ workspaceRoot: workspace.workspacePath, renderId, frozenEditSpec: frozen, assets });
+    workspace.catalog.saveRenderRun({ schemaVersion: 1, id: renderRunId, projectId: raw.projectId, frozenEditSpecId: frozen.id, state: "succeeded", manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/"), manifestHash: result.manifestHash, createdAt: renderNow, updatedAt: new Date().toISOString() });
     return { ok: true, renderId, manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
   } catch (error) {
+    if (renderRunId && renderWorkspace && renderRuntime) {
+      const message = error instanceof Error ? error.message : "AI 剪辑导出失败";
+      try {
+        const current = renderWorkspace.catalog.getRenderRun(renderRunId);
+        if (current) renderWorkspace.catalog.saveRenderRun({ ...current, state: "failed", error: { code: "edit_render_failed", message }, updatedAt: new Date().toISOString() });
+      } catch {
+        // Preserve the original render error; recovery can inspect a running run after restart.
+      }
+    }
     return { ok: false, errorCode: "edit_render_failed", message: error instanceof Error ? error.message : "AI 剪辑导出失败" };
   }
 });

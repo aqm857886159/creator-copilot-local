@@ -19,6 +19,14 @@ interface ImportMediaResult {
   artifacts?: Array<{ artifactId: string; kind: string; relativePath: string; mimeType: string; contentHash: string; byteSize: number; parentArtifactIds: string[] }>;
 }
 
+interface AssetSearchResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  artifacts?: Array<{ artifactId: string; kind: string; relativePath: string; mimeType: string; contentHash: string; byteSize: number; parentArtifactIds: string[] }>;
+  facts?: Array<{ id: string; artifactId: string; kind: string; startMs: number; endMs: number; text: string; labels: string[]; providerKey: string }>;
+}
+
 interface CaptureWorkflowInput {
   projectTitle: string;
   blocks: Array<{ kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; visualNeed: "none" | "support" | "must_show" }>;
@@ -103,6 +111,7 @@ interface EditProposalResult {
   missing?: Array<{ shotId: string; taskId?: string; reason: string; instruction: string }>;
   proposal?: EditProposal;
   assetLocks?: Array<{ assetId: string; contentHash: string }>;
+  provider?: { providerKey: string; modelKey?: string; responseHash?: string };
 }
 
 interface EditRenderResult {
@@ -118,6 +127,7 @@ interface Window {
     getInfo: () => Promise<DesktopInfo>;
     chooseWorkspace: () => Promise<ChooseWorkspaceResult>;
     importMedia: () => Promise<ImportMediaResult>;
+    searchAssets: (query: string) => Promise<AssetSearchResult>;
     createCaptureWorkflow: (input: CaptureWorkflowInput) => Promise<CaptureWorkflowResult>;
     importTake: (shootTaskId: string) => Promise<ImportTakeResult>;
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;
