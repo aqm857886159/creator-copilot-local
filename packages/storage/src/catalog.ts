@@ -1182,6 +1182,13 @@ export class SqliteCatalog {
     return row ? fromStoredJob(row) : undefined;
   }
 
+  listJobsForWorkspace(workspaceId: string, kind?: string) {
+    const rows = kind
+      ? this.db.prepare("SELECT * FROM jobs WHERE idempotency_scope = ? AND kind = ? ORDER BY updated_at DESC, id DESC").all(workspaceId, kind) as Array<Record<string, unknown>>
+      : this.db.prepare("SELECT * FROM jobs WHERE idempotency_scope = ? ORDER BY updated_at DESC, id DESC").all(workspaceId) as Array<Record<string, unknown>>;
+    return rows.map((row) => fromStoredJob(row));
+  }
+
   claimJob(id: string, workerId: string, now = new Date(), leaseMs = 30_000) {
     if (!workerId || !Number.isFinite(leaseMs) || leaseMs <= 0 || Number.isNaN(now.getTime())) throw new Error("无效的 worker lease 参数");
     const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();

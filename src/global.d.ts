@@ -26,6 +26,7 @@ interface AssetSearchResult {
   message?: string;
   artifacts?: Array<{ artifactId: string; kind: string; relativePath: string; mimeType: string; contentHash: string; byteSize: number; parentArtifactIds: string[] }>;
   facts?: Array<{ id: string; artifactId: string; kind: string; startMs: number; endMs: number; text: string; labels: string[]; providerKey: string }>;
+  analysisJobs?: Array<{ id: string; state: string; attempt: number; artifactIds: string[]; lastError?: { code: string; message: string; retryable: boolean }; updatedAt: string }>;
 }
 
 interface AnalyzeAssetResult {

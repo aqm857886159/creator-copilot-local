@@ -82,6 +82,18 @@ describe("SqliteCatalog", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("lists workspace jobs for a restartable media status view", () => {
+    const root = mkdtempSync(join(tmpdir(), "creator-copilot-job-list-"));
+    const catalog = new SqliteCatalog(join(root, "catalog.sqlite"));
+    catalog.insertJob(fixtureJob({ id: "analysis-1", kind: "media.analysis", artifactIds: ["artifact-1"], idempotencyKey: "analysis-key", updatedAt: "2026-08-14T00:00:01.000Z" }));
+    catalog.insertJob(fixtureJob({ id: "other-workspace", kind: "media.analysis", idempotencyScope: "workspace-2", idempotencyKey: "other-analysis-key" }));
+    catalog.insertJob(fixtureJob({ id: "proxy-1", kind: "media.proxy", artifactIds: ["artifact-1"], idempotencyKey: "proxy-key" }));
+    expect(catalog.listJobsForWorkspace("workspace-1", "media.analysis").map((job) => job.id)).toEqual(["analysis-1"]);
+    expect(catalog.listJobsForWorkspace("workspace-1").map((job) => job.id)).toEqual(["analysis-1", "proxy-1"]);
+    catalog.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("fences stale workers and rejects changed receipt inputs", () => {
     const root = mkdtempSync(join(tmpdir(), "creator-copilot-fence-"));
     const catalog = new SqliteCatalog(join(root, "catalog.sqlite"));

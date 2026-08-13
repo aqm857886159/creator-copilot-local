@@ -35,7 +35,7 @@ SQLite schema v5 增加：
 素材库页面现在可：
 
 ```text
-选择工作区 → 导入视频 → 原素材/代理/缩略图进入 catalog → 文件名/类型/分析事实搜索
+选择工作区 → 导入视频 → 原素材/代理/缩略图进入 catalog → 文件名/类型/分析事实搜索；重启后仍能看到每个原素材的分析 Job 状态、尝试次数和可继续动作
 ```
 
 原始视频行上的“分析素材”动作会在 main 中重新校验 workspace-relative 路径和内容 hash，创建或复用 `media.analysis` Job，执行镜头检测/ASR/OCR worker，并把 `AnalysisFact` 写入同一工作区的 FTS5 索引。已有 succeeded Job 只读复用事实；failed、timed_out 和 needs_attention 通过 lease-safe 状态迁移后才能重试。
@@ -62,6 +62,7 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 - FTS5 写入、查询、kind 过滤、重启后查询；
 - 导入产物进入 catalog，素材库可读取。
 - 素材库按原始 artifact 创建/复用分析 Job，并支持按 artifactId 限定事实检索。
+- `search-assets` 同时返回工作区内与可见素材关联的 `media.analysis` Job；素材列表明确区分尚未分析、待继续、分析中、已完成和失败，避免应用重启后把排队任务显示成无状态按钮。
 
 本机真实 smoke（2026-08-14）：
 

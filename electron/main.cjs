@@ -356,7 +356,11 @@ ipcMain.handle("desktop:search-assets", async (_event, rawQuery) => {
     const facts = workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, query, limit: 50 });
     const matchingArtifactIds = new Set(facts.map((fact) => fact.artifactId));
     const visibleArtifacts = query ? artifacts.filter((artifact) => matchingArtifactIds.has(artifact.artifactId) || `${artifact.relativePath} ${artifact.kind} ${artifact.mimeType}`.toLowerCase().includes(query.toLowerCase())) : artifacts;
-    return { ok: true, artifacts: visibleArtifacts, facts };
+    const visibleArtifactIds = new Set(visibleArtifacts.map((artifact) => artifact.artifactId));
+    const analysisJobs = workspace.catalog.listJobsForWorkspace(workspace.workspaceId, "media.analysis")
+      .filter((job) => job.artifactIds.some((artifactId) => visibleArtifactIds.has(artifactId)))
+      .map((job) => ({ id: job.id, state: job.state, attempt: job.attempt, artifactIds: job.artifactIds, lastError: job.lastError, updatedAt: job.updatedAt }));
+    return { ok: true, artifacts: visibleArtifacts, facts, analysisJobs };
   } catch (error) {
     return { ok: false, errorCode: "asset_search_failed", message: error instanceof Error ? error.message : "素材搜索失败" };
   }
