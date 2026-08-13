@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.storage.json",
+  "compilerOptions": {
+    "outDir": "./dist-electron/media",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": ["packages/media/src/index.ts"]
+}

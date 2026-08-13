@@ -14,6 +14,7 @@ import {
   Settings2,
   Sparkles,
   Target,
+  Upload,
 } from "lucide-react";
 import { demoWorkspace } from "./lib/demo-workspace";
 import type { ViewId } from "./types";
@@ -44,6 +45,8 @@ export function App() {
   const [activeView, setActiveView] = useState<ViewId>("today");
   const [query, setQuery] = useState("");
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
+  const [mediaImport, setMediaImport] = useState<ImportMediaResult | null>(null);
+  const [mediaImporting, setMediaImporting] = useState(false);
   const visibleProjects = useMemo(
     () =>
       demoWorkspace.projects.filter((project) =>
@@ -57,6 +60,23 @@ export function App() {
     if (!desktop) return;
     const result = await desktop.chooseWorkspace();
     if (!result.canceled) setWorkspacePath(result.path);
+  }
+
+  async function importMedia() {
+    const desktop = window.desktop;
+    if (!desktop || mediaImporting) return;
+    setMediaImporting(true);
+    try {
+      setMediaImport(await desktop.importMedia());
+    } finally {
+      setMediaImporting(false);
+    }
+  }
+
+  function formatDuration(durationMs?: number | null) {
+    if (!durationMs) return "时长未知";
+    const totalSeconds = Math.round(durationMs / 1000);
+    return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
   }
 
   return (
@@ -115,7 +135,8 @@ export function App() {
         <div className="page-content">
           {activeView === "today" ? (
             <>
-              <section className="hero-row"><div><div className="eyebrow">THURSDAY · AUG 14</div><h1>今天，先把一个观点讲清楚。</h1><p className="hero-copy">从研究、脚本到分镜和素材，原点把下一步放在你面前。</p></div><button className="primary-button"><Plus size={17} /> 新建创作项目</button></section>
+              <section className="hero-row"><div><div className="eyebrow">THURSDAY · AUG 14</div><h1>今天，先把一个观点讲清楚。</h1><p className="hero-copy">从研究、脚本到分镜和素材，原点把下一步放在你面前。</p></div><div className="hero-actions"><button className="secondary-button" onClick={importMedia} disabled={mediaImporting}><Upload size={16} /> {mediaImporting ? "处理中…" : "导入素材"}</button><button className="primary-button"><Plus size={17} /> 新建创作项目</button></div></section>
+              {mediaImport && <section className={`media-feedback ${mediaImport.ok ? "success" : "error"}`}><div className="media-feedback-icon"><Upload size={16} /></div><div className="media-feedback-copy"><strong>{mediaImport.ok ? `已导入 ${mediaImport.sourceName}` : mediaImport.message}</strong>{mediaImport.ok ? <p>{formatDuration(mediaImport.durationMs)} · {mediaImport.artifacts?.length ?? 0} 个本地产物已生成，可进入素材库继续整理。</p> : <p>请检查工作区和视频文件后重试。</p>}</div>{mediaImport.ok && <span className="media-feedback-status">本地完成</span>}</section>}
               <section className="signal-strip"><div className="signal-icon"><Sparkles size={17} /></div><div><strong>今日创作提示</strong><p>你的两个待选题都在“表达结构”这个支柱上，可以先完成一条，再把经验回流到下一条。</p></div><button className="text-button" onClick={() => setActiveView("ideas")}>查看选题 <ArrowUpRight size={14} /></button></section>
               <div className="section-heading"><div><div className="eyebrow">IN PROGRESS</div><h2>正在推进</h2></div><button className="text-button" onClick={() => setActiveView("projects")}>查看全部 <ArrowUpRight size={14} /></button></div>
               <section className="project-grid">{visibleProjects.map((project) => <article className="project-card" key={project.id}><div className="card-topline"><span className={`stage-chip stage-${project.stage}`}>{stageLabel(project.stage)}</span><span className="due-label">{project.dueAt}</span></div><h3>{project.title}</h3><p>{project.angle}</p><div className="progress-row"><span>完成度</span><strong>{project.progress}%</strong></div><div className="progress-track"><span style={{ width: `${project.progress}%` }} /></div><div className="next-action"><span className="action-dot" />{project.nextAction}<ArrowUpRight size={14} /></div></article>)}<button className="new-card"><Plus size={20} /><span>从一个新选题开始</span></button></section>
