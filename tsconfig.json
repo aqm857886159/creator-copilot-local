@@ -6,5 +6,6 @@
     { "path": "./tsconfig.storage.json" }
     ,{ "path": "./tsconfig.media.json" }
     ,{ "path": "./tsconfig.creation.json" }
+    ,{ "path": "./tsconfig.exchange.json" }
   ]
 }

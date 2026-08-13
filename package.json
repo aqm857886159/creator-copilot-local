@@ -14,6 +14,7 @@
     "dev:desktop": "concurrently -k -n web,electron -c cyan,yellow \"npm:dev:web\" \"wait-on http://127.0.0.1:4316 && electron .\"",
     "start": "tsx server/index.ts",
     "test": "vitest run",
+    "test:render:smoke": "npm run build && node scripts/render-smoke.mjs",
     "test:providers:live": "node --env-file=.env scripts/provider-smoke.mjs",
     "typecheck": "tsc -b --pretty false"
   },

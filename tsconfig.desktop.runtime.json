@@ -12,6 +12,7 @@
   "include": [
     "packages/contracts/src/index.ts",
     "packages/creation/src/index.ts",
+    "packages/exchange/src/index.ts",
     "packages/media/src/index.ts",
     "packages/storage/src/catalog.ts"
   ]

@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.storage.json",
+  "compilerOptions": {
+    "rootDir": "./packages",
+    "outDir": "./.tsbuild/exchange",
+    "noEmit": true
+  },
+  "include": ["packages/contracts/src/index.ts", "packages/exchange/src/**/*.ts"]
+}
