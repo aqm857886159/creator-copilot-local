@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.storage.json",
+  "compilerOptions": {
+    "outDir": "./.tsbuild/creation"
+  },
+  "include": ["packages/creation"]
+}

@@ -1,0 +1,106 @@
+import { useState } from "react";
+import { Camera, Check, ExternalLink, FileText, Plus, Upload } from "lucide-react";
+
+const initialBlocks: CaptureWorkflowInput["blocks"] = [
+  { kind: "hook", text: "为什么很多人越努力表达，反而越没有记忆点？", visualNeed: "must_show" },
+  { kind: "claim", text: "因为观点一直停留在同一个口播画面里，观众没有新的视觉证据。", visualNeed: "support" },
+  { kind: "example", text: "讲到修改和推翻时，让观众真正看到桌面上的草稿和修改痕迹。", visualNeed: "must_show" },
+];
+
+const initialShots: CaptureWorkflowInput["shots"] = [
+  { scriptBlockIndex: 0, purpose: "emotion", mode: "talking_head", framing: "medium", cameraDirection: "正面固定，问题说完后停顿半秒。", actionDescription: "面对镜头说出问题，保持眼神稳定。", targetMs: 4_000, sourceRequirement: "shoot_task" },
+  { scriptBlockIndex: 1, purpose: "explain", mode: "talking_head", framing: "close", cameraDirection: "轻微推近或切近景。", actionDescription: "用更近的景别讲出核心判断。", targetMs: 5_000, sourceRequirement: "shoot_task" },
+  { scriptBlockIndex: 2, purpose: "prove", mode: "broll", framing: "detail", cameraDirection: "手机俯拍，缓慢横移。", actionDescription: "拍桌面上带有圈画和修改痕迹的草稿。", targetMs: 3_000, sourceRequirement: "shoot_task" },
+];
+
+export function CreationWorkbench({ workspaceReady, chooseWorkspace }: { workspaceReady: boolean; chooseWorkspace: () => Promise<void> }) {
+  const [projectTitle, setProjectTitle] = useState("表达为什么需要画面变化");
+  const [blocks, setBlocks] = useState(initialBlocks);
+  const [shots, setShots] = useState(initialShots);
+  const [workflow, setWorkflow] = useState<CaptureWorkflowResult | null>(null);
+  const [takesByTask, setTakesByTask] = useState<Record<string, CaptureTake[]>>({});
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  function updateBlock(index: number, patch: Partial<CaptureWorkflowInput["blocks"][number]>) {
+    setBlocks((current) => current.map((block, blockIndex) => blockIndex === index ? { ...block, ...patch } : block));
+  }
+
+  function updateShot(index: number, patch: Partial<CaptureWorkflowInput["shots"][number]>) {
+    setShots((current) => current.map((shot, shotIndex) => shotIndex === index ? { ...shot, ...patch } : shot));
+  }
+
+  function addBlockAndShot() {
+    const blockIndex = blocks.length;
+    setBlocks((current) => [...current, { kind: "evidence", text: "补充一个新的表达段落。", visualNeed: "support" }]);
+    setShots((current) => [...current, { scriptBlockIndex: blockIndex, purpose: "prove", mode: "broll", framing: "detail", cameraDirection: "保持主体清晰，拍摄一条备用版本。", actionDescription: "描述这个段落需要补拍的具体画面。", targetMs: 3_000, sourceRequirement: "shoot_task" }]);
+  }
+
+  async function exportWorkflow() {
+    const desktop = window.desktop;
+    if (!desktop || !workspaceReady || busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await desktop.createCaptureWorkflow({ projectTitle, blocks, shots });
+      setWorkflow(result);
+      if (!result.ok) setMessage(result.message ?? "拍摄包生成失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importTake(taskId: string) {
+    const desktop = window.desktop;
+    if (!desktop) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await desktop.importTake(taskId);
+      if (!result.ok || !result.take) {
+        if (result.errorCode !== "cancelled") setMessage(result.message ?? "Take 导入失败");
+        return;
+      }
+      setTakesByTask((current) => ({ ...current, [taskId]: [...(current[taskId] ?? []), result.take!] }));
+      if (result.task) setWorkflow((current) => current ? { ...current, tasks: current.tasks?.map((task) => task.id === taskId ? result.task! : task) } : current);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function chooseTake(taskId: string, takeId: string) {
+    const desktop = window.desktop;
+    if (!desktop) return;
+    const result = await desktop.selectTake({ shootTaskId: taskId, takeId });
+    if (!result.ok) {
+      setMessage(result.message ?? "Take 选择失败");
+      return;
+    }
+    if (result.takes) setTakesByTask((current) => ({ ...current, [taskId]: result.takes! }));
+    if (result.task) setWorkflow((current) => current ? { ...current, tasks: current.tasks?.map((task) => task.id === taskId ? result.task! : task) } : current);
+  }
+
+  return (
+    <section className="creation-workbench">
+      <div className="creation-heading">
+        <div><div className="eyebrow">MANUAL CREATION LOOP</div><h1>脚本、分镜与拍摄包</h1><p>先把观点拆成可以执行的镜头；AI 会在这条真实链路上继续提案，而不是替你虚构素材。</p></div>
+        <div className={`workspace-state ${workspaceReady ? "ready" : "missing"}`}><span />{workspaceReady ? "本地工作区已连接" : "尚未选择工作区"}</div>
+      </div>
+
+      {!workspaceReady && <div className="workspace-gate"><FileText size={19} /><div><strong>先选择一个本地工作区</strong><p>脚本、SQLite、拍摄包和导入的 Take 都会保存在这个目录。</p></div><button className="primary-button" onClick={chooseWorkspace}>选择工作区</button></div>}
+
+      <label className="project-title-field"><span>项目标题</span><input value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} /></label>
+
+      <div className="creation-editor-grid">
+        <section className="creation-column"><div className="column-title"><div><span>01</span><h2>脚本段落</h2></div><small>写你真正想说的话</small></div>{blocks.map((block, index) => <article className="editor-card" key={`block-${index}`}><div className="editor-card-top"><b>段落 {String(index + 1).padStart(2, "0")}</b><select value={block.kind} onChange={(event) => updateBlock(index, { kind: event.target.value as typeof block.kind })}><option value="hook">开头</option><option value="claim">观点</option><option value="evidence">证据</option><option value="example">案例</option><option value="counterpoint">反方</option><option value="conclusion">结论</option><option value="cta">行动</option></select></div><textarea value={block.text} onChange={(event) => updateBlock(index, { text: event.target.value })} /><label className="inline-field"><span>画面需要</span><select value={block.visualNeed} onChange={(event) => updateBlock(index, { visualNeed: event.target.value as typeof block.visualNeed })}><option value="none">不需要补画面</option><option value="support">建议补画面</option><option value="must_show">必须展示</option></select></label></article>)}</section>
+
+        <section className="creation-column"><div className="column-title"><div><span>02</span><h2>分镜与拍法</h2></div><small>拍什么、为什么、拍多久</small></div>{shots.map((shot, index) => <article className="editor-card shot-editor" key={`shot-${index}`}><div className="editor-card-top"><b>镜头 {String(index + 1).padStart(2, "0")}</b><div className="select-pair"><select value={shot.mode} onChange={(event) => updateShot(index, { mode: event.target.value as typeof shot.mode })}><option value="talking_head">真人口播</option><option value="broll">B-roll</option><option value="screen_recording">录屏</option><option value="graphic">图形</option><option value="still">静帧</option></select><select value={shot.framing} onChange={(event) => updateShot(index, { framing: event.target.value as typeof shot.framing })}><option value="wide">全景</option><option value="medium">中景</option><option value="close">近景</option><option value="detail">细节</option><option value="screen">屏幕</option></select></div></div><textarea value={shot.actionDescription} onChange={(event) => updateShot(index, { actionDescription: event.target.value })} /><input className="camera-direction" value={shot.cameraDirection} onChange={(event) => updateShot(index, { cameraDirection: event.target.value })} placeholder="拍摄方式，例如：手机俯拍、缓慢横移" /><label className="inline-field"><span>目标时长</span><input type="number" min="1" max="60" value={shot.targetMs / 1000} onChange={(event) => updateShot(index, { targetMs: Math.max(1, Number(event.target.value)) * 1000 })} /><em>秒</em></label></article>)}</section>
+      </div>
+
+      <div className="creation-actions"><button className="secondary-button" onClick={addBlockAndShot}><Plus size={16} /> 添加段落与镜头</button><button className="primary-button" disabled={!workspaceReady || busy} onClick={exportWorkflow}><Camera size={16} /> {busy ? "处理中…" : "生成并导出拍摄包"}</button></div>
+      {message && <div className="creation-message error">{message}</div>}
+
+      {workflow?.ok && workflow.tasks && <section className="capture-result" aria-live="polite"><div className="capture-result-heading"><div><div className="eyebrow">CAPTURE PACKAGE READY</div><h2>逐镜头拍摄清单</h2></div>{workflow.capturePackage && <button className="secondary-button" onClick={() => window.desktop?.openWorkspaceFile(workflow.capturePackage!.relativePath)}><ExternalLink size={15} /> 手机/浏览器查看</button>}</div><div className="capture-task-list">{workflow.tasks.map((task, index) => <article className="capture-task" key={task.id}><div className="task-number">{String(index + 1).padStart(2, "0")}</div><div className="capture-task-main"><div className="capture-task-title"><strong>{task.title}</strong><span>{Math.round(task.targetMs / 100) / 10} 秒</span></div><p>{task.instruction}</p><div className="take-list">{(takesByTask[task.id] ?? []).map((take, takeIndex) => <button className={`take-chip ${take.status === "selected" ? "selected" : ""}`} key={take.id} onClick={() => chooseTake(task.id, take.id)} aria-pressed={take.status === "selected"}>{take.status === "selected" ? <Check size={13} /> : null}Take {takeIndex + 1}</button>)}<button className="take-import" disabled={busy} onClick={() => importTake(task.id)}><Upload size={13} /> 导入 Take</button></div></div></article>)}</div></section>}
+    </section>
+  );
+}

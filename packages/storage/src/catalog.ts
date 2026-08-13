@@ -14,9 +14,23 @@ import {
   type CommandReceipt,
   type JobRecord,
   type JobState,
-} from "../../contracts/src/index";
+} from "../../contracts/src/index.js";
+import {
+  CapturePackageSchema,
+  ScriptSchema,
+  ShootTaskSchema,
+  StoryboardSchema,
+  TakeSchema,
+  attachTake,
+  selectTake,
+  type CapturePackage,
+  type Script,
+  type ShootTask,
+  type Storyboard,
+  type Take,
+} from "../../creation/src/index.js";
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 type WorkspaceRecord = {
   id: string;
@@ -210,6 +224,66 @@ const migrations: Record<number, string> = {
     );
     CREATE INDEX IF NOT EXISTS outbox_state_idx ON outbox_messages(state, lease_expires_at);
   `,
+  3: `
+    CREATE TABLE IF NOT EXISTS scripts (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      revision INTEGER NOT NULL CHECK (revision > 0),
+      status TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS scripts_project_idx ON scripts(project_id, updated_at);
+
+    CREATE TABLE IF NOT EXISTS storyboards (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      script_id TEXT NOT NULL REFERENCES scripts(id) ON DELETE RESTRICT,
+      script_revision INTEGER NOT NULL CHECK (script_revision > 0),
+      revision INTEGER NOT NULL CHECK (revision > 0),
+      status TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS storyboards_project_idx ON storyboards(project_id, updated_at);
+
+    CREATE TABLE IF NOT EXISTS shoot_tasks (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      shot_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS shoot_tasks_project_idx ON shoot_tasks(project_id, status);
+    CREATE UNIQUE INDEX IF NOT EXISTS shoot_tasks_shot_idx ON shoot_tasks(shot_id);
+
+    CREATE TABLE IF NOT EXISTS capture_packages (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      storyboard_revision INTEGER NOT NULL CHECK (storyboard_revision > 0),
+      status TEXT NOT NULL,
+      relative_path TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS capture_packages_project_idx ON capture_packages(project_id, updated_at);
+
+    CREATE TABLE IF NOT EXISTS takes (
+      id TEXT PRIMARY KEY NOT NULL,
+      shoot_task_id TEXT NOT NULL REFERENCES shoot_tasks(id) ON DELETE CASCADE,
+      asset_id TEXT NOT NULL REFERENCES artifacts(artifact_id) ON DELETE RESTRICT,
+      status TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS takes_task_idx ON takes(shoot_task_id, status, created_at);
+  `,
 };
 
 function parseJson<T>(value: string, label: string): T {
@@ -363,6 +437,126 @@ export class SqliteCatalog {
     return result.changes === 1;
   }
 
+  saveScript(raw: Script) {
+    const script = ScriptSchema.parse(raw);
+    const current = this.db.prepare("SELECT revision FROM scripts WHERE id = ?").get(script.id) as { revision: number } | undefined;
+    if (!current) {
+      if (script.revision !== 1) return false;
+      this.db.prepare("INSERT INTO scripts(id, project_id, revision, status, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(script.id, script.projectId, script.revision, script.status, JSON.stringify(script), script.createdAt, script.updatedAt);
+      return true;
+    }
+    if (script.revision !== current.revision + 1) return false;
+    const result = this.db.prepare("UPDATE scripts SET revision = ?, status = ?, payload_json = ?, updated_at = ? WHERE id = ? AND revision = ?")
+      .run(script.revision, script.status, JSON.stringify(script), script.updatedAt, script.id, current.revision);
+    return result.changes === 1;
+  }
+
+  getScript(id: string): Script | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM scripts WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? ScriptSchema.parse(parseJson(row.payload_json, "script")) : undefined;
+  }
+
+  saveStoryboard(raw: Storyboard) {
+    const storyboard = StoryboardSchema.parse(raw);
+    const current = this.db.prepare("SELECT revision FROM storyboards WHERE id = ?").get(storyboard.id) as { revision: number } | undefined;
+    if (!current) {
+      if (storyboard.revision !== 1) return false;
+      this.db.prepare("INSERT INTO storyboards(id, project_id, script_id, script_revision, revision, status, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(storyboard.id, storyboard.projectId, storyboard.scriptId, storyboard.scriptRevision, storyboard.revision, storyboard.status, JSON.stringify(storyboard), storyboard.createdAt, storyboard.updatedAt);
+      return true;
+    }
+    if (storyboard.revision !== current.revision + 1) return false;
+    const result = this.db.prepare("UPDATE storyboards SET script_id = ?, script_revision = ?, revision = ?, status = ?, payload_json = ?, updated_at = ? WHERE id = ? AND revision = ?")
+      .run(storyboard.scriptId, storyboard.scriptRevision, storyboard.revision, storyboard.status, JSON.stringify(storyboard), storyboard.updatedAt, storyboard.id, current.revision);
+    return result.changes === 1;
+  }
+
+  getStoryboard(id: string): Storyboard | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM storyboards WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? StoryboardSchema.parse(parseJson(row.payload_json, "storyboard")) : undefined;
+  }
+
+  saveShootTask(raw: ShootTask) {
+    const task = ShootTaskSchema.parse(raw);
+    this.db.prepare(`INSERT INTO shoot_tasks(id, project_id, shot_id, status, payload_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET status = excluded.status, payload_json = excluded.payload_json, updated_at = excluded.updated_at`)
+      .run(task.id, task.projectId, task.shotId, task.status, JSON.stringify(task), task.createdAt, task.updatedAt);
+    return task;
+  }
+
+  getShootTask(id: string): ShootTask | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM shoot_tasks WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? ShootTaskSchema.parse(parseJson(row.payload_json, "shoot task")) : undefined;
+  }
+
+  saveCapturePackage(raw: CapturePackage) {
+    const capturePackage = CapturePackageSchema.parse(raw);
+    this.db.prepare(`INSERT INTO capture_packages(id, project_id, storyboard_revision, status, relative_path, payload_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET storyboard_revision = excluded.storyboard_revision, status = excluded.status, relative_path = excluded.relative_path, payload_json = excluded.payload_json, updated_at = excluded.updated_at`)
+      .run(capturePackage.id, capturePackage.projectId, capturePackage.storyboardRevision, capturePackage.status, capturePackage.relativePath, JSON.stringify(capturePackage), capturePackage.createdAt, capturePackage.updatedAt);
+    return capturePackage;
+  }
+
+  getCapturePackage(id: string): CapturePackage | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM capture_packages WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? CapturePackageSchema.parse(parseJson(row.payload_json, "capture package")) : undefined;
+  }
+
+  saveCaptureWorkflow(input: { project: ProjectRecord; script: Script; storyboard: Storyboard; tasks: ShootTask[]; capturePackage: CapturePackage }) {
+    const transaction = this.db.transaction(() => {
+      if (input.script.projectId !== input.project.id || input.storyboard.projectId !== input.project.id || input.capturePackage.projectId !== input.project.id) throw new Error("创作工作流的 projectId 不一致");
+      if (input.storyboard.scriptId !== input.script.id || input.storyboard.scriptRevision !== input.script.revision) throw new Error("分镜没有引用当前脚本修订");
+      const taskIds = new Set(input.tasks.map((task) => task.id));
+      if (input.capturePackage.taskIds.some((taskId) => !taskIds.has(taskId))) throw new Error("拍摄包引用了不存在的任务");
+      this.createProject(input.project);
+      if (!this.saveScript(input.script)) throw new Error("脚本初始修订写入失败");
+      if (!this.saveStoryboard(input.storyboard)) throw new Error("分镜初始修订写入失败");
+      for (const task of input.tasks) this.saveShootTask(task);
+      this.saveCapturePackage(input.capturePackage);
+    }).immediate;
+    transaction();
+  }
+
+  addTake(raw: Take) {
+    const take = TakeSchema.parse(raw);
+    const transaction = this.db.transaction(() => {
+      if (this.getTake(take.id)) return false;
+      const task = this.getShootTask(take.shootTaskId);
+      if (!task) throw new Error("Take 对应的拍摄任务不存在");
+      this.db.prepare("INSERT INTO takes(id, shoot_task_id, asset_id, status, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(take.id, take.shootTaskId, take.assetId, take.status, JSON.stringify(take), take.createdAt, take.updatedAt);
+      this.saveShootTask(attachTake(task, take));
+      return true;
+    }).immediate;
+    return transaction();
+  }
+
+  getTake(id: string): Take | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM takes WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? TakeSchema.parse(parseJson(row.payload_json, "take")) : undefined;
+  }
+
+  listTakes(shootTaskId: string): Take[] {
+    const rows = this.db.prepare("SELECT payload_json FROM takes WHERE shoot_task_id = ? ORDER BY created_at, id").all(shootTaskId) as Array<{ payload_json: string }>;
+    return rows.map((row) => TakeSchema.parse(parseJson(row.payload_json, "take")));
+  }
+
+  selectTakeForTask(shootTaskId: string, takeId: string) {
+    const transaction = this.db.transaction(() => {
+      const task = this.getShootTask(shootTaskId);
+      if (!task) throw new Error("拍摄任务不存在");
+      const selection = selectTake(task, this.listTakes(shootTaskId), takeId);
+      this.saveShootTask(selection.task);
+      const statement = this.db.prepare("UPDATE takes SET status = ?, payload_json = ?, updated_at = ? WHERE id = ? AND shoot_task_id = ?");
+      for (const take of selection.takes) statement.run(take.status, JSON.stringify(take), take.updatedAt, take.id, shootTaskId);
+      return selection;
+    }).immediate;
+    return transaction();
+  }
+
   saveReceipt(input: StoredReceipt) {
     const receipt = CommandReceiptSchema.parse(input.receipt);
     const existing = this.getReceipt(input.idempotencyScope, input.idempotencyKey);
@@ -460,6 +654,21 @@ export class SqliteCatalog {
     }
     this.db.prepare(`INSERT INTO artifacts(artifact_id, workspace_id, kind, relative_path, mime_type, content_hash, byte_size, parent_artifact_ids_json, source_revision, validation_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(artifact.artifactId, artifact.workspaceId, artifact.kind, artifact.relativePath, artifact.mimeType, artifact.contentHash, artifact.byteSize, JSON.stringify(artifact.parentArtifactIds), artifact.sourceRevision ?? null, artifact.validationStatus, nowIso());
+  }
+
+  insertArtifacts(manifests: ArtifactManifest[]) {
+    const transaction = this.db.transaction(() => {
+      for (const manifest of manifests) {
+        const artifact = ArtifactManifestSchema.parse(manifest);
+        const existing = this.getArtifact(artifact.artifactId);
+        if (existing) {
+          if (existing.contentHash !== artifact.contentHash || existing.relativePath !== artifact.relativePath) throw new Error(`Artifact ID 冲突：${artifact.artifactId}`);
+          continue;
+        }
+        this.insertArtifact(artifact);
+      }
+    }).immediate;
+    transaction();
   }
 
   getArtifact(id: string): ArtifactManifest | undefined {

@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.storage.json",
+  "compilerOptions": {
+    "rootDir": "./packages",
+    "outDir": "./dist-electron/packages",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": [
+    "packages/contracts/src/index.ts",
+    "packages/creation/src/index.ts",
+    "packages/media/src/index.ts",
+    "packages/storage/src/catalog.ts"
+  ]
+}

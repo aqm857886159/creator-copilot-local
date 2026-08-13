@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { SqliteCatalog } from "./catalog";
 import type { JobRecord } from "../../contracts/src/index";
+import { ScriptSchema, createShootTasks, createStoryboard, type Take } from "../../creation/src/index";
 
 function fixtureJob(overrides: Partial<JobRecord> = {}): JobRecord {
   const now = new Date().toISOString();
@@ -35,7 +36,7 @@ describe("SqliteCatalog", () => {
     catalog.createWorkspace({ id: "workspace-1", name: "测试工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
     catalog.createProject({ id: "project-1", workspaceId: "workspace-1", title: "测试项目", stage: "script", revision: 1, payload: { source: "fixture" }, createdAt: now, updatedAt: now });
     catalog.insertArtifact({ schemaVersion: 1, artifactId: "artifact-1", workspaceId: "workspace-1", kind: "proxy", relativePath: "derived/proxy.mp4", mimeType: "video/mp4", contentHash: "sha256:proxy", byteSize: 12, parentArtifactIds: [], validationStatus: "valid" });
-    expect(catalog.schemaVersion()).toBe(2);
+    expect(catalog.schemaVersion()).toBe(3);
     expect(catalog.getProject("project-1")?.payload).toEqual({ source: "fixture" });
     expect(catalog.getArtifact("artifact-1")?.relativePath).toBe("derived/proxy.mp4");
     expect(catalog.updateProject("project-1", 0, { title: "不应覆盖" })).toBe(false);
@@ -165,7 +166,7 @@ describe("SqliteCatalog", () => {
     `);
     legacy.close();
     const catalog = new SqliteCatalog(dbPath);
-    expect(catalog.schemaVersion()).toBe(2);
+    expect(catalog.schemaVersion()).toBe(3);
     catalog.insertJob(fixtureJob({ id: "legacy-job", idempotencyKey: "legacy-job-key" }));
     catalog.enqueueOutbox({ id: "legacy-outbox", kind: "legacy", payload: {}, idempotencyKey: "legacy-outbox-key", idempotencyScope: "workspace-1", state: "queued", attempt: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     catalog.createWorkspace({ id: "workspace-1", name: "工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -174,5 +175,39 @@ describe("SqliteCatalog", () => {
     catalog.close();
     rmSync(root, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("persists script, storyboard, capture tasks, and multiple take selection", () => {
+    const root = mkdtempSync(join(tmpdir(), "creator-copilot-creation-store-"));
+    const dbPath = join(root, "catalog.sqlite");
+    const catalog = new SqliteCatalog(dbPath);
+    const now = "2026-08-14T00:00:00.000Z";
+    catalog.createWorkspace({ id: "workspace-creation", name: "创作工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
+    catalog.createProject({ id: "project-creation", workspaceId: "workspace-creation", title: "观点视频", stage: "script", revision: 1, payload: {}, createdAt: now, updatedAt: now });
+    const script = ScriptSchema.parse({ schemaVersion: 1, id: "script-creation", projectId: "project-creation", revision: 1, status: "approved", blocks: [{ schemaVersion: 1, id: "block-creation", order: 0, kind: "claim", text: "表达需要画面变化。", emphasis: [], evidenceIds: [], visualNeed: "must_show" }], estimatedDurationMs: 5_000, createdAt: now, updatedAt: now });
+    expect(catalog.saveScript(script)).toBe(true);
+    expect(catalog.saveScript(script)).toBe(false);
+    const storyboard = createStoryboard({ id: "storyboard-creation", script, createdAt: now, shots: [{ id: "shot-creation", order: 0, scriptBlockIds: ["block-creation"], purpose: "explain", mode: "talking_head", actionDescription: "面对镜头说出观点。", targetMs: 5_000, sourceRequirement: "shoot_task" }] });
+    expect(catalog.saveStoryboard(storyboard)).toBe(true);
+    const task = createShootTasks(storyboard, now)[0];
+    catalog.saveShootTask(task);
+    catalog.saveCapturePackage({ schemaVersion: 1, id: "capture-creation", projectId: "project-creation", storyboardRevision: 1, format: "html", relativePath: "capture-packages/capture-creation/index.html", taskIds: [task.id], status: "ready", createdAt: now, updatedAt: now });
+    for (const index of [1, 2]) {
+      catalog.insertArtifact({ schemaVersion: 1, artifactId: `artifact-take-${index}`, workspaceId: "workspace-creation", kind: "source", relativePath: `originals/take-${index}.mp4`, mimeType: "video/mp4", contentHash: `sha256:take-${index}`, byteSize: index, parentArtifactIds: [], validationStatus: "valid" });
+      const take: Take = { schemaVersion: 1, id: `take-${index}`, shootTaskId: task.id, assetId: `artifact-take-${index}`, relativePath: `originals/take-${index}.mp4`, status: "candidate", createdAt: now, updatedAt: now };
+      expect(catalog.addTake(take)).toBe(true);
+    }
+    expect(catalog.listTakes(task.id)).toHaveLength(2);
+    const selected = catalog.selectTakeForTask(task.id, "take-2");
+    expect(selected.takes.find((take) => take.id === "take-2")?.status).toBe("selected");
+    expect(catalog.getShootTask(task.id)?.status).toBe("accepted");
+    catalog.close();
+    const restored = new SqliteCatalog(dbPath);
+    expect(restored.getScript(script.id)?.blocks[0].text).toContain("画面变化");
+    expect(restored.getStoryboard(storyboard.id)?.shots[0].selectedTakeId).toBeUndefined();
+    expect(restored.getCapturePackage("capture-creation")?.status).toBe("ready");
+    expect(restored.getTake("take-2")?.status).toBe("selected");
+    restored.close();
+    rmSync(root, { recursive: true, force: true });
   });
 });

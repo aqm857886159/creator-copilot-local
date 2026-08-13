@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { demoWorkspace } from "./lib/demo-workspace";
 import type { ViewId } from "./types";
+import { CreationWorkbench } from "./components/creation-workbench";
 
 const navItems: Array<{ id: ViewId; label: string; icon: typeof LayoutDashboard }> = [
   { id: "today", label: "今天", icon: LayoutDashboard },
@@ -89,7 +90,7 @@ export function App() {
             <div className="brand-caption">CREATOR COPILOT</div>
           </div>
         </div>
-        <div className="workspace-switcher" onClick={chooseWorkspace} role="button" tabIndex={0}>
+        <div className="workspace-switcher" onClick={chooseWorkspace} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void chooseWorkspace(); } }} role="button" tabIndex={0} aria-label="选择本地工作区">
           <span className="workspace-dot" />
           <span className="workspace-name">{workspacePath ? "本地工作区" : "演示工作区"}</span>
           <ArrowUpRight size={14} />
@@ -103,6 +104,7 @@ export function App() {
                 className={`nav-item ${activeView === item.id ? "active" : ""}`}
                 key={item.id}
                 onClick={() => setActiveView(item.id)}
+                aria-current={activeView === item.id ? "page" : undefined}
               >
                 <Icon size={17} strokeWidth={1.8} />
                 <span>{item.label}</span>
@@ -129,7 +131,7 @@ export function App() {
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb"><span>工作台</span><b>/</b><strong>{navItems.find((item) => item.id === activeView)?.label ?? "设置"}</strong></div>
-          <div className="topbar-actions"><div className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索项目、选题或素材" /></div><button className="icon-button" title="快捷键"><Sparkles size={17} /></button><button className="avatar top-avatar">创</button></div>
+          <div className="topbar-actions"><div className="search-box"><Search size={16} /><input aria-label="搜索项目、选题或素材" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索项目、选题或素材" /></div><button className="icon-button" aria-label="打开快捷操作" title="快捷操作"><Sparkles size={17} /></button><button className="avatar top-avatar" aria-label="打开创作者资料">创</button></div>
         </header>
 
         <div className="page-content">
@@ -142,6 +144,8 @@ export function App() {
               <section className="project-grid">{visibleProjects.map((project) => <article className="project-card" key={project.id}><div className="card-topline"><span className={`stage-chip stage-${project.stage}`}>{stageLabel(project.stage)}</span><span className="due-label">{project.dueAt}</span></div><h3>{project.title}</h3><p>{project.angle}</p><div className="progress-row"><span>完成度</span><strong>{project.progress}%</strong></div><div className="progress-track"><span style={{ width: `${project.progress}%` }} /></div><div className="next-action"><span className="action-dot" />{project.nextAction}<ArrowUpRight size={14} /></div></article>)}<button className="new-card"><Plus size={20} /><span>从一个新选题开始</span></button></section>
               <div className="lower-grid"><section className="panel"><div className="panel-heading"><div><div className="eyebrow">NEXT UP</div><h2>下一步动作</h2></div><FileText size={19} /></div><div className="task-row"><span className="task-index">01</span><div><strong>完成脚本第二版</strong><p>越努力越没记忆点？</p></div><span className="task-time">25 min</span></div><div className="task-row"><span className="task-index">02</span><div><strong>补拍一个“反例”镜头</strong><p>为分镜 04 准备 B-roll</p></div><span className="task-time">15 min</span></div></section><section className="panel insight-panel"><div className="panel-heading"><div><div className="eyebrow">CREATOR MEMORY</div><h2>最近沉淀</h2></div><Lightbulb size={19} /></div><blockquote>“不要从结论开始，先把那个让你改变想法的瞬间讲出来。”</blockquote><span className="memory-source">来自 3 次复盘 · 表达结构</span></section></div>
             </>
+          ) : activeView === "projects" ? (
+            <CreationWorkbench workspaceReady={Boolean(workspacePath)} chooseWorkspace={chooseWorkspace} />
           ) : (
             <section className="empty-view"><div className="empty-icon"><Sparkles size={24} /></div><div className="eyebrow">{activeView.toUpperCase()}</div><h1>{navItems.find((item) => item.id === activeView)?.label ?? "设置"}</h1><p>这个工作区正在从可运行的本地壳开始建设。下一阶段会接入真实项目、素材、命令和任务状态。</p><button className="primary-button" onClick={() => setActiveView("today")}>回到今天</button></section>
           )}

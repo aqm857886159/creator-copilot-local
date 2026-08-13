@@ -1,0 +1,226 @@
+# Provider 官方接入调研与小额联调记录 v0.1
+
+日期：2026-08-14
+状态：已完成官方文档核对；已完成无生成任务的真实 smoke；未接入 UI 和正式任务调度。
+范围：TikHub（抖音研究）与 APIMart（文本/视觉/音频/视频模型网关）。
+
+## 1. 结论先行
+
+我们不是把两个供应商直接散落到页面里，而是做一个统一的 `ProviderPort`：
+
+```text
+main process credential store
+        ↓
+ProviderPort
+  ├─ listModels / capability
+  ├─ submit / chat
+  ├─ poll / download / validate
+  └─ normalized error / usage / cost
+        ↓
+Job + CommandReceipt + ArtifactManifest
+```
+
+产品第一阶段的杀手级研究闭环是：
+
+```text
+抖音主页链接
+→ 解析 sec_user_id
+→ App V3 读取账号资料
+→ App V3 按游标读取最新作品（先 20 条）
+→ 读取作品事实/统计（播放数单独接口）
+→ 仅在用户确认后下载少量公开素材到本地
+→ 本地 ffprobe + ASR/OCR/镜头分析
+→ 证据抽屉 + 内容模式 + 选题机会
+```
+
+TikHub 的 Search API、批量高清下载、星图画像和视频生成都不能偷偷放进“默认分析”：它们有额外成本、权限、合规或资源风险，必须做成明确的可计费动作并显示预计成本。
+
+## 2. 官方资料与事实（核对日期：2026-08-14）
+
+### 2.1 TikHub
+
+官方入口：
+
+- [TikHub API 文档](https://docs.tikhub.io/)
+- [TikHub Douyin API 产品页](https://tikhub.io/douyin-api)
+- [用户信息接口](https://docs.tikhub.io/186826050e0)
+- [每日用量接口](https://docs.tikhub.io/186826051e0)
+- [价格计算接口](https://docs.tikhub.io/186826052e0)
+- [健康检查](https://docs.tikhub.io/237673542e0)
+- [账号资料](https://docs.tikhub.io/186826222e0)
+- [用户作品分页](https://docs.tikhub.io/186826223e0)
+- [单作品 App V3](https://docs.tikhub.io/186826219e0)
+- [单作品无版权限制 V3](https://docs.tikhub.io/406098636e0)
+- [播放统计](https://docs.tikhub.io/186826221e0)
+- [最高画质播放链接](https://docs.tikhub.io/312096107e0)
+- [低粉爆款榜](https://docs.tikhub.io/252393854e0)
+
+事实：
+
+| 能力 | 官方合同/限制 | 对本产品的用途 |
+| --- | --- | --- |
+| 认证 | `Authorization: Bearer <key>` | 只在 Electron main 持有；renderer 只拿 `configured` |
+| 域名 | 中国大陆可用 `api.tikhub.dev`；其他地区 `api.tikhub.io`，路径/参数相同 | Base URL 可配置，默认大陆 `.dev` |
+| App V3 账号 | `GET /api/v1/douyin/app/v3/handler_user_profile?sec_user_id=...` | 账号快照、昵称、粉丝和基础信息 |
+| App V3 作品 | `GET /api/v1/douyin/app/v3/fetch_user_post_videos`，`max_cursor` 翻页，`count` 不超过 20，`sort_type=0` 最新/`1` 最热 | 首次研究固定 20 条，之后按用户动作扩展 |
+| App V3 单视频 | `GET /api/v1/douyin/app/v3/fetch_one_video?aweme_id=...` | 文案、作者、视频/图文元数据 |
+| V3 受限内容 | `fetch_one_video_v3` 可处理更多受限内容，但仍要遵守平台权利和用户授权 | 只作为显式 fallback，不自动下载 |
+| 播放量 | 标准作品接口可能不带播放数；`fetch_video_statistics` 读取 `digg_count/download_count/play_count/share_count`，一次最多 2 个 ID | 研究报告需要把“播放统计来源”单独标证据 |
+| 高画质 | 单条高画质接口价格文档标为 `$0.005/次`；链接有时效性 | 用户点“下载到本地”后立即导入，绝不保存临时 URL 当资产路径 |
+| URL 解析 | Web `get_sec_user_id`、`get_aweme_id` | 粘贴主页/作品链接时先转稳定 ID |
+| 榜单 | Billboard 有低粉爆款、高完播、高点赞、高涨粉等榜；支持关键词/垂类过滤 | 选题雷达的第二入口，必须有成本预估和缓存 |
+| 搜索 | 官方产品页标为 `$0.01/请求`、无量价折扣、每次约 6–10 条；Web/App 搜索不作为入口 | 禁止默认后台搜索；用户点击后才执行 |
+| 星图 | 观众画像等企业数据可到 `$0.02/次` 或更高 | 后置为付费研究模块，不阻塞首条账号分析 |
+| 价格/用量 | 有 `get_user_info`、`get_user_daily_usage`、`calculate_price`、endpoint info | 设置页显示调用预算、今日用量和本次预计成本 |
+| 限制/合规 | 官方说明只返回公开数据；私密内容不可用；评论建议每次不超过 30；默认 RPS 10；下载链接临时 | 记录来源、时间、权限、过期时间和失败原因；不把抓取结果自动晋升为记忆 |
+
+事实与工程推断要分开：TikHub 返回“结构化数据”不等于已经完成脚本/分镜分析。我们仍必须把下载到本地的视频送进自己的 ffprobe、ASR、OCR、镜头和视觉事实管线；AI 结论必须关联作品 ID、时间区间和原始证据。
+
+### 2.2 APIMart
+
+官方入口：
+
+- [官方文档索引](https://docs.apimart.ai/llms.txt)
+- [快速开始](https://docs.apimart.ai/en/quickstart)
+- [通用 Chat Completions](https://docs.apimart.ai/en/api-reference/texts/general/chat-completions)
+- [模型元数据接口说明](https://docs.apimart.ai/en/api-reference/texts/models/list.md)
+- [统一异步任务查询](https://docs.apimart.ai/en/api-reference/tasks/status)
+- [Whisper-1 转写](https://docs.apimart.ai/en/api-reference/audios/whisper-1)
+- [TTS](https://docs.apimart.ai/en/api-reference/audios/tts)
+- [图片上传](https://docs.apimart.ai/en/api-reference/uploads/images)
+- [视频生成示例](https://docs.apimart.ai/en/api-reference/videos/wan2.6/generation)
+- [Token 余额](https://docs.apimart.ai/en/api-reference/account/token-balance)
+
+事实：
+
+| 能力 | 官方合同/限制 | 对本产品的用途 |
+| --- | --- | --- |
+| Base URL/认证 | `https://api.apimart.ai`；请求使用 Bearer key | 只在 main/provider adapter；不进 Vite 环境变量 |
+| 文本 | `POST /v1/chat/completions`，OpenAI-compatible；支持 `stream`、tool/function calling、结构化响应策略由适配器控制 | 脚本、分镜和 AI 剪辑提案 |
+| 模型目录 | `GET /v1/models`；文档声明可用 `expand` 获取类别、能力标签和参数 schema；真实 smoke 返回 285 条且当前响应字段主要是 `supported_endpoint_types`，因此不能假设扩展字段一定存在 | 动态模型选择；表单必须从 capability 缺失安全降级 |
+| 异步任务 | 图片/视频提交返回 `task_id`，`GET /v1/tasks/{task_id}` 查状态、进度和临时结果 URL | 统一映射 `submitted/polling/completed/failed` 到 Job |
+| 图片上传 | `POST /v1/uploads/images`；不再建议把 base64 直接塞进生成接口；URL 有效期文档标为 72 小时 | 生成示意图前先上传；完成后立即本地化 |
+| 视频 | 多模型统一 `POST /v1/videos/generations`；不同模型在时长、画幅、清晰度和参考素材上不同；多数异步 | 只作为 AI 剪辑提案中的缺口补画面，不替代真人素材 |
+| ASR | Whisper-1 `POST /v1/audio/transcriptions`；99 语言、mp3/mp4/m4a/wav/webm、最大 25MB；支持 json/text/srt/vtt/verbose_json | 云端 fallback；首个本地基线仍优先 whisper.cpp |
+| TTS | `POST /v1/audio/speech`；输入最多 4096 字符；输出 wav/opus/aac/flac/pcm 等 | 口播提示音/示意音频；音色克隆另做 provider capability，不把通用 voice 当克隆 |
+| 余额 | `GET /v1/balance` 查看当前 key；`GET /v1/user/balance` 查看账户 | 设置页成本保护、低余额预警 |
+| 过期 URL | 图片/视频结果 URL 通常 24–72 小时；必须下载到本地并记录 `sourceUrlExpiresAt` | ArtifactManifest 只保存相对路径、hash 和来源摘要 |
+| 错误 | 文档列 400/401/402/403/429/500 等 | 归一化为 invalid/auth/quota/rate_limit/provider/retryable，不把原始响应直接交给 UI |
+
+APIMart 的“OpenAI-compatible”只代表协议接近，不代表模型质量、上下文、工具行为和计费完全等价。Provider adapter 必须保存 `providerKey/modelKey/capabilitySnapshot/requestSummary/usage/cost`，不能在 Domain 中写死某家模型名。
+
+## 3. 统一 Provider 合同（实施建议）
+
+```ts
+interface ProviderPort {
+  getCapabilities(): Promise<CapabilityReport>;
+  listModels(input?: { refresh?: boolean }): Promise<ModelDescriptor[]>;
+  chat(input: StructuredChatRequest): Promise<ProviderChatResult>;
+  submit(input: MediaTaskRequest): Promise<SubmittedTask>;
+  poll(input: PollTaskRequest): Promise<ProviderTaskStatus>;
+  download(input: DownloadRequest): Promise<DownloadedArtifact>;
+  validate(input: ValidateProviderOutputRequest): Promise<ValidationResult>;
+}
+```
+
+TikHub 作为 `ResearchConnector`，与生成模型的 `ProviderPort` 分开，但共用：
+
+```text
+ProviderRequestReceipt → Job → Evidence/Artifact → CostReport
+```
+
+每个适配器都要：
+
+1. 输入 Zod/JSON Schema 校验，拒绝未知字段和越界数量；
+2. 统一超时、重试、429、401、402、提交未知状态；
+3. 只记录脱敏的请求摘要和响应 hash，原始响应限体积保存到受控 evidence；
+4. 临时 URL 立刻下载、ffprobe/文件 hash、原子落盘；
+5. 断网/重启后通过 `externalJobId` 或本地证据恢复，不自动重复付费；
+6. mock fixture 先覆盖成功、schema fail、空结果、限流、授权、超时、部分结果和重复提交。
+
+## 4. 本次真实 smoke（小额、可复现）
+
+运行入口：
+
+```bash
+PROVIDER_LIVE_TESTS=1 npm run test:providers:live
+```
+
+脚本：[scripts/provider-smoke.mjs](../scripts/provider-smoke.mjs)。默认只运行无生成任务的健康/凭证/模型目录检查；只有显式设置 `PROVIDER_BILLED_SMOKE=1` 才运行一条账号资料和一条最小文本请求。
+
+本次实际运行：
+
+- TikHub health：HTTP 200，`status=ok`；
+- TikHub credential：HTTP 200，返回账户数据（没有打印余额、邮箱、key 名或原始响应）；
+- APIMart model list：HTTP 200，返回 285 个模型；扩展字段没有出现在首层，适配器必须做 capability fallback；
+- 未运行 TikHub 搜索、批量高清下载、星图画像、图片/视频生成、语音生成；
+- APIMart 最小文本 smoke 只回复 `OK`，使用低成本模型、`max_tokens=128`、`reasoning_effort=minimal`，未保存原始响应。
+
+本地 `.env` 仅用于当前机器联调，已被 `.gitignore` 忽略；仓库只提交 `.env.example` 和本文件，不提交任何 key。
+
+## 5. 第一阶段产品功能映射
+
+### A. 对标账号“证据包”
+
+用户粘贴主页链接后，先展示预计请求数和费用，再执行：
+
+1. URL → `sec_user_id`；
+2. profile snapshot；
+3. 最新 20 条作品 metadata；
+4. 只对用户选中的 3–5 条下载/分析；
+5. 每条作品生成：文案、时间线、镜头、OCR、ASR、画面标签、互动数据和证据引用；
+6. 账号级汇总：高频开头、观点结构、镜头节奏、画面补充方式、评论问题、可借鉴但不复制的选题机会。
+
+“分析几十条”是用户目标，不应变成首次点击就花费几十次下载和视觉调用。默认先 metadata 20 条，再按价值排序增量分析；每一步允许取消、重试和成本上限。
+
+### B. AI 剪辑提案
+
+模型只输出 `EditProposal`：
+
+```text
+scriptBlockId / shotId
+→ candidate asset IDs
+→ in/out timecode
+→ reason + evidence IDs
+→ confidence + missing material
+→ suggested subtitle/style parameters
+```
+
+用户批准后冻结为 `FrozenEditSpec`，正式渲染不再问模型。这样 AI 负责“理解、匹配、建议”，媒体执行器负责“可重现、可撤销、可导出”。
+
+### C. 拍摄包补缺口
+
+当素材检索没有命中时，系统不生成虚假的“已找到素材”，而是把缺口转成拍摄任务：拍什么、拍几秒、设备/景别、动作、画面目的、备选拍法。用户用手机或相机拍摄后导入多个 Take，再人工选择。
+
+## 6. 不纳入首个 Provider 版本的事项
+
+- 抖音后台批量搜索或定时爬取；
+- 一键下载对标账号几十条高清视频；
+- 星图画像/服务报价等较贵企业数据；
+- APIMart 图片/视频生成默认自动调用；
+- 云端 ASR 取代本地 ASR；
+- 自动发布、点赞、评论、关注等交互动作；
+- 把临时 URL、原始供应商 JSON 或未确认 AI 结论写成领域事实。
+
+## 7. 风险与决策
+
+| 风险 | 决策 |
+| --- | --- |
+| API 版本/字段变化 | 保存 `providerVersion`、能力快照和归一化对象；适配器契约测试先于真实联调 |
+| TikHub 合规/版权/跨境 | 只分析公开内容，记录来源与用户动作；下载和再利用由用户明确确认，遵守平台条款和适用法律 |
+| 大量视频分析成本 | metadata-first、选中后分析、每步预算和取消 |
+| APIMart 模型目录字段不稳定 | `supported_endpoint_types` 作为最低能力；缺失时用静态能力映射并标记 `inferred` |
+| Provider 任务提交未知 | 本地 Job 进入 `submission_unknown`，查询外部任务或人工确认，禁止盲重试 |
+| 临时 URL 过期 | 立即本地化 + hash + ffprobe；失败保留 metadata-only evidence |
+| AI 生成“很顺但不像本人” | 保留用户原稿、差异和表达偏好；AI 只给 proposal，不覆盖原文 |
+
+## 8. 下一步实现顺序
+
+1. `packages/providers` 建立 `ProviderPort`、`ResearchConnector`、能力/错误/成本合同和 mock fixtures；
+2. Electron main 增加凭证状态和余额查询（只返回非敏感字段）；
+3. TikHub connector 先做 URL resolver → profile → posts metadata；
+4. 账号研究 UI 做“预算/范围/证据/取消”四个显式状态；
+5. APIMart connector 先做 model catalog + chat structured proposal；
+6. 只有 V4 RenderIR golden 通过后，才让 AI 生成 `EditProposal`；
+7. ASR/OCR/视觉模型以本地 baseline 为主，APIMart Whisper 作为可选 fallback；
+8. 任何付费图片/视频任务都必须另开审批和成本门，不能从普通“生成拍摄示意图”按钮静默触发。
