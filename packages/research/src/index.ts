@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { ResearchConnector, TikHubProfile, TikHubVideoMetadata } from "../../providers/src/index.js";
 
+export * from "./topic-radar.js";
+
 const id = z.string().min(1);
 
 export const BenchmarkVideoSchema = z.object({

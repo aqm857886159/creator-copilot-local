@@ -1,7 +1,7 @@
 # V5 AI SDK 与 TikHub 发现能力实施计划
 
 日期：2026-08-14  
-状态：本切片已完成；UI 预算门与选题雷达调用方待下一切片
+状态：本切片已完成；选题雷达 UI/IPC 已在 v7 topic radar 切片完成
 
 ## 目标
 
@@ -52,6 +52,6 @@
 - AI SDK 结构化提案已接入 Electron main，默认只在 `AI_EDIT_PROVIDER=apimart` 且存在本地凭证时启用；
 - 发现并修复 APIMart 省略 `stream:false` 时返回 SSE 的协议差异；
 - 增加 TikHub 动态价格、低粉爆款、高完播和搜索热榜 adapter；
-- 完成 46 个测试、TypeScript 检查和生产构建；
+- 完成基础 Provider/Agent 合同测试、TypeScript 检查和生产构建；测试总数以当前 `npm test` 输出为准，不把测试数量写死为历史快照；
 - macOS arm64 打包后 `preload-ipc+runtime-sqlite` smoke 通过，证明新增 AI SDK 依赖可被 packaged runtime 加载；
 - 完成一次真实 AI SDK 单镜头提案（1 个操作、0 个缺口）以及总计约 `$0.005` 的 TikHub 榜单字段 smoke；未调用图片、视频、语音或批量下载。

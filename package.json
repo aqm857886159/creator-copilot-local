@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:render:smoke": "npm run build && node scripts/render-smoke.mjs",
     "test:providers:live": "node --env-file=.env scripts/provider-smoke.mjs",
+    "test:topic-radar:live": "npm run build && node --env-file=.env scripts/topic-radar-smoke.mjs",
     "test:agent:live": "npm run build && node --env-file=.env scripts/agent-proposal-smoke.mjs",
     "typecheck": "tsc -b --pretty false"
   },

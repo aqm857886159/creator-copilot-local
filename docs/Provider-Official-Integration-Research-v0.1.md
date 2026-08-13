@@ -207,6 +207,10 @@ PROVIDER_LIVE_TESTS=1 PROVIDER_BILLED_SMOKE=1 npm run test:providers:live
 
 # 只执行 1 次 AI SDK 结构化剪辑提案
 AGENT_PROVIDER_LIVE=1 AI_EDIT_ADAPTER=ai-sdk npm run test:agent:live
+
+# 选题雷达默认只读动态价格，不计费；如需一次受控榜单请求，显式打开且最多 1 条
+npm run test:topic-radar:live
+TOPIC_RADAR_BILLED_SMOKE=1 TOPIC_RADAR_SOURCE=low_fan npm run test:topic-radar:live
 ```
 
 脚本：[scripts/provider-smoke.mjs](../scripts/provider-smoke.mjs)。默认只运行无生成任务的健康/凭证/动态价格/模型目录检查；只有显式设置 `PROVIDER_DISCOVERY_SMOKE=1` 才运行一条低粉榜请求，只有显式设置 `PROVIDER_BILLED_SMOKE=1` 才运行一条账号资料和一条最小文本请求。AI SDK 提案使用独立的 [scripts/agent-proposal-smoke.mjs](../scripts/agent-proposal-smoke.mjs)，避免普通 Provider 检查误触模型计费。
@@ -223,6 +227,8 @@ AGENT_PROVIDER_LIVE=1 AI_EDIT_ADAPTER=ai-sdk npm run test:agent:live
 - 所有 SDK mock 都设置 `maxRetries: 0`；真实响应正文、密钥、余额和用户账户字段均未写入仓库或日志。
 
 本地 `.env` 仅用于当前机器联调，已被 `.gitignore` 忽略；仓库只提交 `.env.example` 和本文件，不提交任何 key。
+
+选题雷达 smoke 的默认边界是单来源、`pageSize=1`、24 小时窗口；`TOPIC_RADAR_BILLED_SMOKE=1` 才会发出一条真实榜单/搜索请求，执行前脚本会先读取动态端点价格。脚本只打印来源、数量、hash 和价格摘要，不打印原始响应、临时 URL、余额或凭证。
 
 ## 5. 第一阶段产品功能映射
 
@@ -282,9 +288,9 @@ scriptBlockId / shotId
 
 ## 8. 下一步实现顺序
 
-1. 已完成：`ProviderPort`、账号 `ResearchConnector`、动态价格读取、榜单/搜索 discovery adapter、AI SDK 结构化 `EditProposalDraft` 和 mock fixtures；
+1. 已完成：`ProviderPort`、账号 `ResearchConnector`、动态价格读取、榜单/搜索 discovery adapter、AI SDK 结构化 `EditProposalDraft`、mock fixtures，以及“报价后确认”的选题雷达本地证据报告；
 2. 下一步：设置页增加凭证状态、动态价格和今日预算（只返回非敏感字段）；
-3. 下一步：把低粉爆款/高完播/搜索热榜接成独立“选题雷达”，每次调用前展示范围和价格，不混入默认账号分析；
+3. 已完成首版：低粉爆款/高完播/搜索热榜作为独立“选题雷达”，每次调用前展示动态范围和价格，不混入默认账号分析；后续再加设置页预算、更多端点和可选的本地深度拆解；
 4. 账号研究 UI 补“预算/范围/证据/取消”四个显式状态，并让用户从 20 条 metadata 中选 3–5 条做本地深度拆解；
 5. ASR/OCR/视觉模型继续以本地 baseline 为主，APIMart Whisper 仅作用户选择的 fallback；
 6. 任何付费图片/视频任务都必须另开审批和成本门，不能从普通“生成拍摄示意图”按钮静默触发。

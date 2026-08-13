@@ -323,6 +323,14 @@ interface AgentRuntimePort {
 
 **验收门：** 任一作品失败不丢其他结果；每个模式结论有证据；真实调用范围、成本和清理记录可审计；结果不自动写入素材库或创作记忆。
 
+### V7b：选题雷达（已完成首版）
+
+**依赖：V5；不阻塞 V6 的本地媒体分析。**
+
+这是面向用户的“选题库”入口，不是账号研究的隐式后台任务。首版已完成：低粉爆款、高完播样本、搜索热榜三个 TikHub 来源的动态报价、一次性确认令牌、每源一个本地 Job、成功/部分失败/提交未知状态和本地证据报告。候选机会只引用来源信号，不自动生成脚本、不自动晋升 Topic/Project/ReviewMemory。
+
+施工记录：[V7 选题雷达垂直切片](./plan/2026-08-14-v7-topic-radar.md)。后续设置页预算、更多端点、多关键词趋势和本地深度拆解必须保持显式成本门。
+
 ### V8：交换、发布和受控复盘
 
 **依赖：V4、V7。**
@@ -339,7 +347,7 @@ interface AgentRuntimePort {
 ## 5. 依赖图与团队分工
 
 ```text
-V0 → V1 → V2 → V3 → V4 → V5 → V6 → V7 → V8
+V0 → V1 → V2 → V3 → V4 → V5 → V6 → V7/V7b → V8
                  ↑          │
                  └──────────┘
 ```
@@ -479,6 +487,7 @@ V6-01 ASR/shot/OCR baseline + FTS5 index
 V6-02 asset candidate search + evidence
 V7-01 TikHub mock connector + one scoped real account
 V7-02 account analysis aggregation + TopicOpportunity
+V7b-01 topic radar quote/confirm/report + local history
 V8-01 FCPXML/OTIO loss report + manual publish package
 V8-02 metrics/review memory proposal + accepted persistence
 ```

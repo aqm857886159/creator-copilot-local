@@ -37,10 +37,10 @@ import {
   type Take,
 } from "../../creation/src/index.js";
 import { AnalysisFactSchema, searchQueryForFts, type AnalysisFact } from "../../analysis/src/index.js";
-import { AccountResearchReportSchema, type AccountResearchReport } from "../../research/src/index.js";
+import { AccountResearchReportSchema, TopicRadarReportSchema, type AccountResearchReport, type TopicRadarReport } from "../../research/src/index.js";
 import { MetricSnapshotSchema, PublicationSchema, ReviewMemoryProposalSchema, type MetricSnapshot, type Publication, type ReviewMemoryProposal } from "../../publishing/src/index.js";
 
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;
 
 const RenderRunRecordSchema = z.object({
   schemaVersion: z.literal(1),
@@ -422,6 +422,18 @@ const migrations: Record<number, string> = {
     );
     CREATE INDEX IF NOT EXISTS review_memory_workspace_idx ON review_memory_proposals(workspace_id, created_at);
   `,
+  8: `
+    CREATE TABLE IF NOT EXISTS topic_radar_reports (
+      id TEXT PRIMARY KEY NOT NULL,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      provider_key TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('completed', 'partial', 'failed')),
+      quote_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS topic_radar_reports_workspace_idx ON topic_radar_reports(workspace_id, created_at);
+  `,
 };
 
 function parseJson<T>(value: string, label: string): T {
@@ -766,6 +778,31 @@ export class SqliteCatalog {
     const rows = this.db.prepare("SELECT id FROM research_reports WHERE workspace_id = ? ORDER BY created_at DESC, id").all(workspaceId) as Array<{ id: string }>;
     return rows.flatMap((row) => {
       const report = this.getResearchReport(row.id);
+      return report ? [report] : [];
+    });
+  }
+
+  saveTopicRadarReport(raw: TopicRadarReport) {
+    const report = TopicRadarReportSchema.parse(raw);
+    if (!this.getWorkspace(report.workspaceId)) throw new Error("选题雷达报告所属工作区不存在");
+    const existing = this.db.prepare("SELECT workspace_id FROM topic_radar_reports WHERE id = ?").get(report.id) as { workspace_id?: string } | undefined;
+    if (existing?.workspace_id && existing.workspace_id !== report.workspaceId) throw new Error("选题雷达报告不能跨工作区覆盖");
+    this.db.prepare(`INSERT INTO topic_radar_reports(id, workspace_id, provider_key, status, quote_id, payload_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET status = excluded.status, quote_id = excluded.quote_id, payload_json = excluded.payload_json, created_at = excluded.created_at`)
+      .run(report.id, report.workspaceId, report.providerKey, report.status, report.quote.id, JSON.stringify(report), report.createdAt);
+    return report;
+  }
+
+  getTopicRadarReport(id: string): TopicRadarReport | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM topic_radar_reports WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? TopicRadarReportSchema.parse(parseJson(row.payload_json, "topic radar report")) : undefined;
+  }
+
+  listTopicRadarReports(workspaceId: string) {
+    const rows = this.db.prepare("SELECT id FROM topic_radar_reports WHERE workspace_id = ? ORDER BY created_at DESC, id").all(workspaceId) as Array<{ id: string }>;
+    return rows.flatMap((row) => {
+      const report = this.getTopicRadarReport(row.id);
       return report ? [report] : [];
     });
   }

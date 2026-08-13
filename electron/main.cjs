@@ -11,6 +11,7 @@ let selectedWorkspacePath = null;
 let desktopRuntimePromise = null;
 let catalog = null;
 let workspaceId = null;
+const pendingTopicRadarQuotes = new Map();
 
 async function getDesktopRuntime() {
   if (!desktopRuntimePromise) {
@@ -54,6 +55,7 @@ async function initializeWorkspace(workspacePath) {
   catalog = nextCatalog;
   workspaceId = nextWorkspaceId;
   selectedWorkspacePath = canonicalWorkspacePath;
+  pendingTopicRadarQuotes.clear();
   return canonicalWorkspacePath;
 }
 
@@ -82,6 +84,21 @@ function getEditAgent(runtime) {
 function getTikHubConnector(runtime) {
   if (!process.env.TIKHUB_API_KEY) throw new Error("TikHub API key 未配置");
   return new runtime.providers.TikHubDouyinConnector({ apiKey: process.env.TIKHUB_API_KEY, baseUrl: process.env.TIKHUB_BASE_URL ?? "https://api.tikhub.dev" });
+}
+
+function topicRadarEndpointFor(runtime, source) {
+  const endpoint = runtime.research.TOPIC_RADAR_ENDPOINTS?.[source];
+  if (!endpoint) throw new Error(`不支持的选题雷达来源：${source}`);
+  return endpoint;
+}
+
+function topicRadarJobError(error) {
+  const normalized = error && typeof error === "object" && "normalized" in error ? error.normalized : undefined;
+  const category = normalized && typeof normalized === "object" && "category" in normalized ? normalized.category : undefined;
+  const code = normalized && typeof normalized === "object" && "code" in normalized ? String(normalized.code) : "TOPIC_RADAR_FAILED";
+  const message = normalized && typeof normalized === "object" && "message" in normalized ? String(normalized.message) : error instanceof Error ? error.message : "选题雷达请求失败";
+  const retryable = normalized && typeof normalized === "object" && "retryable" in normalized ? Boolean(normalized.retryable) : true;
+  return { code, message: message.slice(0, 500), retryable, submissionUnknown: category === "network" || category === "timeout" };
 }
 
 function analysisWorkerScriptPath() {
@@ -222,6 +239,91 @@ ipcMain.handle("desktop:research-account", async (_event, raw) => {
     return { ok: true, report };
   } catch (error) {
     return { ok: false, errorCode: "account_research_failed", message: error instanceof Error ? error.message : "对标账号分析失败" };
+  }
+});
+
+ipcMain.handle("desktop:quote-topic-radar", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    const runtime = await getDesktopRuntime();
+    const query = runtime.research.normalizeTopicRadarQuery(raw);
+    const connector = getTikHubConnector(runtime);
+    const prices = {};
+    // TikHub's endpoint-info endpoint is limited to roughly one request/second.
+    // Read prices in order with a small gap; never burst a quote request.
+    for (const [index, source] of query.sources.entries()) {
+      if (index > 0) await new Promise((resolve) => setTimeout(resolve, 1_050));
+      prices[source] = await connector.getEndpointInfo(topicRadarEndpointFor(runtime, source));
+    }
+    const quote = runtime.research.createTopicRadarQuote({ workspaceId: workspace.workspaceId, query, prices, now: new Date().toISOString() });
+    pendingTopicRadarQuotes.set(quote.id, { workspaceId: workspace.workspaceId, quote, used: false });
+    return { ok: true, quote };
+  } catch (error) {
+    return { ok: false, errorCode: "topic_radar_quote_failed", message: error instanceof Error ? error.message : "无法取得选题雷达报价" };
+  }
+});
+
+ipcMain.handle("desktop:run-topic-radar", async (_event, rawQuoteId) => {
+  try {
+    const workspace = requireWorkspace();
+    if (typeof rawQuoteId !== "string" || !rawQuoteId.trim()) throw new Error("选题雷达报价无效");
+    const pending = pendingTopicRadarQuotes.get(rawQuoteId);
+    if (!pending || pending.workspaceId !== workspace.workspaceId) throw new Error("报价不存在、已重启失效或不属于当前工作区，请重新报价");
+    const now = new Date();
+    if (pending.used) throw new Error("报价已经使用，请重新报价");
+    if (new Date(pending.quote.expiresAt).getTime() <= now.getTime()) throw new Error("报价已过期，请重新报价");
+    pending.used = true;
+    const runtime = await getDesktopRuntime();
+    const connector = getTikHubConnector(runtime);
+    const results = [];
+    const runs = [];
+    for (const source of pending.quote.query.sources) {
+      const line = pending.quote.lines.find((candidate) => candidate.source === source);
+      if (!line) throw new Error(`报价缺少 ${source} 明细`);
+      const timestamp = new Date().toISOString();
+      const jobId = `topic-radar-${pending.quote.id}-${source}`;
+      const idempotencyKey = `${pending.quote.id}:${source}`;
+      const existingJob = workspace.catalog.getJob(jobId);
+      if (existingJob?.state === "succeeded") {
+        runs.push({ schemaVersion: 1, source, endpoint: line.endpoint, jobId, quotedCostUsd: line.costUsd, status: "succeeded", itemCount: 0 });
+        continue;
+      }
+      if (!existingJob) workspace.catalog.insertJob({ schemaVersion: 1, id: jobId, kind: "topic-radar.discovery", inputHash: `quote:${pending.quote.id}:${source}`, state: "queued", attempt: 0, idempotencyKey, idempotencyScope: workspace.workspaceId, providerKey: "tikhub", artifactIds: [], correlationId: pending.quote.id, createdAt: timestamp, updatedAt: timestamp });
+      const leaseToken = workspace.catalog.claimJob(jobId, "topic-radar-main", now, 120_000);
+      if (!leaseToken || !workspace.catalog.heartbeatJob(jobId, "topic-radar-main", leaseToken, now, 120_000)) {
+        runs.push({ schemaVersion: 1, source, endpoint: line.endpoint, jobId, quotedCostUsd: line.costUsd, status: "submission_unknown", itemCount: 0, error: { code: "LEASE_UNAVAILABLE", message: "选题雷达任务无法取得本地租约，不会自动重复付费。", retryable: true } });
+        continue;
+      }
+      try {
+        let result;
+        if (source === "search_hot") result = { search: await connector.fetchSearchHotList({ page: 1, pageSize: pending.quote.query.pageSize, dateWindow: pending.quote.query.dateWindow, keyword: pending.quote.query.keyword }) };
+        else result = { billboard: await connector.fetchBillboardPosts({ kind: source, page: 1, pageSize: pending.quote.query.pageSize, dateWindow: pending.quote.query.dateWindow, keyword: pending.quote.query.keyword }) };
+        const itemCount = result.search?.items.length ?? result.billboard?.items.length ?? 0;
+        const responseHash = result.search?.responseHash ?? result.billboard?.responseHash;
+        workspace.catalog.transitionJob(jobId, "running", "succeeded", leaseToken, { checkpoint: { source, itemCount, responseHash } });
+        results.push({ source, ...result });
+        runs.push({ schemaVersion: 1, source, endpoint: line.endpoint, jobId, quotedCostUsd: line.costUsd, status: "succeeded", itemCount, responseHash });
+      } catch (error) {
+        const failure = topicRadarJobError(error);
+        const status = failure.submissionUnknown ? "submission_unknown" : "failed";
+        workspace.catalog.transitionJob(jobId, "running", status === "submission_unknown" ? "submission_unknown" : "failed", leaseToken, { lastError: { code: failure.code, message: failure.message, retryable: failure.retryable } });
+        runs.push({ schemaVersion: 1, source, endpoint: line.endpoint, jobId, quotedCostUsd: line.costUsd, status, itemCount: 0, error: { code: failure.code, message: failure.message, retryable: failure.retryable } });
+      }
+    }
+    const report = runtime.research.createTopicRadarReport({ workspaceId: workspace.workspaceId, quote: pending.quote, runs, results, createdAt: new Date().toISOString() });
+    workspace.catalog.saveTopicRadarReport(report);
+    return { ok: report.status !== "failed", report, message: report.status === "partial" ? "部分来源完成，失败来源不会自动重试。" : undefined };
+  } catch (error) {
+    return { ok: false, errorCode: "topic_radar_run_failed", message: error instanceof Error ? error.message : "选题雷达运行失败" };
+  }
+});
+
+ipcMain.handle("desktop:list-topic-radar-reports", async () => {
+  try {
+    const workspace = requireWorkspace();
+    return { ok: true, reports: workspace.catalog.listTopicRadarReports(workspace.workspaceId) };
+  } catch (error) {
+    return { ok: false, errorCode: "topic_radar_history_failed", message: error instanceof Error ? error.message : "无法读取选题雷达历史" };
   }
 });
 

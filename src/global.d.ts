@@ -61,6 +61,43 @@ interface AnalyzeResearchMediaResult {
   jobs?: Array<{ id: string; state: string; reused?: boolean; factCount?: number }>;
 }
 
+interface TopicRadarQueryView {
+  schemaVersion: 1;
+  sources: Array<"low_fan" | "high_completion" | "search_hot">;
+  keyword: string;
+  dateWindow: 1 | 24 | 72 | 168;
+  pageSize: number;
+}
+
+interface TopicRadarQuoteView {
+  schemaVersion: 1;
+  id: string;
+  workspaceId: string;
+  query: TopicRadarQueryView;
+  lines: Array<{ source: "low_fan" | "high_completion" | "search_hot"; endpoint: string; costUsd: number; rateLimit?: string; endpointType?: string }>;
+  totalCostUsd: number;
+  currency: "USD";
+  quotedAt: string;
+  expiresAt: string;
+}
+
+interface TopicRadarReportView {
+  schemaVersion: 1;
+  id: string;
+  workspaceId: string;
+  providerKey: "tikhub";
+  query: TopicRadarQueryView;
+  quote: TopicRadarQuoteView;
+  status: "completed" | "partial" | "failed";
+  signals: Array<{ id: string; source: string; kind: string; label: string; detail: string; metrics: Record<string, number>; sourceId: string; sourceUrl?: string; capturedAt: string }>;
+  opportunities: Array<{ id: string; source: string; title: string; angle: string; whyNow: string; evidenceIds: string[]; status: "candidate" }>;
+  runs: Array<{ source: string; endpoint: string; jobId: string; quotedCostUsd: number; status: string; itemCount: number; responseHash?: string; error?: { code: string; message: string; retryable: boolean } }>;
+  createdAt: string;
+}
+
+interface TopicRadarQuoteResult { ok: boolean; errorCode?: string; message?: string; quote?: TopicRadarQuoteView }
+interface TopicRadarRunResult { ok: boolean; errorCode?: string; message?: string; report?: TopicRadarReportView; reports?: TopicRadarReportView[] }
+
 interface CaptureWorkflowInput {
   projectTitle: string;
   blocks: Array<{ kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; visualNeed: "none" | "support" | "must_show" }>;
@@ -233,6 +270,9 @@ interface Window {
     researchAccount: (input: { sourceInput: string; count?: number }) => Promise<AccountResearchResult>;
     downloadResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<DownloadResearchMediaResult>;
     analyzeResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<AnalyzeResearchMediaResult>;
+    quoteTopicRadar: (input: TopicRadarQueryView) => Promise<TopicRadarQuoteResult>;
+    runTopicRadar: (quoteId: string) => Promise<TopicRadarRunResult>;
+    listTopicRadarReports: () => Promise<TopicRadarRunResult>;
     createCaptureWorkflow: (input: CaptureWorkflowInput) => Promise<CaptureWorkflowResult>;
     importTake: (shootTaskId: string) => Promise<ImportTakeResult>;
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;

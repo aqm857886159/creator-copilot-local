@@ -23,6 +23,7 @@ import { AiEditWorkbench } from "./components/ai-edit-workbench";
 import { AssetLibraryWorkbench } from "./components/asset-library-workbench";
 import { AccountRadarWorkbench } from "./components/account-radar-workbench";
 import { ReviewWorkbench } from "./components/review-workbench";
+import { TopicRadarWorkbench } from "./components/topic-radar-workbench";
 
 const navItems: Array<{ id: ViewId; label: string; icon: typeof LayoutDashboard }> = [
   { id: "today", label: "今天", icon: LayoutDashboard },
@@ -157,6 +158,8 @@ export function App() {
             <AssetLibraryWorkbench workspaceReady={Boolean(workspacePath)} importMedia={importMedia} />
           ) : activeView === "radar" ? (
             <AccountRadarWorkbench workspaceReady={Boolean(workspacePath)} />
+          ) : activeView === "ideas" ? (
+            <TopicRadarWorkbench workspacePath={workspacePath} />
           ) : activeView === "review" ? (
             <ReviewWorkbench workspaceReady={Boolean(workspacePath)} />
           ) : (

@@ -27,7 +27,7 @@ npm run test:desktop:package
 - `contextIsolation` / preload 暴露的 `desktop:get-info` IPC 能返回平台和架构；
 - 打包后的 `dist-electron` runtime 可以加载；
 - 打包后的 `better-sqlite3` 可以创建 catalog 并执行 schema migration；
-- 当前 macOS arm64 产物返回 `schemaVersion=7`。
+- 当前 macOS arm64 产物返回 `schemaVersion=8`。
 
 分析 utility worker 已增加 packaged runtime 路径兼容（`app.asar` / `app.asar.unpacked`），但本次 smoke 尚未把 worker 执行标记为通过；它会在下一条独立媒体 worker smoke 中验证。
 
@@ -36,7 +36,7 @@ staging 不复用根目录 `node_modules`，避免 Electron ABI 重编译污染�
 本次实际结果：
 
 ```json
-{"ok":true,"smoke":"preload-ipc+runtime-sqlite","platform":"darwin","arch":"arm64","schemaVersion":7}
+{"ok":true,"smoke":"preload-ipc+runtime-sqlite","platform":"darwin","arch":"arm64","schemaVersion":8}
 ```
 
 ## 安全和打包边界

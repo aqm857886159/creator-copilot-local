@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachResearchAnalysis, attachResearchMedia, buildAccountResearchReport } from "./index";
+import { attachResearchAnalysis, attachResearchMedia, buildAccountResearchReport, createTopicRadarQuote, createTopicRadarReport, normalizeTopicRadarQuery } from "./index";
 
 describe("benchmark account research", () => {
   it("builds a metadata-first evidence report with explicit coverage", async () => {
@@ -24,5 +24,27 @@ describe("benchmark account research", () => {
 
   it("rejects an unbounded first request", async () => {
     await expect(buildAccountResearchReport({ workspaceId: "workspace-1", sourceInput: "fixture", connector: { providerKey: "tikhub", resolveSecUserId: async () => "id", fetchProfile: async () => ({ secUserId: "id", raw: {} }), fetchUserPosts: async () => ({ providerKey: "tikhub", source: "public", fetchedAt: "2026-08-14T00:00:00.000Z", cursor: 0, hasMore: false, items: [], responseHash: "sha256:x" }), fetchHighestQualityPlayUrl: async () => ({ awemeId: "id", url: "https://cdn.example/video.mp4", responseHash: "sha256:x" }) }, count: 21 })).rejects.toThrow("1–20");
+  });
+
+  it("quotes only bounded, unique discovery sources and creates evidence-linked opportunities", () => {
+    const query = normalizeTopicRadarQuery({ schemaVersion: 1, sources: ["low_fan", "search_hot"], keyword: "深度口播", dateWindow: 24, pageSize: 2 });
+    const quote = createTopicRadarQuote({ workspaceId: "workspace-1", query, now: "2026-08-14T00:00:00.000Z", prices: {
+      low_fan: { endpoint: "/api/v1/douyin/billboard/fetch_hot_total_low_fan_list", costUsd: 0.001, allowFreeCredit: true, allowDiscount: true, rateLimit: "10/second" },
+      high_completion: { endpoint: "/api/v1/douyin/billboard/fetch_hot_total_high_play_list", costUsd: 0.001, allowFreeCredit: true, allowDiscount: true, rateLimit: "10/second" },
+      search_hot: { endpoint: "/api/v1/douyin/billboard/fetch_hot_total_search_list", costUsd: 0.001, allowFreeCredit: true, allowDiscount: true, rateLimit: "10/second" },
+    }});
+    expect(quote.totalCostUsd).toBe(0.002);
+    const report = createTopicRadarReport({ workspaceId: "workspace-1", quote, runs: [
+      { schemaVersion: 1, source: "low_fan", endpoint: quote.lines[0].endpoint, jobId: "job-low", quotedCostUsd: 0.001, status: "succeeded", itemCount: 1, responseHash: "sha256:low" },
+      { schemaVersion: 1, source: "search_hot", endpoint: quote.lines[1].endpoint, jobId: "job-search", quotedCostUsd: 0.001, status: "failed", itemCount: 0, error: { code: "RATE_LIMIT", message: "稍后重试", retryable: true } },
+    ], results: [{ source: "low_fan", billboard: { providerKey: "tikhub", kind: "low_fan", fetchedAt: "2026-08-14T00:00:00.000Z", page: 1, pageSize: 1, total: 1, responseHash: "sha256:low", items: [{ awemeId: "aweme-1", title: "一个反常识观点", followerCount: 800, playCount: 120000, raw: { fans_cnt: 800, play_cnt: 120000 } }] } }] , createdAt: "2026-08-14T00:00:00.000Z" });
+    expect(report.status).toBe("partial");
+    expect(report.signals[0]).toMatchObject({ source: "low_fan", sourceId: "aweme-1" });
+    expect(report.opportunities[0].evidenceIds).toContain(report.signals[0].id);
+  });
+
+  it("rejects duplicate discovery sources and page sizes above the provider safety bound", () => {
+    expect(() => normalizeTopicRadarQuery({ schemaVersion: 1, sources: ["low_fan", "low_fan"], keyword: "", dateWindow: 24, pageSize: 2 })).toThrow("来源不能重复");
+    expect(() => normalizeTopicRadarQuery({ schemaVersion: 1, sources: ["low_fan"], keyword: "", dateWindow: 24, pageSize: 21 })).toThrow();
   });
 });

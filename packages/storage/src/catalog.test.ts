@@ -8,7 +8,7 @@ import type { JobRecord } from "../../contracts/src/index";
 import { ScriptSchema, createShootTasks, createStoryboard, type Take } from "../../creation/src/index";
 import { DEFAULT_VERTICAL_PROFILE, EditProposalSchema, freezeEditProposal } from "../../exchange/src/index";
 import { transcriptFacts, parseWhisperJson } from "../../analysis/src/index";
-import { AccountResearchReportSchema } from "../../research/src/index";
+import { AccountResearchReportSchema, TopicRadarReportSchema } from "../../research/src/index";
 import { MetricSnapshotSchema, proposeReviewMemory } from "../../publishing/src/index";
 
 function fixtureJob(overrides: Partial<JobRecord> = {}): JobRecord {
@@ -40,7 +40,7 @@ describe("SqliteCatalog", () => {
     catalog.createWorkspace({ id: "workspace-1", name: "测试工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
     catalog.createProject({ id: "project-1", workspaceId: "workspace-1", title: "测试项目", stage: "script", revision: 1, payload: { source: "fixture" }, createdAt: now, updatedAt: now });
     catalog.insertArtifact({ schemaVersion: 1, artifactId: "artifact-1", workspaceId: "workspace-1", kind: "proxy", relativePath: "derived/proxy.mp4", mimeType: "video/mp4", contentHash: "sha256:proxy", byteSize: 12, parentArtifactIds: [], validationStatus: "valid" });
-    expect(catalog.schemaVersion()).toBe(7);
+    expect(catalog.schemaVersion()).toBe(8);
     expect(catalog.getProject("project-1")?.payload).toEqual({ source: "fixture" });
     expect(catalog.getArtifact("artifact-1")?.relativePath).toBe("derived/proxy.mp4");
     expect(catalog.updateProject("project-1", 0, { title: "不应覆盖" })).toBe(false);
@@ -170,7 +170,7 @@ describe("SqliteCatalog", () => {
     `);
     legacy.close();
     const catalog = new SqliteCatalog(dbPath);
-    expect(catalog.schemaVersion()).toBe(7);
+    expect(catalog.schemaVersion()).toBe(8);
     catalog.insertJob(fixtureJob({ id: "legacy-job", idempotencyKey: "legacy-job-key" }));
     catalog.enqueueOutbox({ id: "legacy-outbox", kind: "legacy", payload: {}, idempotencyKey: "legacy-outbox-key", idempotencyScope: "workspace-1", state: "queued", attempt: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     catalog.createWorkspace({ id: "workspace-1", name: "工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -230,6 +230,9 @@ describe("SqliteCatalog", () => {
     const report = AccountResearchReportSchema.parse({ schemaVersion: 1, id: "research-creation", workspaceId: "workspace-creation", providerKey: "tikhub", sourceInput: "https://www.douyin.com/user/fixture", secUserId: "MS4wLjABAAAAfixture", profile: { nickname: "参考账号", followerCount: 1000 }, videos: [], coverage: { requested: 20, received: 0, metadataAnalyzed: 0, mediaAnalyzed: 0, missingMedia: 0, hasMore: false, note: "metadata only" }, findings: [], evidence: [], createdAt: now });
     catalog.saveResearchReport(report);
     expect(catalog.getResearchReport(report.id)?.profile.nickname).toBe("参考账号");
+    const topicReport = TopicRadarReportSchema.parse({ schemaVersion: 1, id: "topic-radar-creation", workspaceId: "workspace-creation", providerKey: "tikhub", query: { schemaVersion: 1, sources: ["low_fan"], keyword: "深度口播", dateWindow: 24, pageSize: 2 }, quote: { schemaVersion: 1, id: "topic-quote-creation", workspaceId: "workspace-creation", query: { schemaVersion: 1, sources: ["low_fan"], keyword: "深度口播", dateWindow: 24, pageSize: 2 }, lines: [{ source: "low_fan", endpoint: "/api/v1/douyin/billboard/fetch_hot_total_low_fan_list", costUsd: 0.001 }], totalCostUsd: 0.001, currency: "USD", quotedAt: now, expiresAt: "2026-08-14T00:10:00.000Z" }, status: "completed", signals: [], opportunities: [], runs: [{ schemaVersion: 1, source: "low_fan", endpoint: "/api/v1/douyin/billboard/fetch_hot_total_low_fan_list", jobId: "job-topic", quotedCostUsd: 0.001, status: "succeeded", itemCount: 0 }], createdAt: now });
+    catalog.saveTopicRadarReport(topicReport);
+    expect(catalog.listTopicRadarReports("workspace-creation")).toHaveLength(1);
     catalog.close();
     const restored = new SqliteCatalog(dbPath);
     expect(restored.getScript(script.id)?.blocks[0].text).toContain("画面变化");
@@ -243,6 +246,7 @@ describe("SqliteCatalog", () => {
     expect(restored.getReviewMemoryProposal(memory.id)?.status).toBe("confirmed");
     expect(restored.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "画面" })).toHaveLength(1);
     expect(restored.listResearchReports("workspace-creation")).toHaveLength(1);
+    expect(restored.getTopicRadarReport("topic-radar-creation")?.status).toBe("completed");
     restored.close();
     rmSync(root, { recursive: true, force: true });
   });
