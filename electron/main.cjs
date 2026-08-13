@@ -12,6 +12,7 @@ let desktopRuntimePromise = null;
 let catalog = null;
 let workspaceId = null;
 const pendingTopicRadarQuotes = new Map();
+const activeAnalysisWorkers = new Map();
 
 async function getDesktopRuntime() {
   if (!desktopRuntimePromise) {
@@ -136,11 +137,13 @@ function runAnalysisWorker(payload) {
   const workerPath = analysisWorkerScriptPath();
   return new Promise((resolve, reject) => {
     const requestId = randomUUID();
+    const workerKey = typeof payload?.jobId === "string" && payload.jobId ? payload.jobId : requestId;
     const worker = utilityProcess.fork(workerPath);
     let settled = false;
     const timeout = setTimeout(() => {
       if (settled) return;
       settled = true;
+      activeAnalysisWorkers.delete(workerKey);
       worker.kill();
       reject(new Error("媒体分析 worker 超时"));
     }, 10 * 60 * 1000);
@@ -148,9 +151,17 @@ function runAnalysisWorker(payload) {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      activeAnalysisWorkers.delete(workerKey);
       callback();
       worker.kill();
     };
+    const cancel = () => {
+      if (settled) return false;
+      const error = Object.assign(new Error("媒体分析已取消"), { code: "MEDIA_ANALYSIS_CANCELLED" });
+      finish(() => reject(error));
+      return true;
+    };
+    activeAnalysisWorkers.set(workerKey, cancel);
     worker.on("message", (message) => {
       if (!message || message.requestId !== requestId) return;
       finish(() => {
@@ -164,6 +175,11 @@ function runAnalysisWorker(payload) {
     });
     worker.postMessage({ requestId, payload });
   });
+}
+
+function cancelAnalysisWorker(jobId) {
+  const cancel = activeAnalysisWorkers.get(jobId);
+  return typeof cancel === "function" ? cancel() : false;
 }
 
 async function analyzeLocalArtifact({ workspace, runtime, artifact }) {
@@ -203,14 +219,16 @@ async function analyzeLocalArtifact({ workspace, runtime, artifact }) {
     const durationMs = probe.durationMs;
     if (!durationMs || durationMs <= 0) throw new Error("素材没有可用时长");
     const createdAt = new Date().toISOString();
-    const workerResult = await runAnalysisWorker({ sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, whisperModelPath: process.env.WHISPER_MODEL_PATH, whisperBinaryPath: process.env.WHISPER_BINARY_PATH, visionScriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(process.cwd(), "scripts", "apple-vision-ocr.swift"), visionBinaryPath: process.env.APPLE_VISION_OCR_BINARY, visionSampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) });
+    const workerResult = await runAnalysisWorker({ jobId: job.id, sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, whisperModelPath: process.env.WHISPER_MODEL_PATH, whisperBinaryPath: process.env.WHISPER_BINARY_PATH, visionScriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(process.cwd(), "scripts", "apple-vision-ocr.swift"), visionBinaryPath: process.env.APPLE_VISION_OCR_BINARY, visionSampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) });
     workspace.catalog.saveAnalysisFacts(workerResult.facts);
     if (!workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: workerResult.shotCount, factIds: workerResult.facts.map((fact) => fact.id), asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus } })) throw new Error("分析任务完成状态未能持久化");
     return { ok: true, status: "succeeded", reused: false, job: workspace.catalog.getJob(job.id), facts: workerResult.facts, summary: workerResult.summary, asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus };
   } catch (error) {
     const message = error instanceof Error ? error.message : "本地媒体分析失败";
-    const transitioned = workspace.catalog.transitionJob(job.id, "running", "failed", leaseToken, { lastError: { code: "MEDIA_ANALYSIS_FAILED", message, retryable: true } });
-    return { ok: false, status: transitioned ? "failed" : "needs_attention", job: workspace.catalog.getJob(job.id), message };
+    const cancelled = error && typeof error === "object" && error.code === "MEDIA_ANALYSIS_CANCELLED";
+    const nextState = cancelled ? "cancelled" : "failed";
+    const transitioned = workspace.catalog.transitionJob(job.id, "running", nextState, leaseToken, { lastError: { code: cancelled ? "MEDIA_ANALYSIS_CANCELLED" : "MEDIA_ANALYSIS_FAILED", message, retryable: !cancelled } });
+    return { ok: false, status: cancelled ? "cancelled" : transitioned ? "failed" : "needs_attention", job: workspace.catalog.getJob(job.id), message };
   }
 }
 
@@ -345,6 +363,22 @@ ipcMain.handle("desktop:analyze-asset", async (_event, raw) => {
     return await analyzeLocalArtifact({ workspace, runtime, artifact });
   } catch (error) {
     return { ok: false, status: "failed", errorCode: "asset_analysis_failed", message: error instanceof Error ? error.message : "本地素材分析失败" };
+  }
+});
+
+ipcMain.handle("desktop:cancel-analysis", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.artifactId !== "string" || !raw.artifactId.trim()) throw new Error("取消分析参数无效");
+    const artifact = workspace.catalog.getArtifact(raw.artifactId.trim());
+    if (!artifact || artifact.workspaceId !== workspace.workspaceId) throw new Error("素材不存在或不属于当前工作区");
+    const jobId = `analysis-${artifact.artifactId}`;
+    const job = workspace.catalog.getJob(jobId);
+    if (!job || !["claimed", "running"].includes(job.state)) return { ok: false, status: job?.state ?? "not_found", message: "这段素材当前没有正在运行的分析任务。" };
+    const cancelled = cancelAnalysisWorker(jobId);
+    return { ok: cancelled, status: cancelled ? "cancelling" : job.state, message: cancelled ? "已请求取消分析，正在清理 worker。" : "分析 worker 已结束或不属于当前窗口。" };
+  } catch (error) {
+    return { ok: false, errorCode: "asset_analysis_cancel_failed", message: error instanceof Error ? error.message : "取消本地分析失败" };
   }
 });
 
@@ -574,7 +608,7 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         const durationMs = probe.durationMs ?? video.durationMs;
         if (!durationMs || durationMs <= 0) throw new Error("素材没有可用时长");
         const createdAt = new Date().toISOString();
-        const workerResult = await runAnalysisWorker({ sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, whisperModelPath: process.env.WHISPER_MODEL_PATH, whisperBinaryPath: process.env.WHISPER_BINARY_PATH, visionScriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(process.cwd(), "scripts", "apple-vision-ocr.swift"), visionBinaryPath: process.env.APPLE_VISION_OCR_BINARY, visionSampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) });
+        const workerResult = await runAnalysisWorker({ jobId: job.id, sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, whisperModelPath: process.env.WHISPER_MODEL_PATH, whisperBinaryPath: process.env.WHISPER_BINARY_PATH, visionScriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(process.cwd(), "scripts", "apple-vision-ocr.swift"), visionBinaryPath: process.env.APPLE_VISION_OCR_BINARY, visionSampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) });
         workspace.catalog.saveAnalysisFacts(workerResult.facts);
         workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: workerResult.shotCount, factIds: workerResult.facts.map((fact) => fact.id), asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus } });
         updates.push({ awemeId: video.awemeId, status: workerResult.asrReady && workerResult.ocrReady ? "completed" : "partial", factIds: workerResult.facts.map((fact) => fact.id), summary: workerResult.summary, analyzedAt: createdAt });
@@ -582,9 +616,11 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         jobs.push({ id: job.id, state: "succeeded", factCount: workerResult.facts.length });
       } catch (error) {
         const message = error instanceof Error ? error.message : "本地媒体分析失败";
-        workspace.catalog.transitionJob(job.id, "running", "failed", leaseToken, { lastError: { code: "MEDIA_ANALYSIS_FAILED", message, retryable: true } });
+        const cancelled = error && typeof error === "object" && error.code === "MEDIA_ANALYSIS_CANCELLED";
+        const nextState = cancelled ? "cancelled" : "failed";
+        workspace.catalog.transitionJob(job.id, "running", nextState, leaseToken, { lastError: { code: cancelled ? "MEDIA_ANALYSIS_CANCELLED" : "MEDIA_ANALYSIS_FAILED", message, retryable: !cancelled } });
         failed.push({ awemeId: video.awemeId, message });
-        jobs.push({ id: job.id, state: "failed" });
+        jobs.push({ id: job.id, state: nextState });
       }
     }
     let updated = runtime.research.attachResearchAnalysis(workspace.catalog.getResearchReport(report.id) ?? report, updates);

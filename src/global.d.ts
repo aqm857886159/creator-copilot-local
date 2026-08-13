@@ -42,6 +42,13 @@ interface AnalyzeAssetResult {
   facts?: Array<{ id: string; artifactId: string; kind: string; startMs: number; endMs: number; text: string; labels: string[]; providerKey: string }>;
 }
 
+interface CancelAnalysisResult {
+  ok: boolean;
+  status?: string;
+  errorCode?: string;
+  message?: string;
+}
+
 interface AccountResearchResult {
   ok: boolean;
   errorCode?: string;
@@ -314,6 +321,7 @@ interface Window {
     chooseWorkspace: () => Promise<ChooseWorkspaceResult>;
     importMedia: () => Promise<ImportMediaResult>;
     analyzeAsset: (input: { artifactId: string }) => Promise<AnalyzeAssetResult>;
+    cancelAnalysis: (input: { artifactId: string }) => Promise<CancelAnalysisResult>;
     searchAssets: (query: string) => Promise<AssetSearchResult>;
     researchAccount: (input: { sourceInput: string; count?: number }) => Promise<AccountResearchResult>;
     downloadResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<DownloadResearchMediaResult>;

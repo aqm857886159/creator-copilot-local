@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("desktop", {
   chooseWorkspace: () => ipcRenderer.invoke("desktop:choose-workspace"),
   importMedia: () => ipcRenderer.invoke("desktop:import-media"),
   analyzeAsset: (input) => ipcRenderer.invoke("desktop:analyze-asset", input),
+  cancelAnalysis: (input) => ipcRenderer.invoke("desktop:cancel-analysis", input),
   searchAssets: (query) => ipcRenderer.invoke("desktop:search-assets", query),
   researchAccount: (input) => ipcRenderer.invoke("desktop:research-account", input),
   downloadResearchMedia: (input) => ipcRenderer.invoke("desktop:download-research-media", input),

@@ -63,6 +63,7 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 - 导入产物进入 catalog，素材库可读取。
 - 素材库按原始 artifact 创建/复用分析 Job，并支持按 artifactId 限定事实检索。
 - `search-assets` 同时返回工作区内与可见素材关联的 `media.analysis` Job；素材列表明确区分尚未分析、待继续、分析中、已完成和失败，避免应用重启后把排队任务显示成无状态按钮。
+- 正在运行的本地分析可从素材库主动取消；main 只取消自己持有的 utility worker，Job 进入 `cancelled` 并清理 lease，不会把被杀掉的旧 worker 当成成功。
 
 本机真实 smoke（2026-08-14）：
 

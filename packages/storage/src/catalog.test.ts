@@ -127,6 +127,21 @@ describe("SqliteCatalog", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("clears the lease when a running analysis job is cancelled", () => {
+    const root = mkdtempSync(join(tmpdir(), "creator-copilot-job-cancel-"));
+    const catalog = new SqliteCatalog(join(root, "catalog.sqlite"));
+    const now = new Date("2026-08-14T00:00:00.000Z");
+    catalog.insertJob(fixtureJob({ id: "cancel-job", idempotencyKey: "cancel-key", kind: "media.analysis" }));
+    const leaseToken = catalog.claimJob("cancel-job", "analysis-main", now, 60_000);
+    expect(leaseToken).toEqual(expect.any(String));
+    expect(catalog.heartbeatJob("cancel-job", "analysis-main", leaseToken!, now, 60_000)).toBe(true);
+    expect(catalog.transitionJob("cancel-job", "running", "cancelled", leaseToken!, { lastError: { code: "MEDIA_ANALYSIS_CANCELLED", message: "用户取消", retryable: false } })).toBe(true);
+    expect(catalog.getJob("cancel-job")).toMatchObject({ state: "cancelled", lastError: { code: "MEDIA_ANALYSIS_CANCELLED", retryable: false } });
+    expect(catalog.getJob("cancel-job")?.leaseToken).toBeUndefined();
+    catalog.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("commits domain facts, events, outbox, and receipt atomically", () => {
     const root = mkdtempSync(join(tmpdir(), "creator-copilot-command-"));
     const catalog = new SqliteCatalog(join(root, "catalog.sqlite"));
