@@ -24,6 +24,8 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.30",
+    "ai": "^7.0.65",
     "better-sqlite3": "^12.4.1",
     "cors": "^2.8.5",
     "express": "^5.1.0",

@@ -65,8 +65,16 @@ function requireWorkspace() {
 function getEditAgent(runtime) {
   const providerKey = process.env.AI_EDIT_PROVIDER ?? "local-fallback";
   if (providerKey === "apimart" && process.env.APIMART_API_KEY) {
+    const modelKey = process.env.AI_EDIT_MODEL ?? "gpt-5-nano";
+    const adapter = process.env.AI_EDIT_ADAPTER ?? "ai-sdk";
+    if (adapter === "ai-sdk") {
+      const configuredBaseUrl = process.env.APIMART_BASE_URL ?? "https://api.apimart.ai";
+      const baseUrl = configuredBaseUrl.replace(/\/+$/, "").endsWith("/v1") ? configuredBaseUrl : `${configuredBaseUrl.replace(/\/+$/, "")}/v1`;
+      const generator = new runtime.providers.AiSdkStructuredGenerator({ apiKey: process.env.APIMART_API_KEY, baseUrl });
+      return new runtime.agentRuntime.AiSdkEditAgentRuntime(generator, modelKey);
+    }
     const provider = new runtime.providers.ApiMartClient({ apiKey: process.env.APIMART_API_KEY, baseUrl: process.env.APIMART_BASE_URL ?? "https://api.apimart.ai" });
-    return new runtime.agentRuntime.ProviderEditAgentRuntime(provider, process.env.AI_EDIT_MODEL ?? "gpt-5-nano");
+    return new runtime.agentRuntime.ProviderEditAgentRuntime(provider, modelKey);
   }
   return new runtime.agentRuntime.LocalEditAgentRuntime();
 }

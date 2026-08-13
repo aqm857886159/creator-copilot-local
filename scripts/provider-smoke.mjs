@@ -1,5 +1,6 @@
 const liveEnabled = process.env.PROVIDER_LIVE_TESTS === "1";
 const billedEnabled = process.env.PROVIDER_BILLED_SMOKE === "1";
+const discoveryEnabled = process.env.PROVIDER_DISCOVERY_SMOKE === "1";
 
 if (!liveEnabled) {
   console.log("Provider smoke skipped. Set PROVIDER_LIVE_TESTS=1 to run the bounded live checks.");
@@ -35,6 +36,27 @@ async function testTikHub() {
     hasApiKeyData: Boolean(account.body.api_key_data),
     hasUserData: Boolean(account.body.user_data),
   }));
+
+  const endpointInfoUrl = new URL(`${baseUrl}/api/v1/tikhub/user/get_endpoint_info`);
+  endpointInfoUrl.searchParams.set("endpoint", "/api/v1/douyin/billboard/fetch_hot_total_low_fan_list");
+  const endpointInfo = await fetchJson(endpointInfoUrl);
+  console.log(JSON.stringify({
+    provider: "tikhub",
+    check: "low_fan_dynamic_price",
+    httpStatus: endpointInfo.response.status,
+    costUsd: typeof endpointInfo.body.data?.endpoint_cost === "number" ? endpointInfo.body.data.endpoint_cost : null,
+    rateLimit: endpointInfo.body.data?.rate_limit ?? null,
+  }));
+
+  if (discoveryEnabled) {
+    const discovery = await fetchJson(`${baseUrl}/api/v1/douyin/billboard/fetch_hot_total_low_fan_list`, {
+      method: "POST",
+      headers: { ...bearer(key), "Content-Type": "application/json" },
+      body: JSON.stringify({ page: 1, page_size: 2, date_window: 24, keyword: "", tags: [] }),
+    });
+    const items = discovery.body.data?.data?.objs;
+    console.log(JSON.stringify({ provider: "tikhub", check: "low_fan_two_items", httpStatus: discovery.response.status, code: discovery.body.code ?? null, itemCount: Array.isArray(items) ? items.length : 0, requestIdPresent: Boolean(discovery.body.request_id) }));
+  }
 
   if (!billedEnabled) return;
   const profileUrl = new URL(`${baseUrl}/api/v1/douyin/app/v3/handler_user_profile`);

@@ -42,6 +42,7 @@ TikHub 的 Search API、批量高清下载、星图画像和视频生成都不�
 官方入口：
 
 - [TikHub API 文档](https://docs.tikhub.io/)
+- [TikHub 官方 LLM 接口目录](https://docs.tikhub.io/llms.txt)
 - [TikHub Douyin API 产品页](https://tikhub.io/douyin-api)
 - [用户信息接口](https://docs.tikhub.io/186826050e0)
 - [每日用量接口](https://docs.tikhub.io/186826051e0)
@@ -54,6 +55,13 @@ TikHub 的 Search API、批量高清下载、星图画像和视频生成都不�
 - [播放统计](https://docs.tikhub.io/186826221e0)
 - [最高画质播放链接](https://docs.tikhub.io/312096107e0)
 - [低粉爆款榜](https://docs.tikhub.io/252393854e0)
+- [高完播率榜](https://docs.tikhub.io/252393855e0)
+- [搜索热榜](https://docs.tikhub.io/252393860e0)
+- [热门内容词](https://docs.tikhub.io/252393862e0)
+- [账号近 7 日作品分析](https://docs.tikhub.io/252393848e0)
+- [评论词云权重](https://docs.tikhub.io/252393843e0)
+- [多关键词热度趋势](https://docs.tikhub.io/443673033e0)
+- [星图内容趋势指南](https://docs.tikhub.io/417585632e0)
 
 事实（本次通过官方页面再次核对）：
 
@@ -76,6 +84,23 @@ TikHub 的 Search API、批量高清下载、星图画像和视频生成都不�
 | 限制/合规 | 官方说明只返回公开数据；私密内容不可用；评论建议每次不超过 30；默认 RPS 10；下载链接临时 | 记录来源、时间、权限、过期时间和失败原因；不把抓取结果自动晋升为记忆 |
 
 事实与工程推断要分开：TikHub 返回“结构化数据”不等于已经完成脚本/分镜分析。我们仍必须把下载到本地的视频送进自己的 ffprobe、ASR、OCR、镜头和视觉事实管线；AI 结论必须关联作品 ID、时间区间和原始证据。
+
+#### 2.1.1 适合本产品的发现接口优先级
+
+动态价格通过零成本的 `GET /api/v1/tikhub/user/get_endpoint_info` 于 2026-08-14 实测；该元数据端点自身动态价格为 `$0`、限流为 `1/second`。价格会变化，下面只能作为本次快照，正式调用仍要实时读取。
+
+| 产品问题 | TikHub 端点 | 本次动态价格 | 首版用途与边界 |
+| --- | --- | ---: | --- |
+| 小账号靠什么内容突破 | `POST /api/v1/douyin/billboard/fetch_hot_total_low_fan_list` | `$0.001` | 选题雷达的“低粉爆款”证据；支持 `1/24/72/168h`、关键词和垂类标签；默认只取 10 条 |
+| 哪类表达更容易被完整看完 | `POST /api/v1/douyin/billboard/fetch_hot_total_high_play_list` | `$0.001` | 高完播样本池；不能把完播率榜单直接当脚本模板，仍要本地拆镜头/ASR/OCR |
+| 用户正在主动搜什么 | `POST /api/v1/douyin/billboard/fetch_hot_total_search_list` | `$0.001` | 搜索热榜与趋势曲线；支持 `1/24/72/168h` 和关键词过滤 |
+| 某赛道近期高频内容词 | `POST /api/v1/douyin/billboard/fetch_hot_total_hot_word_list` | `$0.001` | 内容词地图；时间窗口为 `24/72/168h`，用于拓展选题而不是自动生成结论 |
+| 对标账号上一周的作品表现 | `GET /api/v1/douyin/billboard/fetch_hot_account_item_analysis_list` | `$0.001` | 账号报告的外部证据补充；参数为 `sec_uid`，文档标题虽写“上周”，描述中出现 `day`，但 OpenAPI 参数表只列 `sec_uid`，适配器不能擅自发送未声明参数 |
+| 评论区在讨论什么 | `GET /api/v1/douyin/billboard/fetch_hot_comment_word_list` | `$0.001` | 单作品评论词云，用来找用户问题/误解；不可替代评论原文抽样和人工语义判断 |
+| 多个选题词的长期趋势 | `POST /api/v1/douyin/index/fetch_multi_keyword_hot_trend` | `$0.003` | 关键词比较，参数为逗号分隔关键词、`YYYYMMDD` 起止日期、平台与地区；成本更高，用户明确点击后执行 |
+| 星图趋势指南 | `GET /api/v1/douyin/xingtu_v2/get_content_trend_guide` | 动态 `$0.001` | 静态页面写 `$0.002/次`，与动态端点信息冲突；证明价格不能写死，星图能力后置 |
+
+低粉榜/高完播榜真实响应不是直接的 `data[]`，而是 `response.data.data.objs[]`；作品字段包含 `item_id/item_title/fans_cnt/play_cnt/score/like_rate/follow_rate` 等。搜索热榜位于 `response.data.data.search_list[]`，包含 `key_word/search_score/trends[]`。适配器已经用归一化对象屏蔽这层供应商嵌套，原始对象只作为受控证据。
 
 ### 2.2 APIMart
 
@@ -109,6 +134,34 @@ TikHub 的 Search API、批量高清下载、星图画像和视频生成都不�
 | 错误 | 文档列 400/401/402/403/429/500 等 | 归一化为 invalid/auth/quota/rate_limit/provider/retryable，不把原始响应直接交给 UI |
 
 APIMart 的“OpenAI-compatible”只代表协议接近，不代表模型质量、上下文、工具行为和计费完全等价。Provider adapter 必须保存 `providerKey/modelKey/capabilitySnapshot/requestSummary/usage/cost`，不能在 Domain 中写死某家模型名。
+
+### 2.3 Vercel AI SDK 7
+
+官方入口：
+
+- [AI SDK 结构化输出](https://ai-sdk.dev/docs/ai-sdk-core/generating-structured-data)
+- [AI SDK `generateText` 参考](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text)
+- [OpenAI Compatible Provider](https://ai-sdk.dev/providers/openai-compatible-providers)
+- [npm `ai`](https://www.npmjs.com/package/ai)
+- [npm `@ai-sdk/openai-compatible`](https://www.npmjs.com/package/@ai-sdk/openai-compatible)
+
+2026-08-14 核对的当前版本为 `ai@7.0.65`、`@ai-sdk/openai-compatible@3.0.30`，Node 要求为 22+，许可证均为 Apache-2.0。AI SDK 7 的推荐结构化输出接口是：
+
+```ts
+const result = await generateText({
+  model: provider(modelKey),
+  output: Output.object({ schema: EditProposalDraftSchema }),
+  maxRetries: 0,
+});
+```
+
+关键实现结论：
+
+1. 使用 `Output.object` 在 Provider 边界校验 Zod Schema，领域层仍要二次检查素材白名单、时间码和分镜归属；
+2. `createOpenAICompatible` 的 `supportsStructuredOutputs: true` 会发送 `response_format.type=json_schema`；模型/网关不支持时必须显式降级，不能吞掉 Schema 错误；
+3. APIMart 在请求体省略 `stream` 时实测返回 `text/event-stream`，而 AI SDK 的 `generateText` 非流式路径期待一个 JSON 响应；适配器必须通过官方 `transformRequestBody` 补 `stream:false`；
+4. 付费模型请求设置 `maxRetries: 0`，避免 SDK 在未知提交状态下重复计费；重试由本地 Job/审批合同拥有；
+5. APIMart Base URL 在 AI SDK 中必须包含 `/v1`，而现有 HTTP adapter 保存根地址并自己拼接 `/v1/chat/completions`，两者不能混用。
 
 ## 3. 统一 Provider 合同（实施建议）
 
@@ -145,17 +198,29 @@ ProviderRequestReceipt → Job → Evidence/Artifact → CostReport
 
 ```bash
 PROVIDER_LIVE_TESTS=1 npm run test:providers:live
+
+# 额外执行 1 次低粉榜、最多 2 条（先由默认 smoke 打印动态价格）
+PROVIDER_LIVE_TESTS=1 PROVIDER_DISCOVERY_SMOKE=1 npm run test:providers:live
+
+# 额外执行账号样例 + APIMart 最小文本请求
+PROVIDER_LIVE_TESTS=1 PROVIDER_BILLED_SMOKE=1 npm run test:providers:live
+
+# 只执行 1 次 AI SDK 结构化剪辑提案
+AGENT_PROVIDER_LIVE=1 AI_EDIT_ADAPTER=ai-sdk npm run test:agent:live
 ```
 
-脚本：[scripts/provider-smoke.mjs](../scripts/provider-smoke.mjs)。默认只运行无生成任务的健康/凭证/模型目录检查；只有显式设置 `PROVIDER_BILLED_SMOKE=1` 才运行一条账号资料和一条最小文本请求。
+脚本：[scripts/provider-smoke.mjs](../scripts/provider-smoke.mjs)。默认只运行无生成任务的健康/凭证/动态价格/模型目录检查；只有显式设置 `PROVIDER_DISCOVERY_SMOKE=1` 才运行一条低粉榜请求，只有显式设置 `PROVIDER_BILLED_SMOKE=1` 才运行一条账号资料和一条最小文本请求。AI SDK 提案使用独立的 [scripts/agent-proposal-smoke.mjs](../scripts/agent-proposal-smoke.mjs)，避免普通 Provider 检查误触模型计费。
 
 本次实际运行：
 
 - TikHub health：HTTP 200，`status=ok`；
 - TikHub credential：HTTP 200，返回账户数据（没有打印余额、邮箱、key 名或原始响应）；
 - APIMart model list：HTTP 200，返回 285 个模型；扩展字段没有出现在首层，适配器必须做 capability fallback；
-- 未运行 TikHub 搜索、批量高清下载、星图画像、图片/视频生成、语音生成；
-- APIMart 最小文本 smoke 只回复 `OK`，使用低成本模型、`max_tokens=128`、`reasoning_effort=minimal`，未保存原始响应。
+- TikHub 动态端点价格：读取了账号作品、榜单、搜索、指数和星图候选端点；价格元数据端点为 `$0`，没有打印账户余额或原始响应；
+- TikHub 低粉爆款、高完播、搜索热榜各做小样本，因诊断嵌套字段又补了低粉榜/搜索榜各 1 次，共 5 个 `$0.001` 榜单请求，预计 `$0.005`；每次最多 2 条，只输出字段结构和数量；
+- APIMart AI SDK 首次请求因网关默认 SSE 失败；随后做 1 条直接 `json_schema` 诊断、1 条原 HTTP adapter 对照、1 条修复后的 AI SDK 提案，共 4 个小文本请求；最终 AI SDK 返回 1 个合法操作、0 个素材缺口，且只使用确认素材；
+- 未运行 TikHub 批量下载、星图画像、评论抓取，未运行 APIMart 图片/视频/语音生成；
+- 所有 SDK mock 都设置 `maxRetries: 0`；真实响应正文、密钥、余额和用户账户字段均未写入仓库或日志。
 
 本地 `.env` 仅用于当前机器联调，已被 `.gitignore` 忽略；仓库只提交 `.env.example` 和本文件，不提交任何 key。
 
@@ -217,11 +282,9 @@ scriptBlockId / shotId
 
 ## 8. 下一步实现顺序
 
-1. `packages/providers` 建立 `ProviderPort`、`ResearchConnector`、能力/错误/成本合同和 mock fixtures；
-2. Electron main 增加凭证状态和余额查询（只返回非敏感字段）；
-3. TikHub connector 先做 URL resolver → profile → posts metadata；
-4. 账号研究 UI 做“预算/范围/证据/取消”四个显式状态；
-5. APIMart connector 先做 model catalog + chat structured proposal；
-6. 只有 V4 RenderIR golden 通过后，才让 AI 生成 `EditProposal`；
-7. ASR/OCR/视觉模型以本地 baseline 为主，APIMart Whisper 作为可选 fallback；
-8. 任何付费图片/视频任务都必须另开审批和成本门，不能从普通“生成拍摄示意图”按钮静默触发。
+1. 已完成：`ProviderPort`、账号 `ResearchConnector`、动态价格读取、榜单/搜索 discovery adapter、AI SDK 结构化 `EditProposalDraft` 和 mock fixtures；
+2. 下一步：设置页增加凭证状态、动态价格和今日预算（只返回非敏感字段）；
+3. 下一步：把低粉爆款/高完播/搜索热榜接成独立“选题雷达”，每次调用前展示范围和价格，不混入默认账号分析；
+4. 账号研究 UI 补“预算/范围/证据/取消”四个显式状态，并让用户从 20 条 metadata 中选 3–5 条做本地深度拆解；
+5. ASR/OCR/视觉模型继续以本地 baseline 为主，APIMart Whisper 仅作用户选择的 fallback；
+6. 任何付费图片/视频任务都必须另开审批和成本门，不能从普通“生成拍摄示意图”按钮静默触发。

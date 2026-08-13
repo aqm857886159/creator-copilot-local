@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { materializeEditProposalDraft } from "./index";
+import { AiSdkStructuredGenerator } from "../../providers/src/index";
+import { AiSdkEditAgentRuntime, materializeEditProposalDraft } from "./index";
 
 const now = "2026-08-14T00:00:00.000Z";
 const script = { schemaVersion: 1 as const, id: "script-1", projectId: "project-1", revision: 1, status: "approved" as const, blocks: [{ schemaVersion: 1 as const, id: "block-1", order: 0, kind: "claim" as const, text: "观点文本", emphasis: [], evidenceIds: [], visualNeed: "support" as const }], estimatedDurationMs: 2_000, createdAt: now, updatedAt: now };
@@ -22,5 +23,21 @@ describe("agent edit proposal runtime", () => {
   it("reports an unselected Take as a visible material gap", () => {
     const result = materializeEditProposalDraft({ ...input, takesByTask: { "task-1": [{ ...take, status: "candidate" as const }] } }, { schemaVersion: 1, operations: [], subtitles: [], missingMaterial: [] });
     expect(result).toMatchObject({ status: "needs_material", missing: [{ shotId: "shot-1", reason: "take_not_selected" }] });
+  });
+
+  it("turns an AI SDK draft into a reviewable proposal without bypassing material locks", async () => {
+    const fetcher: typeof fetch = async () => new Response(JSON.stringify({
+      id: "response-edit-proposal",
+      model: "model-structured",
+      choices: [{ index: 0, message: { role: "assistant", content: JSON.stringify({ schemaVersion: 1, operations: [{ shotId: "shot-1", sourceAssetId: "asset-1", sourceSegment: { startMs: 0, endMs: 1_800 }, role: "a_roll", reason: "保留观点的完整表达", evidenceIds: ["shot-1"], confidence: 0.95 }], subtitles: [{ shotId: "shot-1", text: "观点文本" }], missingMaterial: [] }) }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 20, completion_tokens: 20, total_tokens: 40 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const generator = new AiSdkStructuredGenerator({ apiKey: "secret-test-key", baseUrl: "https://api.example.test/v1", fetcher });
+    const runtime = new AiSdkEditAgentRuntime(generator, "model-structured");
+    await expect(runtime.proposeEdit(input)).resolves.toMatchObject({
+      status: "ready",
+      provider: { providerKey: "apimart", modelKey: "model-structured" },
+      proposal: { operations: [{ sourceAssetId: "asset-1", timeline: { startMs: 0, endMs: 1_800 } }] },
+    });
   });
 });

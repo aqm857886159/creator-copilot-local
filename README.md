@@ -17,6 +17,8 @@ npm run dev:web
 npm run dev:desktop
 ```
 
+云端能力默认关闭。将 `.env.example` 复制为本地 `.env` 后可配置 TikHub/APIMart；密钥只由 Electron main 和受控联调脚本读取。`AI_EDIT_PROVIDER=apimart` 会启用 AI SDK 结构化剪辑提案，`AI_EDIT_PROVIDER=local-fallback` 保持完全离线。
+
 ## 文档入口
 
 - [PRD](docs/PRD-v0.2-Workflow-and-Scope.md)
@@ -24,6 +26,7 @@ npm run dev:desktop
 - [用户旅途坏路径测试](docs/User-Journey-Failure-Test-Cases-v0.1.md)
 - [Agent 技术栈 CTO 评审](docs/Agent-Stack-CTO-Review-v0.1.md)
 - [数据库选型 ADR](docs/Database-Decision-ADR-v0.1.md)
+- [Provider 官方接入与小额联调记录](docs/Provider-Official-Integration-Research-v0.1.md)
 
 ## 验证
 

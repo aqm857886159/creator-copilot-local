@@ -9,7 +9,7 @@ import {
   type RenderAsset,
 } from "../../exchange/src/index.js";
 import { ScriptSchema, ShootTaskSchema, StoryboardSchema, TakeSchema, type Script, type ShootTask, type Storyboard, type Take } from "../../creation/src/index.js";
-import { ProviderChatResultSchema, type ProviderPort } from "../../providers/src/index.js";
+import { AiSdkStructuredGenerator, ProviderChatResultSchema, type ProviderPort } from "../../providers/src/index.js";
 
 const id = z.string().min(1);
 
@@ -187,6 +187,40 @@ export class ProviderEditAgentRuntime implements AgentRuntimePort {
       throw new AgentProposalError("provider_output", error instanceof Error ? error.message : "Provider 提案请求失败");
     }
     return draftToProposal(input, parseJsonOutput(response.text), { providerKey: response.providerKey, modelKey: response.modelKey, responseHash: response.responseHash });
+  }
+}
+
+/**
+ * AI SDK-backed edit proposer. The model only produces the typed draft; the
+ * existing draftToProposal() function remains the authority for material
+ * locks, timecode bounds, missing-material decisions and timeline ordering.
+ */
+export class AiSdkEditAgentRuntime implements AgentRuntimePort {
+  constructor(private readonly generator: AiSdkStructuredGenerator, private readonly modelKey: string) {}
+
+  async proposeEdit(input: EditProposalAgentInput) {
+    const prompt = promptForEditProposal(input);
+    let result;
+    try {
+      result = await this.generator.generate({
+        modelKey: this.modelKey,
+        system: prompt.system,
+        prompt: prompt.user,
+        schema: EditProposalDraftSchema,
+        name: "EditProposalDraft",
+        description: "只能引用确认素材、分镜和脚本的 AI 粗剪提案草稿",
+        maxOutputTokens: 2_500,
+        temperature: 0.2,
+        timeoutMs: 90_000,
+      });
+    } catch (error) {
+      throw new AgentProposalError("provider_output", error instanceof Error ? error.message.slice(0, 500) : "AI SDK 提案请求失败");
+    }
+    return draftToProposal(input, result.output, {
+      providerKey: this.generator.providerKey,
+      modelKey: result.responseModelId,
+      responseHash: result.responseHash,
+    });
   }
 }
 

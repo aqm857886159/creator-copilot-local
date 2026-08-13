@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
+export * from "./ai-sdk.js";
+
 const id = z.string().min(1);
 
 export const ProviderErrorCategorySchema = z.enum(["invalid", "auth", "quota", "rate_limit", "timeout", "provider", "network", "capability"]);
@@ -111,6 +113,55 @@ export type TikHubVideoDownload = {
   url: string;
   requestId?: string;
   responseHash: string;
+};
+
+export type TikHubEndpointInfo = {
+  endpoint: string;
+  costUsd: number;
+  allowFreeCredit: boolean;
+  allowDiscount: boolean;
+  rateLimit?: string;
+  endpointType?: string;
+};
+
+export type TikHubBillboardKind = "low_fan" | "high_completion";
+
+export type TikHubBillboardPost = {
+  awemeId: string;
+  title?: string;
+  coverUrl?: string;
+  durationValue?: number;
+  nickname?: string;
+  followerCount?: number;
+  playCount?: number;
+  publishedAt?: string;
+  score?: number;
+  shareUrl?: string;
+  likeCount?: number;
+  followCount?: number;
+  followRate?: number;
+  likeRate?: number;
+  mediaType?: number;
+  imageCount?: number;
+  raw: Record<string, unknown>;
+};
+
+export type TikHubBillboardPage = {
+  providerKey: "tikhub";
+  kind: TikHubBillboardKind;
+  fetchedAt: string;
+  page: number;
+  pageSize: number;
+  total: number;
+  items: TikHubBillboardPost[];
+  responseHash: string;
+};
+
+export type TikHubSearchTrend = {
+  keyword: string;
+  score?: number;
+  trends: Array<{ date: string; value: number }>;
+  raw: Record<string, unknown>;
 };
 
 export interface ResearchConnector {
@@ -253,6 +304,25 @@ function dataPayload(body: Record<string, unknown>) {
   return typeof body.data === "object" && body.data !== null ? body.data as Record<string, unknown> : body;
 }
 
+function assertTikHubSuccess(result: { response: Response; body: Record<string, unknown> }) {
+  const candidates = [result.body, dataPayload(result.body)];
+  for (const body of candidates) {
+    const code = typeof body.code === "number" ? body.code : undefined;
+    if (code === undefined || code === 0 || code === 200) continue;
+    const category: ProviderErrorCategory = code === 401 || code === 403 ? "auth" : code === 402 ? "quota" : code === 429 ? "rate_limit" : "provider";
+    throw new ProviderRequestError(ProviderErrorSchema.parse({
+      schemaVersion: 1,
+      providerKey: "tikhub",
+      category,
+      code: String(code),
+      message: typeof body.message === "string" ? body.message.slice(0, 500) : "TikHub 返回业务错误",
+      retryable: category === "rate_limit" || code >= 500,
+      httpStatus: result.response.status,
+      requestId: responseRequestId(result.body, result.response),
+    }));
+  }
+}
+
 function firstString(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) if (typeof record[key] === "string" && record[key]) return record[key] as string;
   return undefined;
@@ -268,7 +338,105 @@ export class TikHubDouyinConnector implements ResearchConnector {
   private async get(path: string, params: Record<string, string | number>) {
     const url = new URL(path, this.baseUrl);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
-    return fetchJson(this.providerKey, this.baseUrl, `${url.pathname}${url.search}`, { headers: bearer(this.options.apiKey) }, 30_000, this.fetcher);
+    const result = await fetchJson(this.providerKey, this.baseUrl, `${url.pathname}${url.search}`, { headers: bearer(this.options.apiKey) }, 30_000, this.fetcher);
+    assertTikHubSuccess(result);
+    return result;
+  }
+  private async post(path: string, body: Record<string, unknown>) {
+    const result = await fetchJson(this.providerKey, this.baseUrl, path, { method: "POST", headers: { ...bearer(this.options.apiKey), "Content-Type": "application/json" }, body: JSON.stringify(body) }, 30_000, this.fetcher);
+    assertTikHubSuccess(result);
+    return result;
+  }
+
+  async getEndpointInfo(endpoint: string): Promise<TikHubEndpointInfo> {
+    const normalizedEndpoint = z.string().min(1).max(500).regex(/^\/api\//).parse(endpoint);
+    const url = new URL("/api/v1/tikhub/user/get_endpoint_info", this.baseUrl);
+    url.searchParams.set("endpoint", normalizedEndpoint);
+    const result = await fetchJson(this.providerKey, this.baseUrl, `${url.pathname}${url.search}`, {}, 30_000, this.fetcher);
+    assertTikHubSuccess(result);
+    const data = dataPayload(result.body);
+    return {
+      endpoint: firstString(data, ["endpoint_uri", "endpoint"]) ?? normalizedEndpoint,
+      costUsd: typeof data.endpoint_cost === "number" ? data.endpoint_cost : 0,
+      allowFreeCredit: data.allow_free_credit === true,
+      allowDiscount: data.allow_discount === true,
+      rateLimit: firstString(data, ["rate_limit"]),
+      endpointType: firstString(data, ["endpoint_type"]),
+    };
+  }
+
+  async fetchBillboardPosts(input: { kind: TikHubBillboardKind; page?: number; pageSize?: number; dateWindow?: 1 | 24 | 72 | 168; keyword?: string; tags?: Array<{ value: number; children?: Array<{ value: number }> }> }): Promise<TikHubBillboardPage> {
+    const parsed = z.object({
+      kind: z.enum(["low_fan", "high_completion"]),
+      page: z.number().int().positive().max(100).default(1),
+      pageSize: z.number().int().positive().max(20).default(10),
+      dateWindow: z.union([z.literal(1), z.literal(24), z.literal(72), z.literal(168)]).default(24),
+      keyword: z.string().max(100).default(""),
+      tags: z.array(z.object({ value: z.number().int().nonnegative(), children: z.array(z.object({ value: z.number().int().nonnegative() }).strict()).max(30).optional() }).strict()).max(10).default([]),
+    }).strict().parse(input);
+    const path = parsed.kind === "low_fan" ? "/api/v1/douyin/billboard/fetch_hot_total_low_fan_list" : "/api/v1/douyin/billboard/fetch_hot_total_high_play_list";
+    const result = await this.post(path, { page: parsed.page, page_size: parsed.pageSize, date_window: parsed.dateWindow, keyword: parsed.keyword, tags: parsed.tags });
+    const outer = dataPayload(result.body);
+    const data = dataPayload(outer);
+    const page = typeof data.page === "object" && data.page ? data.page as Record<string, unknown> : {};
+    const rawItems = Array.isArray(data.objs) ? data.objs : [];
+    const items = rawItems.flatMap((item): TikHubBillboardPost[] => {
+      if (!item || typeof item !== "object") return [];
+      const raw = item as Record<string, unknown>;
+      const awemeId = firstString(raw, ["item_id", "aweme_id", "id"]);
+      if (!awemeId) return [];
+      return [{
+        awemeId,
+        title: firstString(raw, ["item_title", "title", "desc"]),
+        coverUrl: firstString(raw, ["item_cover_url", "cover_url"]),
+        durationValue: typeof raw.item_duration === "number" ? raw.item_duration : undefined,
+        nickname: firstString(raw, ["nick_name", "nickname"]),
+        followerCount: typeof raw.fans_cnt === "number" ? raw.fans_cnt : undefined,
+        playCount: typeof raw.play_cnt === "number" ? raw.play_cnt : undefined,
+        publishedAt: typeof raw.publish_time === "number" ? new Date(raw.publish_time * 1000).toISOString() : undefined,
+        score: typeof raw.score === "number" ? raw.score : undefined,
+        shareUrl: firstString(raw, ["item_url", "share_url"]),
+        likeCount: typeof raw.like_cnt === "number" ? raw.like_cnt : undefined,
+        followCount: typeof raw.follow_cnt === "number" ? raw.follow_cnt : undefined,
+        followRate: typeof raw.follow_rate === "number" ? raw.follow_rate : undefined,
+        likeRate: typeof raw.like_rate === "number" ? raw.like_rate : undefined,
+        mediaType: typeof raw.media_type === "number" ? raw.media_type : undefined,
+        imageCount: typeof raw.image_cnt === "number" ? raw.image_cnt : undefined,
+        raw,
+      }];
+    });
+    return {
+      providerKey: this.providerKey,
+      kind: parsed.kind,
+      fetchedAt: new Date().toISOString(),
+      page: typeof page.page === "number" ? page.page : parsed.page,
+      pageSize: typeof page.page_size === "number" ? page.page_size : parsed.pageSize,
+      total: typeof page.total === "number" ? page.total : items.length,
+      items,
+      responseHash: hashResponse(result.body),
+    };
+  }
+
+  async fetchSearchHotList(input: { page?: number; pageSize?: number; dateWindow?: 1 | 24 | 72 | 168; keyword?: string }) {
+    const parsed = z.object({ page: z.number().int().positive().max(100).default(1), pageSize: z.number().int().positive().max(20).default(10), dateWindow: z.union([z.literal(1), z.literal(24), z.literal(72), z.literal(168)]).default(24), keyword: z.string().max(100).default("") }).strict().parse(input);
+    const result = await this.post("/api/v1/douyin/billboard/fetch_hot_total_search_list", { page_num: parsed.page, page_size: parsed.pageSize, date_window: parsed.dateWindow, keyword: parsed.keyword });
+    const outer = dataPayload(result.body);
+    const data = dataPayload(outer);
+    const rawItems = Array.isArray(data.search_list) ? data.search_list : [];
+    const items = rawItems.flatMap((item): TikHubSearchTrend[] => {
+      if (!item || typeof item !== "object") return [];
+      const raw = item as Record<string, unknown>;
+      const keyword = firstString(raw, ["key_word", "keyword"]);
+      if (!keyword) return [];
+      const rawTrends = Array.isArray(raw.trends) ? raw.trends : [];
+      const trends = rawTrends.flatMap((trend) => {
+        if (!trend || typeof trend !== "object") return [];
+        const value = trend as Record<string, unknown>;
+        return typeof value.date === "string" && typeof value.value === "number" ? [{ date: value.date, value: value.value }] : [];
+      });
+      return [{ keyword, score: typeof raw.search_score === "number" ? raw.search_score : undefined, trends, raw }];
+    });
+    return { providerKey: this.providerKey, fetchedAt: new Date().toISOString(), page: typeof data.page_num === "number" ? data.page_num : parsed.page, pageSize: typeof data.page_size === "number" ? data.page_size : parsed.pageSize, total: typeof data.total_count === "number" ? data.total_count : items.length, items, responseHash: hashResponse(result.body) };
   }
 
   async resolveSecUserId(urlOrId: string) {
