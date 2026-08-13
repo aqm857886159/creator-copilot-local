@@ -1,11 +1,17 @@
 const { parentPort } = process;
+const { existsSync } = require("node:fs");
 const path = require("node:path");
 
 let runtimePromise;
 
 async function getRuntime() {
   if (!runtimePromise) {
-    const runtimeRoot = path.join(__dirname, "..", "dist-electron", "packages");
+    const candidateRoots = [
+      path.join(__dirname, "..", "dist-electron", "packages"),
+      path.join(process.resourcesPath ?? "", "app.asar", "dist-electron", "packages"),
+    ];
+    const runtimeRoot = candidateRoots.find((candidate) => existsSync(candidate));
+    if (!runtimeRoot) throw new Error("analysis worker 找不到 dist-electron runtime");
     runtimePromise = Promise.all([
       import(require("node:url").pathToFileURL(path.join(runtimeRoot, "media", "src", "index.js")).href),
       import(require("node:url").pathToFileURL(path.join(runtimeRoot, "analysis", "src", "index.js")).href),

@@ -76,9 +76,14 @@ function getTikHubConnector(runtime) {
   return new runtime.providers.TikHubDouyinConnector({ apiKey: process.env.TIKHUB_API_KEY, baseUrl: process.env.TIKHUB_BASE_URL ?? "https://api.tikhub.dev" });
 }
 
+function analysisWorkerScriptPath() {
+  const unpacked = path.join(process.resourcesPath, "app.asar.unpacked", "electron", "analysis-worker.cjs");
+  return app.isPackaged && existsSync(unpacked) ? unpacked : path.join(__dirname, "analysis-worker.cjs");
+}
+
 function runAnalysisWorker(payload) {
   if (!utilityProcess || typeof utilityProcess.fork !== "function") throw new Error("当前 Electron 不支持 utility process");
-  const workerPath = path.join(__dirname, "analysis-worker.cjs");
+  const workerPath = analysisWorkerScriptPath();
   return new Promise((resolve, reject) => {
     const requestId = randomUUID();
     const worker = utilityProcess.fork(workerPath);
