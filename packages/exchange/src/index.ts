@@ -5,6 +5,7 @@ import { isAbsolute, dirname, extname, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util";
 import { z } from "zod";
 import { stableStringify } from "../../contracts/src/index.js";
+import { ScriptSchema, ShootTaskSchema, StoryboardSchema, TakeSchema, type Script, type ShootTask, type Storyboard, type Take } from "../../creation/src/index.js";
 
 const execFile = promisify(execFileCallback);
 const id = z.string().min(1);
@@ -166,6 +167,74 @@ export type RenderAsset = {
   hasVideo?: boolean;
   hasAudio?: boolean;
 };
+
+export type CaptureAssetFact = {
+  contentHash: string;
+  durationMs?: number;
+};
+
+export type EditProposalMissingMaterial = {
+  shotId: string;
+  taskId?: string;
+  reason: "take_not_selected" | "asset_fact_missing";
+  instruction: string;
+};
+
+/**
+ * A local, auditable fallback proposer. It turns the user's selected Takes into
+ * the same EditProposal contract that a model-backed proposer will use later.
+ * It never invents an asset: missing or unselected material is returned as a
+ * visible gap instead of being silently replaced.
+ */
+export function proposeEditFromCapture(input: {
+  projectId: string;
+  script: Script;
+  storyboard: Storyboard;
+  tasks: ShootTask[];
+  takesByTask: Record<string, Take[]>;
+  assetFacts: Record<string, CaptureAssetFact>;
+  now: string;
+}) {
+  const script = ScriptSchema.parse(input.script);
+  const storyboard = StoryboardSchema.parse(input.storyboard);
+  const tasks = input.tasks.map((task) => ShootTaskSchema.parse(task));
+  const taskByShot = new Map(tasks.map((task) => [task.shotId, task]));
+  const blockById = new Map(script.blocks.map((block) => [block.id, block]));
+  const missing: EditProposalMissingMaterial[] = [];
+  let cursorMs = 0;
+  const operations: ProposalOperation[] = [];
+  const subtitles: SubtitleClip[] = [];
+  const assetLocks = new Map<string, { assetId: string; contentHash: string }>();
+  for (const shot of [...storyboard.shots].sort((left, right) => left.order - right.order)) {
+    const task = taskByShot.get(shot.id);
+    const selectedTake = task ? input.takesByTask[task.id]?.map((take) => TakeSchema.parse(take)).find((take) => take.status === "selected") : undefined;
+    if (!task || !selectedTake) {
+      missing.push({ shotId: shot.id, taskId: task?.id, reason: "take_not_selected", instruction: task?.instruction ?? shot.actionDescription });
+      continue;
+    }
+    const assetFact = input.assetFacts[selectedTake.assetId];
+    if (!assetFact) {
+      missing.push({ shotId: shot.id, taskId: task.id, reason: "asset_fact_missing", instruction: "素材事实尚未准备好，请重新导入或等待素材分析完成" });
+      continue;
+    }
+    const availableMs = assetFact.durationMs ?? selectedTake.durationMs ?? shot.targetMs;
+    const durationMs = Math.min(shot.targetMs, availableMs);
+    if (durationMs <= 0) {
+      missing.push({ shotId: shot.id, taskId: task.id, reason: "asset_fact_missing", instruction: "素材没有有效时长" });
+      continue;
+    }
+    const sourceAssetId = selectedTake.assetId;
+    assetLocks.set(sourceAssetId, { assetId: sourceAssetId, contentHash: assetFact.contentHash });
+    const role: SourceClip["role"] = shot.mode === "talking_head" ? "a_roll" : shot.mode === "broll" ? "b_roll" : shot.mode === "screen_recording" ? "screen" : shot.mode === "still" ? "still" : "generated";
+    operations.push({ id: `proposal-op-${shot.id}`, sourceAssetId, sourceSegment: { startMs: 0, endMs: durationMs }, timeline: { startMs: cursorMs, endMs: cursorMs + durationMs }, role, reason: shot.actionDescription, evidenceIds: [shot.id, task.id], confidence: selectedTake.status === "selected" ? 0.86 : 0.6, status: "suggested" });
+    const text = shot.scriptBlockIds.map((blockId) => blockById.get(blockId)?.text).filter((value): value is string => Boolean(value)).join(" ").trim();
+    if (text) subtitles.push({ id: `subtitle-${shot.id}`, timeline: { startMs: cursorMs, endMs: cursorMs + durationMs }, text });
+    cursorMs += durationMs;
+  }
+  if (missing.length > 0) return { status: "needs_material" as const, missing };
+  const proposal = EditProposalSchema.parse({ schemaVersion: 1, id: `proposal-${input.projectId}-${Date.now()}`, projectId: input.projectId, basedOn: { scriptRevision: script.revision, storyboardRevision: storyboard.revision }, durationMs: cursorMs, operations, subtitles, outputProfile: DEFAULT_VERTICAL_PROFILE, rationale: operations.map((operation) => ({ operationId: operation.id, reason: operation.reason, confidence: operation.confidence })), status: "previewed", createdAt: input.now, updatedAt: input.now });
+  return { status: "ready" as const, missing: [], proposal, assetLocks: [...assetLocks.values()].sort((left, right) => left.assetId.localeCompare(right.assetId)) };
+}
 
 function sha256Text(value: unknown) {
   return `sha256:${createHash("sha256").update(stableStringify(value)).digest("hex")}`;

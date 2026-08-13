@@ -13,7 +13,7 @@ const initialShots: CaptureWorkflowInput["shots"] = [
   { scriptBlockIndex: 2, purpose: "prove", mode: "broll", framing: "detail", cameraDirection: "手机俯拍，缓慢横移。", actionDescription: "拍桌面上带有圈画和修改痕迹的草稿。", targetMs: 3_000, sourceRequirement: "shoot_task" },
 ];
 
-export function CreationWorkbench({ workspaceReady, chooseWorkspace }: { workspaceReady: boolean; chooseWorkspace: () => Promise<void> }) {
+export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowReady, openEdit }: { workspaceReady: boolean; chooseWorkspace: () => Promise<void>; onWorkflowReady: (workflow: CaptureWorkflowResult) => void; openEdit: () => void }) {
   const [projectTitle, setProjectTitle] = useState("表达为什么需要画面变化");
   const [blocks, setBlocks] = useState(initialBlocks);
   const [shots, setShots] = useState(initialShots);
@@ -44,6 +44,7 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace }: { workspa
     try {
       const result = await desktop.createCaptureWorkflow({ projectTitle, blocks, shots });
       setWorkflow(result);
+      onWorkflowReady(result);
       if (!result.ok) setMessage(result.message ?? "拍摄包生成失败");
     } finally {
       setBusy(false);
@@ -100,7 +101,7 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace }: { workspa
       <div className="creation-actions"><button className="secondary-button" onClick={addBlockAndShot}><Plus size={16} /> 添加段落与镜头</button><button className="primary-button" disabled={!workspaceReady || busy} onClick={exportWorkflow}><Camera size={16} /> {busy ? "处理中…" : "生成并导出拍摄包"}</button></div>
       {message && <div className="creation-message error">{message}</div>}
 
-      {workflow?.ok && workflow.tasks && <section className="capture-result" aria-live="polite"><div className="capture-result-heading"><div><div className="eyebrow">CAPTURE PACKAGE READY</div><h2>逐镜头拍摄清单</h2></div>{workflow.capturePackage && <button className="secondary-button" onClick={() => window.desktop?.openWorkspaceFile(workflow.capturePackage!.relativePath)}><ExternalLink size={15} /> 手机/浏览器查看</button>}</div><div className="capture-task-list">{workflow.tasks.map((task, index) => <article className="capture-task" key={task.id}><div className="task-number">{String(index + 1).padStart(2, "0")}</div><div className="capture-task-main"><div className="capture-task-title"><strong>{task.title}</strong><span>{Math.round(task.targetMs / 100) / 10} 秒</span></div><p>{task.instruction}</p><div className="take-list">{(takesByTask[task.id] ?? []).map((take, takeIndex) => <button className={`take-chip ${take.status === "selected" ? "selected" : ""}`} key={take.id} onClick={() => chooseTake(task.id, take.id)} aria-pressed={take.status === "selected"}>{take.status === "selected" ? <Check size={13} /> : null}Take {takeIndex + 1}</button>)}<button className="take-import" disabled={busy} onClick={() => importTake(task.id)}><Upload size={13} /> 导入 Take</button></div></div></article>)}</div></section>}
+      {workflow?.ok && workflow.tasks && <section className="capture-result" aria-live="polite"><div className="capture-result-heading"><div><div className="eyebrow">CAPTURE PACKAGE READY</div><h2>逐镜头拍摄清单</h2></div><div className="capture-result-actions">{workflow.capturePackage && <button className="secondary-button" onClick={() => window.desktop?.openWorkspaceFile(workflow.capturePackage!.relativePath)}><ExternalLink size={15} /> 手机/浏览器查看</button>}<button className="primary-button" onClick={openEdit}><Camera size={15} /> 进入 AI 粗剪</button></div></div><div className="capture-task-list">{workflow.tasks.map((task, index) => <article className="capture-task" key={task.id}><div className="task-number">{String(index + 1).padStart(2, "0")}</div><div className="capture-task-main"><div className="capture-task-title"><strong>{task.title}</strong><span>{Math.round(task.targetMs / 100) / 10} 秒</span></div><p>{task.instruction}</p><div className="take-list">{(takesByTask[task.id] ?? []).map((take, takeIndex) => <button className={`take-chip ${take.status === "selected" ? "selected" : ""}`} key={take.id} onClick={() => chooseTake(task.id, take.id)} aria-pressed={take.status === "selected"}>{take.status === "selected" ? <Check size={13} /> : null}Take {takeIndex + 1}</button>)}<button className="take-import" disabled={busy} onClick={() => importTake(task.id)}><Upload size={13} /> 导入 Take</button></div></div></article>)}</div></section>}
     </section>
   );
 }

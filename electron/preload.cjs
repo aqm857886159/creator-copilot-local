@@ -7,5 +7,7 @@ contextBridge.exposeInMainWorld("desktop", {
   createCaptureWorkflow: (input) => ipcRenderer.invoke("desktop:create-capture-workflow", input),
   importTake: (shootTaskId) => ipcRenderer.invoke("desktop:import-take", shootTaskId),
   selectTake: (input) => ipcRenderer.invoke("desktop:select-take", input),
+  proposeEdit: (projectId) => ipcRenderer.invoke("desktop:propose-edit", projectId),
+  renderEdit: (input) => ipcRenderer.invoke("desktop:render-edit", input),
   openWorkspaceFile: (relativePath) => ipcRenderer.invoke("desktop:open-workspace-file", relativePath),
 });

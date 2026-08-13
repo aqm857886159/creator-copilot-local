@@ -16,8 +16,9 @@ async function getDesktopRuntime() {
     desktopRuntimePromise = Promise.all([
       import(pathToFileURL(path.join(runtimeRoot, "media", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "creation", "src", "index.js")).href),
+      import(pathToFileURL(path.join(runtimeRoot, "exchange", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "storage", "src", "catalog.js")).href),
-    ]).then(([media, creation, storage]) => ({ media, creation, storage, mediaImporter: new media.LocalMediaImporter() }));
+    ]).then(([media, creation, exchange, storage]) => ({ media, creation, exchange, storage, mediaImporter: new media.LocalMediaImporter() }));
   }
   return desktopRuntimePromise;
 }
@@ -168,10 +169,71 @@ ipcMain.handle("desktop:create-capture-workflow", async (_event, raw) => {
     const tasks = runtime.creation.createShootTasks(storyboard, now);
     const capturePackageDraft = runtime.creation.CapturePackageSchema.parse({ schemaVersion: 1, id: capturePackageId, projectId, storyboardRevision: storyboard.revision, format: "html", relativePath: `capture-packages/${capturePackageId}/index.html`, taskIds: tasks.map((task) => task.id), status: "draft", createdAt: now, updatedAt: now });
     const capturePackage = await runtime.creation.exportCapturePackage({ workspaceRoot: workspace.workspacePath, projectTitle: raw.projectTitle.trim(), capturePackage: capturePackageDraft, storyboard, tasks });
-    workspace.catalog.saveCaptureWorkflow({ project: { id: projectId, workspaceId: workspace.workspaceId, title: raw.projectTitle.trim(), stage: "capture", revision: 1, payload: {}, createdAt: now, updatedAt: now }, script, storyboard, tasks, capturePackage });
+    workspace.catalog.saveCaptureWorkflow({ project: { id: projectId, workspaceId: workspace.workspaceId, title: raw.projectTitle.trim(), stage: "capture", revision: 1, payload: { scriptId, storyboardId, capturePackageId, taskIds: tasks.map((task) => task.id) }, createdAt: now, updatedAt: now }, script, storyboard, tasks, capturePackage });
     return { ok: true, projectId, script, storyboard, tasks, capturePackage };
   } catch (error) {
     return { ok: false, errorCode: "capture_workflow_failed", message: error instanceof Error ? error.message : "拍摄包生成失败" };
+  }
+});
+
+ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
+  try {
+    const workspace = requireWorkspace();
+    if (typeof projectId !== "string" || !projectId) throw new Error("项目 ID 无效");
+    const project = workspace.catalog.getProject(projectId);
+    if (!project || project.workspaceId !== workspace.workspaceId) throw new Error("项目不存在或不属于当前工作区");
+    const payload = project.payload;
+    const script = typeof payload.scriptId === "string" ? workspace.catalog.getScript(payload.scriptId) : undefined;
+    const storyboard = typeof payload.storyboardId === "string" ? workspace.catalog.getStoryboard(payload.storyboardId) : undefined;
+    const taskIds = Array.isArray(payload.taskIds) ? payload.taskIds.filter((taskId) => typeof taskId === "string") : [];
+    const tasks = taskIds.map((taskId) => workspace.catalog.getShootTask(taskId)).filter(Boolean);
+    if (!script || !storyboard || tasks.length === 0) throw new Error("项目还没有完整的脚本、分镜或拍摄任务");
+    const takesByTask = {};
+    const assetFacts = {};
+    for (const task of tasks) {
+      const takes = workspace.catalog.listTakes(task.id);
+      takesByTask[task.id] = takes;
+      for (const take of takes) {
+        const artifact = workspace.catalog.getArtifact(take.assetId);
+        if (artifact) assetFacts[take.assetId] = { contentHash: artifact.contentHash, durationMs: take.durationMs };
+      }
+    }
+    const runtime = await getDesktopRuntime();
+    const result = runtime.exchange.proposeEditFromCapture({ projectId, script, storyboard, tasks, takesByTask, assetFacts, now: new Date().toISOString() });
+    return { ok: true, ...result, project: { id: project.id, title: project.title } };
+  } catch (error) {
+    return { ok: false, errorCode: "edit_proposal_failed", message: error instanceof Error ? error.message : "AI 剪辑提案生成失败" };
+  }
+});
+
+ipcMain.handle("desktop:render-edit", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.projectId !== "string" || !raw.proposal) throw new Error("剪辑提案参数无效");
+    const runtime = await getDesktopRuntime();
+    const proposal = runtime.exchange.EditProposalSchema.parse(raw.proposal);
+    const project = workspace.catalog.getProject(raw.projectId);
+    if (!project || project.workspaceId !== workspace.workspaceId) throw new Error("项目不存在或不属于当前工作区");
+    const payload = project.payload;
+    const taskIds = Array.isArray(payload.taskIds) ? payload.taskIds.filter((taskId) => typeof taskId === "string") : [];
+    const takes = taskIds.flatMap((taskId) => workspace.catalog.listTakes(taskId));
+    const takeByAssetId = new Map(takes.map((take) => [take.assetId, take]));
+    const assets = {};
+    for (const operation of proposal.operations.filter((operation) => operation.status !== "rejected")) {
+      const artifact = workspace.catalog.getArtifact(operation.sourceAssetId);
+      const take = takeByAssetId.get(operation.sourceAssetId);
+      if (!artifact || !take || !take.durationMs) throw new Error(`素材事实不完整：${operation.sourceAssetId}`);
+      const absolutePath = path.resolve(workspace.workspacePath, artifact.relativePath);
+      const probe = await new runtime.media.FfmpegToolchain().probe(absolutePath).catch(() => null);
+      assets[operation.sourceAssetId] = { assetId: operation.sourceAssetId, relativePath: artifact.relativePath, absolutePath, contentHash: artifact.contentHash, durationMs: take.durationMs, hasVideo: true, hasAudio: probe ? probe.streams.some((stream) => stream.kind === "audio") : true };
+    }
+    const renderId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
+    const assetLocks = Object.values(assets).map((asset) => ({ assetId: asset.assetId, contentHash: asset.contentHash }));
+    const frozen = runtime.exchange.freezeEditProposal({ proposal, assetLocks, now: new Date().toISOString() });
+    const result = await runtime.exchange.exportRenderPackage({ workspaceRoot: workspace.workspacePath, renderId, frozenEditSpec: frozen, assets });
+    return { ok: true, renderId, manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
+  } catch (error) {
+    return { ok: false, errorCode: "edit_render_failed", message: error instanceof Error ? error.message : "AI 剪辑导出失败" };
   }
 });
 

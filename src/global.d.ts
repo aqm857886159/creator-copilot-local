@@ -71,6 +71,48 @@ interface SelectTakeResult {
   takes?: CaptureTake[];
 }
 
+interface EditProposalOperation {
+  id: string;
+  sourceAssetId: string;
+  sourceSegment: { startMs: number; endMs: number };
+  timeline: { startMs: number; endMs: number };
+  role: "a_roll" | "b_roll" | "screen" | "generated" | "still";
+  reason: string;
+  evidenceIds: string[];
+  confidence: number;
+  status: "suggested" | "accepted" | "rejected";
+}
+
+interface EditProposal {
+  schemaVersion: 1;
+  id: string;
+  projectId: string;
+  durationMs: number;
+  operations: EditProposalOperation[];
+  subtitles: Array<{ id: string; timeline: { startMs: number; endMs: number }; text: string }>;
+  outputProfile: { container: string; videoCodec: string; width: number; height: number; fps: number; audioCodec: string; audioSampleRate: number; subtitle: string };
+  status: string;
+}
+
+interface EditProposalResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  status?: "ready" | "needs_material";
+  project?: { id: string; title: string };
+  missing?: Array<{ shotId: string; taskId?: string; reason: string; instruction: string }>;
+  proposal?: EditProposal;
+  assetLocks?: Array<{ assetId: string; contentHash: string }>;
+}
+
+interface EditRenderResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  renderId?: string;
+  files?: { video: string; subtitle: string | null; manifest: string };
+}
+
 interface Window {
   desktop?: {
     getInfo: () => Promise<DesktopInfo>;
@@ -79,6 +121,8 @@ interface Window {
     createCaptureWorkflow: (input: CaptureWorkflowInput) => Promise<CaptureWorkflowResult>;
     importTake: (shootTaskId: string) => Promise<ImportTakeResult>;
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;
+    proposeEdit: (projectId: string) => Promise<EditProposalResult>;
+    renderEdit: (input: { projectId: string; proposal: EditProposal }) => Promise<EditRenderResult>;
     openWorkspaceFile: (relativePath: string) => Promise<{ ok: boolean; message?: string }>;
   };
 }
