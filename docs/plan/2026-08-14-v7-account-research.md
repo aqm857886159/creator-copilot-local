@@ -28,9 +28,9 @@
 
 - `packages/research/src/index.ts`：`AccountResearchReport`、`ResearchEvidence`、`BenchmarkVideo` 合同和 metadata-first 报告构建器；所有外部 URL 只接受 `http/https`，不把临时 URL当本地资产。
 - `packages/storage/src/catalog.ts`：schema v6 的 `research_reports` 表及保存/读取/列表 API。
-- `electron/main.cjs`：`desktop:research-account`，凭证只在 main 进程读取，报告写入当前工作区 catalog。
-- `electron/main.cjs`：`desktop:download-research-media`，一次最多 5 条，逐条下载、导入、代理化、缩略图化；局部失败不回滚已成功素材。
-- `electron/main.cjs`：`desktop:analyze-research-media`，为每条作品创建或恢复 `media.analysis` Job，取得 lease 后由 `electron/analysis-worker.cjs` 执行 FFmpeg/ASR/OCR，main 只回写事实和 Job receipt；没有中文模型时保留 partial 状态，不伪造 ASR/OCR。
+- `apps/desktop/main.cjs`：`desktop:research-account`，凭证只在 main 进程读取，报告写入当前工作区 catalog。
+- `apps/desktop/main.cjs`：`desktop:download-research-media`，一次最多 5 条，逐条下载、导入、代理化、缩略图化；局部失败不回滚已成功素材。
+- `apps/desktop/main.cjs`：`desktop:analyze-research-media`，为每条作品创建或恢复 `media.analysis` Job，取得 lease 后由 `apps/desktop/analysis-worker.cjs` 执行 FFmpeg/ASR/OCR，main 只回写事实和 Job receipt；没有中文模型时保留 partial 状态，不伪造 ASR/OCR。
 - `packages/research/src/index.ts`：将选中作品的本地事实聚合成描述性账号模式（镜头数量/平均时长、ASR 段数、OCR 条数和开头样本），每条结论关联 `media_fact` evidence；它只描述样本，不把相关性说成因果。
 - `src/components/account-radar-workbench.tsx`：账号输入、10/20 条范围、覆盖状态、作品选择、显式本地化动作和证据缺口展示。
 - `packages/providers/src/index.ts`：TikHub `ResearchConnector`，将 provider 响应归一化为 profile/posts 页面。

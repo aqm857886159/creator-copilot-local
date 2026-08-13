@@ -17,7 +17,7 @@
 
 ### ASR：Faster-Whisper small
 
-输入是 e-cut 内部测试音频的脱敏/内部 fixture，不进入本仓库。使用 `HF_HUB_OFFLINE=1`、CPU、int8、中文语言和 word timestamp 模式，通过本项目的 `electron/sidecars/faster-whisper-sidecar.py` 运行。
+输入是 e-cut 内部测试音频的脱敏/内部 fixture，不进入本仓库。使用 `HF_HUB_OFFLINE=1`、CPU、int8、中文语言和 word timestamp 模式，通过本项目的 `apps/desktop/sidecars/faster-whisper-sidecar.py` 运行。
 
 观察结果：模型返回 8 段中文转写，时间码均为有界的秒值，示例：
 

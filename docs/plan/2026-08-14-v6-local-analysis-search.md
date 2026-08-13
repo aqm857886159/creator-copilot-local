@@ -10,7 +10,7 @@
 - ASR baseline：`WhisperCppTranscriber`，模型路径显式配置，默认语言 `zh`；
 - 可选 ASR sidecar：`FasterWhisperSidecarTranscriber`，复用内部 e-cut 已验证的 Python runtime 方向，但必须显式提供 Python、sidecar 和模型路径，不随桌面包偷偷下载或假装内置；
 - 镜头 baseline：`FfmpegSceneDetector`，读取 `showinfo` 时间点并生成有界的 `ShotFact/AnalysisFact`；它是粗切事实，不等于 TransNetV2 语义镜头理解；
-- OCR baseline：`AppleVisionOcr`，FFmpeg 抽帧后调用打包进 `electron/sidecars/apple-vision-ocr.swift` 的 Swift sidecar；非 macOS 或脚本不可用时保留明确缺口，跨平台 OCR 仍可替换为 RapidOCR/PaddleOCR；
+- OCR baseline：`AppleVisionOcr`，FFmpeg 抽帧后调用打包进 `apps/desktop/sidecars/apple-vision-ocr.swift` 的 Swift sidecar；非 macOS 或脚本不可用时保留明确缺口，跨平台 OCR 仍可替换为 RapidOCR/PaddleOCR；
 - 检索：SQLite FTS5 + 结构化 workspace/artifact 过滤，向量索引后置。
 
 这样素材导入、事实回流和搜索合同可以先被产品验证，不会因为 1.7B/7B 模型包、Python 环境或跨平台原生库矩阵阻塞主链路。
@@ -69,7 +69,7 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 本机真实 smoke（2026-08-14）：
 
 - `/opt/homebrew/bin/ffmpeg` 抽取 1 秒视频帧；
-- `swift electron/sidecars/apple-vision-ocr.swift` 返回测试画面文字、置信度和 bbox；
+- `swift apps/desktop/sidecars/apple-vision-ocr.swift` 返回测试画面文字、置信度和 bbox；
 - 这只证明 macOS runtime/脚本边界可运行，不代表中文口播字幕的识别率、花字去重或跨平台可用性已验收。
 - `scripts/analysis-quality-local-smoke.mjs` 已把 e-cut 内部获授权的 `source.mp4 + aligned.json` 接入本项目质量合同；默认 observational，不把内部对齐标注冒充盲法 Gold，也不把本次结果写成产品准确率。
 - OCR 事实在写入素材库前会按标准化文本和相邻时间窗合并持续花字；否则每秒抽帧会制造重复标签，破坏搜索和账号拆解统计。

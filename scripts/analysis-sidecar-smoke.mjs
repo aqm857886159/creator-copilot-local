@@ -15,7 +15,7 @@ if (!python || !model || !input) {
   throw new Error("live sidecar smoke 需要 FASTER_WHISPER_PYTHON、FASTER_WHISPER_MODEL 和 ANALYSIS_SIDECAR_INPUT");
 }
 
-const script = process.env.FASTER_WHISPER_SCRIPT ?? "electron/sidecars/faster-whisper-sidecar.py";
+const script = process.env.FASTER_WHISPER_SCRIPT ?? "apps/desktop/sidecars/faster-whisper-sidecar.py";
 const { stdout } = await run(python, [
   script,
   "--input", input,

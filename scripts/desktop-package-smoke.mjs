@@ -15,7 +15,7 @@ if (process.platform === "darwin") {
   const resourcesRoot = join(root, "release", "mac-arm64", `${appName}.app`, "Contents", "Resources");
   const workerEntry = join(resourcesRoot, "app.asar.unpacked", "apps", "desktop", "analysis-worker.cjs");
   if (!existsSync(workerEntry)) throw new Error(`打包产物缺少 apps/desktop utility worker：${workerEntry}`);
-  const ocrSidecar = join(resourcesRoot, "app.asar.unpacked", "electron", "sidecars", "apple-vision-ocr.swift");
+  const ocrSidecar = join(resourcesRoot, "app.asar.unpacked", "apps", "desktop", "sidecars", "apple-vision-ocr.swift");
   if (!existsSync(ocrSidecar)) throw new Error(`打包产物缺少 Apple Vision OCR sidecar：${ocrSidecar}`);
 }
 

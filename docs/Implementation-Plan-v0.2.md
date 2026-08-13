@@ -192,7 +192,7 @@ interface AgentRuntimePort {
 
 **依赖：无。**
 
-**当前状态（2026-08-14）：** macOS arm64 目录打包、preload IPC 和打包后 SQLite runtime smoke 已通过；Windows、签名、公证、CI clean checkout、utility worker 打包 smoke 和最终 pnpm workspace 迁移仍未完成。详见 [V0 打包施工记录](./plan/2026-08-14-v0-packaged-desktop-smoke.md)。
+**当前状态（2026-08-14）：** Electron main、preload、utility worker 和 sidecar 事实源已迁入 `apps/desktop`；macOS arm64 目录打包、preload IPC、打包后 SQLite runtime smoke、pnpm 包级 typecheck/build/test 和 UI smoke 已通过。Windows、签名、公证、CI clean checkout、root renderer/package 化和最终 pnpm lock 迁移仍未完成。详见 [V0 基线迁移记录](./plan/2026-08-14-v0-baseline-migration.md) 与 [V0 打包施工记录](./plan/2026-08-14-v0-packaged-desktop-smoke.md)。
 
 代码任务：
 

@@ -62,7 +62,7 @@ const analysis = await import("../dist-electron/packages/analysis/src/index.js")
 const transcript = runAsr
   ? await new analysis.FasterWhisperSidecarTranscriber({
       modelPath,
-      scriptPath: process.env.FASTER_WHISPER_SCRIPT ?? "electron/sidecars/faster-whisper-sidecar.py",
+  scriptPath: process.env.FASTER_WHISPER_SCRIPT ?? "apps/desktop/sidecars/faster-whisper-sidecar.py",
       pythonPath,
       language: process.env.FASTER_WHISPER_LANGUAGE ?? "zh",
       device: process.env.FASTER_WHISPER_DEVICE ?? "cpu",
@@ -77,7 +77,7 @@ if (process.env.ANALYSIS_QUALITY_RUN_OCR === "1") {
   const durationMs = Math.ceil(Number(probe.stdout.trim()) * 1000);
   if (!Number.isInteger(durationMs) || durationMs <= 0) throw new Error("ffprobe 没有返回有效时长");
   const ocrRunner = new analysis.AppleVisionOcr({
-    scriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? "electron/sidecars/apple-vision-ocr.swift",
+    scriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? "apps/desktop/sidecars/apple-vision-ocr.swift",
     binaryPath: process.env.APPLE_VISION_OCR_BINARY,
     sampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000),
   });
