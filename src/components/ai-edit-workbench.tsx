@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, ChevronRight, CircleAlert, Download, Film, PackageOpen, RotateCcw, Sparkles, X } from "lucide-react";
 
 function seconds(milliseconds: number) {
@@ -19,6 +19,19 @@ export function AiEditWorkbench({ workflow, openProjects }: { workflow: CaptureW
   const [analysisFacts, setAnalysisFacts] = useState<NonNullable<EditProposalResult["analysisFacts"]>>([]);
   const [proposalRetryNonce, setProposalRetryNonce] = useState<string | undefined>(undefined);
   const [pendingRecovery, setPendingRecovery] = useState<{ idempotencyScope: string; idempotencyKey: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    if (!workflow?.projectId || !window.desktop) return () => { active = false; };
+    void window.desktop.listEditProposalRecoveries(workflow.projectId).then((response) => {
+      const recovery = response.items?.[0];
+      if (active && recovery) {
+        setPendingRecovery({ idempotencyScope: recovery.idempotencyScope, idempotencyKey: recovery.idempotencyKey });
+        setMessage("发现上一次 Provider 提交状态未知的 AI 提案；请先核对用量，再决定是否结束旧请求。");
+      }
+    });
+    return () => { active = false; };
+  }, [workflow?.projectId]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 

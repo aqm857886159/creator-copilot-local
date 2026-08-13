@@ -980,6 +980,15 @@ export class SqliteCatalog {
     return { idempotencyScope: row.idempotencyScope, idempotencyKey: row.idempotencyKey, inputHash: row.inputHash, receipt: CommandReceiptSchema.parse(parseJson(row.receiptJson, "command receipt")) };
   }
 
+  listPendingCommandReceipts(scope: string, targetType: string, targetId: string, errorCode?: string) {
+    const rows = this.db.prepare(`SELECT idempotency_scope AS idempotencyScope, idempotency_key AS idempotencyKey, input_hash AS inputHash, receipt_json AS receiptJson FROM command_receipts WHERE idempotency_scope = ? AND json_extract(receipt_json, '$.target.type') = ? AND json_extract(receipt_json, '$.target.id') = ? AND json_extract(receipt_json, '$.status') = 'pending' ORDER BY created_at DESC`).all(scope, targetType, targetId) as Array<Omit<StoredReceipt, "receipt"> & { receiptJson: string }>;
+    return rows.flatMap((row) => {
+      const receipt = CommandReceiptSchema.parse(parseJson(row.receiptJson, "command receipt"));
+      if (errorCode && receipt.errorCode !== errorCode) return [];
+      return [{ idempotencyScope: row.idempotencyScope, idempotencyKey: row.idempotencyKey, inputHash: row.inputHash, receipt }];
+    });
+  }
+
   executeCommand(raw: unknown, handler: (command: CommandEnvelope) => CommandExecution): CommandReceipt {
     const command = CommandEnvelopeSchema.parse(raw);
     const inputHash = stableStringify({ actor: command.actor, name: command.name, target: command.target, input: command.input });

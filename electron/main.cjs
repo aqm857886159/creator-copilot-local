@@ -711,6 +711,22 @@ ipcMain.handle("desktop:reconcile-edit-proposal", async (_event, raw) => {
   }
 });
 
+ipcMain.handle("desktop:list-edit-proposal-recoveries", async (_event, projectId) => {
+  try {
+    const workspace = requireWorkspace();
+    if (typeof projectId !== "string" || !projectId) throw new Error("项目 ID 无效");
+    const items = workspace.catalog.listPendingCommandReceipts(workspace.workspaceId, "project", projectId, "SUBMISSION_UNKNOWN").flatMap((stored) => {
+      const jobId = stored.receipt.jobIds[0];
+      const job = jobId ? workspace.catalog.getJob(jobId) : undefined;
+      if (!job || job.state !== "submission_unknown") return [];
+      return [{ idempotencyScope: stored.idempotencyScope, idempotencyKey: stored.idempotencyKey, receipt: stored.receipt, job: { id: job.id, state: job.state, attempt: job.attempt } }];
+    });
+    return { ok: true, items };
+  } catch (error) {
+    return { ok: false, errorCode: "edit_proposal_recovery_list_failed", message: error instanceof Error ? error.message : "无法读取 AI 提案恢复状态" };
+  }
+});
+
 ipcMain.handle("desktop:render-edit", async (_event, raw) => {
   let renderRunId = null;
   let renderJobId = null;

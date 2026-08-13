@@ -224,6 +224,13 @@ interface ReconcileEditProposalResult {
   receipt?: EditProposalResult["receipt"];
 }
 
+interface EditProposalRecoveryListResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  items?: Array<{ idempotencyScope: string; idempotencyKey: string; receipt: EditProposalResult["receipt"]; job: { id: string; state: string; attempt: number } }>;
+}
+
 interface ExchangeExportResult {
   ok: boolean;
   errorCode?: string;
@@ -309,6 +316,7 @@ interface Window {
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;
     proposeEdit: (input: { projectId: string; retryNonce?: string } | string) => Promise<EditProposalResult>;
     reconcileEditProposal: (input: { idempotencyScope: string; idempotencyKey: string; action: "user_confirmed_not_submitted" }) => Promise<ReconcileEditProposalResult>;
+    listEditProposalRecoveries: (projectId: string) => Promise<EditProposalRecoveryListResult>;
     renderEdit: (input: { projectId: string; proposal: EditProposal }) => Promise<EditRenderResult>;
     exportExchange: (input: { renderRunId: string; formats: Array<"fcpxml" | "otio"> }) => Promise<ExchangeExportResult>;
     createPublishPackage: (input: { renderRunId: string; platform?: string; title: string; description?: string; hashtags?: string[]; rightsNote?: string }) => Promise<PublishPackageResult>;
