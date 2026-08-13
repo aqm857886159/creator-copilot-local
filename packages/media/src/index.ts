@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
-import { copyFile, mkdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, open, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -91,6 +91,40 @@ export type MediaToolchain = {
   createProxy(inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void>;
   createThumbnail(inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void>;
 };
+
+export type RemoteMediaFetcher = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
+export async function downloadRemoteFile(input: { url: string; destinationPath: string; maxBytes?: number; fetcher?: RemoteMediaFetcher }) {
+  const parsed = new URL(input.url);
+  if (parsed.protocol !== "https:") throw new Error("远程媒体下载只允许 HTTPS");
+  const maxBytes = input.maxBytes ?? 1024 * 1024 * 1024;
+  const fetcher = input.fetcher ?? fetch;
+  const response = await fetcher(parsed, { redirect: "error", signal: AbortSignal.timeout(120_000) });
+  if (!response.ok) throw new Error(`远程媒体下载失败（HTTP ${response.status}）`);
+  const declaredSize = Number(response.headers.get("content-length") ?? 0);
+  if (declaredSize > maxBytes) throw new Error("远程媒体超过单文件大小上限");
+  if (!response.body) throw new Error("远程媒体响应没有可读内容");
+  const handle = await open(input.destinationPath, "w");
+  let byteSize = 0;
+  try {
+    for await (const chunk of response.body) {
+      const buffer = Buffer.from(chunk);
+      byteSize += buffer.byteLength;
+      if (byteSize > maxBytes) throw new Error("远程媒体超过单文件大小上限");
+      await handle.write(buffer);
+    }
+  } catch (error) {
+    await rm(input.destinationPath, { force: true }).catch(() => undefined);
+    throw error;
+  } finally {
+    await handle.close();
+  }
+  if (byteSize === 0) {
+    await rm(input.destinationPath, { force: true });
+    throw new Error("远程媒体响应为空");
+  }
+  return { byteSize, contentType: response.headers.get("content-type") ?? undefined };
+}
 
 const defaultRunner: CommandRunner = async (binary, args, signal) => {
   const result = await execFile(binary, args, { encoding: "utf8", maxBuffer: 8 * 1024 * 1024, signal });

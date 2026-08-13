@@ -106,11 +106,19 @@ export type TikHubVideoMetadata = {
   raw: Record<string, unknown>;
 };
 
+export type TikHubVideoDownload = {
+  awemeId: string;
+  url: string;
+  requestId?: string;
+  responseHash: string;
+};
+
 export interface ResearchConnector {
   readonly providerKey: string;
   resolveSecUserId(urlOrId: string): Promise<string>;
   fetchProfile(secUserId: string): Promise<TikHubProfile>;
   fetchUserPosts(input: { secUserId: string; maxCursor?: number; count?: number; sortType?: 0 | 1 }): Promise<TikHubPage<TikHubVideoMetadata>>;
+  fetchHighestQualityPlayUrl(input: { awemeId: string; shareUrl?: string; region?: string }): Promise<TikHubVideoDownload>;
 }
 
 function hashResponse(value: unknown) {
@@ -300,5 +308,25 @@ export class TikHubDouyinConnector implements ResearchConnector {
       return [{ awemeId, description: firstString(raw, ["desc", "description"]), createTime: typeof raw.create_time === "number" ? new Date(raw.create_time * 1000).toISOString() : firstString(raw, ["create_time", "createTime"]), shareUrl: firstString(raw, ["share_url", "shareUrl"]), durationMs, coverUrl: firstString(video, ["cover", "cover_url", "coverUrl"]), statistics: Object.fromEntries(Object.entries(statistics).filter((entry): entry is [string, number] => typeof entry[1] === "number")), raw }];
     });
     return { providerKey: this.providerKey, source: "public" as const, fetchedAt: new Date().toISOString(), cursor, hasMore: Boolean(data.has_more ?? data.hasMore), items, responseHash: hashResponse(result.body) } satisfies TikHubPage<TikHubVideoMetadata>;
+  }
+
+  async fetchHighestQualityPlayUrl(input: { awemeId: string; shareUrl?: string; region?: string }) {
+    const awemeId = id.parse(input.awemeId);
+    const result = await this.get("/api/v1/douyin/app/v3/fetch_video_high_quality_play_url", {
+      ...(awemeId ? { aweme_id: awemeId } : {}),
+      ...(input.shareUrl ? { share_url: input.shareUrl } : {}),
+      ...(input.region ? { region: input.region } : {}),
+    });
+    const data = dataPayload(result.body);
+    const url = firstString(data, ["original_video_url", "video_url", "play_url", "url"]);
+    if (!url) throw new ProviderRequestError(ProviderErrorSchema.parse({ schemaVersion: 1, providerKey: this.providerKey, category: "provider", code: "VIDEO_URL_NOT_FOUND", message: "TikHub 未返回可下载的视频地址", retryable: false, requestId: responseRequestId(result.body, result.response) }));
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new ProviderRequestError(ProviderErrorSchema.parse({ schemaVersion: 1, providerKey: this.providerKey, category: "provider", code: "VIDEO_URL_INVALID", message: "TikHub 返回的视频地址无效", retryable: false, requestId: responseRequestId(result.body, result.response) }));
+    }
+    if (parsed.protocol !== "https:") throw new ProviderRequestError(ProviderErrorSchema.parse({ schemaVersion: 1, providerKey: this.providerKey, category: "provider", code: "VIDEO_URL_UNSAFE", message: "TikHub 返回的视频地址不是 HTTPS", retryable: false, requestId: responseRequestId(result.body, result.response) }));
+    return { awemeId, url: parsed.toString(), requestId: responseRequestId(result.body, result.response), responseHash: hashResponse(result.body) } satisfies TikHubVideoDownload;
   }
 }

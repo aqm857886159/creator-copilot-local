@@ -13,6 +13,7 @@ export const BenchmarkVideoSchema = z.object({
   coverUrl: z.string().url().optional(),
   statistics: z.record(z.number().nonnegative()),
   evidenceIds: z.array(id),
+  artifactIds: z.array(id).default([]),
   mediaAnalysisStatus: z.enum(["not_requested", "metadata_only", "queued", "completed", "failed"]),
 }).strict();
 export type BenchmarkVideo = z.infer<typeof BenchmarkVideoSchema>;
@@ -44,6 +45,12 @@ export const AccountResearchReportSchema = z.object({
 }).strict();
 export type AccountResearchReport = z.infer<typeof AccountResearchReportSchema>;
 
+export type ResearchMediaAttachment = {
+  awemeId: string;
+  artifactIds: string[];
+  attachedAt: string;
+};
+
 function profilePayload(profile: TikHubProfile) {
   return { nickname: profile.nickname, signature: profile.signature, followerCount: profile.followerCount, followingCount: profile.followingCount, awemeCount: profile.awemeCount };
 }
@@ -61,7 +68,7 @@ function publicUrl(value?: string) {
 function videoToBenchmark(video: TikHubVideoMetadata, capturedAt: string): { video: BenchmarkVideo; evidence: ResearchEvidence } {
   const evidenceId = `evidence-video-${video.awemeId}`;
   return {
-    video: BenchmarkVideoSchema.parse({ schemaVersion: 1, awemeId: video.awemeId, description: video.description, createTime: video.createTime, shareUrl: publicUrl(video.shareUrl), durationMs: video.durationMs, coverUrl: publicUrl(video.coverUrl), statistics: video.statistics ?? {}, evidenceIds: [evidenceId], mediaAnalysisStatus: "metadata_only" }),
+    video: BenchmarkVideoSchema.parse({ schemaVersion: 1, awemeId: video.awemeId, description: video.description, createTime: video.createTime, shareUrl: publicUrl(video.shareUrl), durationMs: video.durationMs, coverUrl: publicUrl(video.coverUrl), statistics: video.statistics ?? {}, evidenceIds: [evidenceId], artifactIds: [], mediaAnalysisStatus: "metadata_only" }),
     evidence: ResearchEvidenceSchema.parse({ schemaVersion: 1, id: evidenceId, type: "video_metadata", sourceId: video.awemeId, label: `作品 ${video.awemeId}`, payload: { description: video.description, createTime: video.createTime, durationMs: video.durationMs, statistics: video.statistics ?? {} }, capturedAt }),
   };
 }
@@ -78,4 +85,34 @@ export async function buildAccountResearchReport(input: { workspaceId: string; s
   const evidence = [ResearchEvidenceSchema.parse({ schemaVersion: 1, id: `evidence-profile-${secUserId}`, type: "profile", sourceId: secUserId, label: "账号资料快照", payload: profilePayload(profile), capturedAt }), ...mapped.map((item) => item.evidence), ResearchEvidenceSchema.parse({ schemaVersion: 1, id: coverageEvidenceId, type: "coverage", sourceId: secUserId, label: "首轮覆盖范围", payload: { requested: count, received: mapped.length, hasMore: posts.hasMore, mediaAnalysisStatus: "metadata_only" }, capturedAt })];
   const report = AccountResearchReportSchema.parse({ schemaVersion: 1, id: `account-research-${secUserId}-${capturedAt.replace(/[^0-9]/g, "")}`, workspaceId: input.workspaceId, providerKey: posts.providerKey, sourceInput: input.sourceInput, secUserId, profile: profilePayload(profile), videos: mapped.map((item) => item.video), coverage: { requested: count, received: mapped.length, metadataAnalyzed: mapped.length, mediaAnalyzed: 0, missingMedia: mapped.length, hasMore: posts.hasMore, note: "当前为公开元数据首轮；选择具体作品后才下载并执行 ASR/OCR/镜头分析。" }, findings: [{ id: `finding-needs-media-${secUserId}`, kind: "needs_media_analysis", title: "待选择作品做画面拆解", detail: "元数据已取得；请从列表选择 3–5 条，再执行本地媒体分析。", evidenceIds: [coverageEvidenceId] }], evidence, createdAt: capturedAt });
   return report;
+}
+
+export function attachResearchMedia(report: AccountResearchReport, attachments: ResearchMediaAttachment[]) {
+  const attachmentByAwemeId = new Map(attachments.map((attachment) => [attachment.awemeId, attachment]));
+  const videos = report.videos.map((video) => {
+    const attachment = attachmentByAwemeId.get(video.awemeId);
+    if (!attachment) return video;
+    return BenchmarkVideoSchema.parse({ ...video, artifactIds: [...new Set(attachment.artifactIds)], mediaAnalysisStatus: "queued" });
+  });
+  const missingMedia = videos.filter((video) => video.artifactIds.length === 0).length;
+  const updated = AccountResearchReportSchema.parse({
+    ...report,
+    videos,
+    coverage: { ...report.coverage, missingMedia, note: missingMedia === 0 ? "选中作品已本地化，等待 ASR/OCR/镜头分析。" : `已本地化 ${videos.length - missingMedia} 条，仍有 ${missingMedia} 条未下载；可继续选择后补齐。` },
+    findings: [{ id: `finding-needs-media-${report.secUserId}`, kind: "needs_media_analysis", title: "本地素材已就绪，等待画面拆解", detail: "已写入素材库。下一步执行 ASR、OCR 和镜头检测，结论会回挂到作品证据。", evidenceIds: report.findings.flatMap((finding) => finding.evidenceIds) }],
+  });
+  return updated;
+}
+
+export function markResearchMediaFailures(report: AccountResearchReport, awemeIds: string[]) {
+  const failed = new Set(awemeIds);
+  if (failed.size === 0) return report;
+  const videos = report.videos.map((video) => failed.has(video.awemeId) && video.artifactIds.length === 0
+    ? BenchmarkVideoSchema.parse({ ...video, mediaAnalysisStatus: "failed" })
+    : video);
+  return AccountResearchReportSchema.parse({
+    ...report,
+    videos,
+    findings: [{ id: `finding-media-failures-${report.secUserId}`, kind: "needs_media_analysis", title: "部分作品未能本地化", detail: "部分作品下载或导入失败；可稍后重试，已成功本地化的素材不重复下载。", evidenceIds: report.findings.flatMap((finding) => finding.evidenceIds) }],
+  });
 }

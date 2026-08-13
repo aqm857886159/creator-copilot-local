@@ -1,6 +1,8 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const { createHash, randomUUID } = require("node:crypto");
 const { existsSync, mkdirSync, realpathSync } = require("node:fs");
+const { rm: removeFile } = require("node:fs/promises");
+const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
@@ -169,6 +171,52 @@ ipcMain.handle("desktop:research-account", async (_event, raw) => {
     return { ok: true, report };
   } catch (error) {
     return { ok: false, errorCode: "account_research_failed", message: error instanceof Error ? error.message : "对标账号分析失败" };
+  }
+});
+
+ipcMain.handle("desktop:download-research-media", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.reportId !== "string" || !Array.isArray(raw.awemeIds)) throw new Error("研究素材选择参数无效");
+    const awemeIds = [...new Set(raw.awemeIds.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
+    if (awemeIds.length < 1 || awemeIds.length > 5) throw new Error("一次只能选择 1–5 条作品进行本地化");
+    const report = workspace.catalog.getResearchReport(raw.reportId);
+    if (!report || report.workspaceId !== workspace.workspaceId) throw new Error("研究报告不存在或不属于当前工作区");
+    const selected = report.videos.filter((video) => awemeIds.includes(video.awemeId));
+    if (selected.length !== awemeIds.length) throw new Error("选择的作品不在当前研究报告中");
+    const runtime = await getDesktopRuntime();
+    const connector = getTikHubConnector(runtime);
+    const attachments = [];
+    const failed = [];
+    const downloaded = [];
+    for (const video of selected) {
+      if (video.artifactIds.length > 0) {
+        attachments.push({ awemeId: video.awemeId, artifactIds: video.artifactIds, attachedAt: new Date().toISOString() });
+        downloaded.push({ awemeId: video.awemeId, reused: true, artifactIds: video.artifactIds });
+        continue;
+      }
+      const temporaryPath = path.join(os.tmpdir(), `creator-copilot-research-${randomUUID()}.mp4`);
+      try {
+        const playUrl = await connector.fetchHighestQualityPlayUrl({ awemeId: video.awemeId, shareUrl: video.shareUrl, region: "CN" });
+        await runtime.media.downloadRemoteFile({ url: playUrl.url, destinationPath: temporaryPath, maxBytes: 1024 * 1024 * 1024 });
+        const imported = await runtime.mediaImporter.import({ workspaceRoot: workspace.workspacePath, sourcePath: temporaryPath, maxBytes: 1024 * 1024 * 1024 });
+        workspace.catalog.insertArtifacts([imported.source, imported.proxy, imported.thumbnail].map((artifact) => ({ ...artifact, workspaceId: workspace.workspaceId })));
+        const artifactIds = [imported.source.artifactId, imported.proxy.artifactId, imported.thumbnail.artifactId];
+        attachments.push({ awemeId: video.awemeId, artifactIds, attachedAt: new Date().toISOString() });
+        downloaded.push({ awemeId: video.awemeId, reused: false, artifactIds });
+      } catch (error) {
+        failed.push({ awemeId: video.awemeId, message: error instanceof Error ? error.message : "下载或导入失败" });
+      } finally {
+        await removeFile(temporaryPath, { force: true }).catch(() => undefined);
+      }
+    }
+    let updated = runtime.research.attachResearchMedia(report, attachments);
+    updated = runtime.research.markResearchMediaFailures(updated, failed.map((item) => item.awemeId));
+    workspace.catalog.saveResearchReport(updated);
+    if (downloaded.length === 0) return { ok: false, errorCode: "research_media_download_failed", message: failed[0]?.message ?? "没有作品成功本地化", report: updated, failed };
+    return { ok: true, report: updated, downloaded, failed };
+  } catch (error) {
+    return { ok: false, errorCode: "research_media_download_failed", message: error instanceof Error ? error.message : "研究素材下载失败" };
   }
 });
 

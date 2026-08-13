@@ -185,7 +185,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .coverage-numbers strong { color: #52694d; font-size: 17px; font-weight: 550; }
 .radar-video-section { padding-bottom: 13px; }
 .radar-video-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-top: 14px; }
-.radar-video-card { display: flex; min-height: 160px; flex-direction: column; padding: 13px; border: 1px solid #e5ded3; border-radius: 9px; background: #fcfaf5; }
+.radar-selection-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; color: #8e867a; font-size: 10px; }
+.radar-selection-toolbar .primary-button { padding: 9px 12px; font-size: 10px; }
+.radar-video-card { position: relative; display: flex; min-height: 160px; flex-direction: column; padding: 13px; border: 1px solid #e5ded3; border-radius: 9px; background: #fcfaf5; }
+.radar-video-card.selected { border-color: #78936f; box-shadow: 0 0 0 2px #dce8d7; }
+.radar-video-select { display: inline-flex; align-items: center; align-self: flex-start; gap: 5px; min-height: 26px; padding: 4px 7px; border: 1px solid #d6cfc3; border-radius: 6px; background: #f7f3eb; color: #7c7468; font-size: 9px; }
+.radar-video-select:hover:not(:disabled) { border-color: #99ad92; color: #526a4c; }
+.radar-video-select:disabled { cursor: default; opacity: .7; }
+.radar-action-message { display: flex; align-items: center; gap: 8px; padding: 11px 13px; border: 1px solid #d3dfce; border-radius: 9px; background: #eaf0e5; color: #587251; font-size: 11px; }
 .radar-video-top, .radar-video-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #9c9488; font-size: 9px; }
 .radar-video-top span:last-child { color: #7b9375; }
 .radar-video-card h4 { display: -webkit-box; min-height: 43px; margin: 14px 0 7px; overflow: hidden; color: #514b42; font-size: 12px; font-weight: 550; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }

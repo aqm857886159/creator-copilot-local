@@ -40,4 +40,11 @@ describe("provider adapters", () => {
     expect(urls.some((url) => url.includes("count=20"))).toBe(true);
     await expect(connector.fetchUserPosts({ secUserId: "MS4wLjABAAAAexample", count: 21 })).rejects.toThrow("1–20");
   });
+
+  it("only accepts HTTPS high-quality media URLs", async () => {
+    const connector = new TikHubDouyinConnector({ apiKey: "secret-test-key", baseUrl: "https://api.example.test", fetcher: async () => jsonResponse({ data: { original_video_url: "https://cdn.example/video.mp4" } }) });
+    await expect(connector.fetchHighestQualityPlayUrl({ awemeId: "aweme-1", region: "CN" })).resolves.toMatchObject({ awemeId: "aweme-1", url: "https://cdn.example/video.mp4" });
+    const unsafe = new TikHubDouyinConnector({ apiKey: "secret-test-key", baseUrl: "https://api.example.test", fetcher: async () => jsonResponse({ data: { original_video_url: "http://cdn.example/video.mp4" } }) });
+    await expect(unsafe.fetchHighestQualityPlayUrl({ awemeId: "aweme-1" })).rejects.toSatisfy((error: unknown) => error instanceof ProviderRequestError && error.normalized.code === "VIDEO_URL_UNSAFE");
+  });
 });

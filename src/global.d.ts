@@ -37,10 +37,19 @@ interface AccountResearchResult {
     sourceInput: string;
     secUserId: string;
     profile: { nickname?: string; signature?: string; followerCount?: number; followingCount?: number; awemeCount?: number };
-    videos: Array<{ awemeId: string; description?: string; createTime?: string; shareUrl?: string; durationMs?: number; statistics: Record<string, number>; mediaAnalysisStatus: string; evidenceIds: string[] }>;
+    videos: Array<{ awemeId: string; description?: string; createTime?: string; shareUrl?: string; durationMs?: number; statistics: Record<string, number>; mediaAnalysisStatus: string; evidenceIds: string[]; artifactIds: string[] }>;
     coverage: { requested: number; received: number; metadataAnalyzed: number; mediaAnalyzed: number; missingMedia: number; hasMore: boolean; note: string };
     findings: Array<{ id: string; kind: string; title: string; detail: string; evidenceIds: string[] }>;
   };
+}
+
+interface DownloadResearchMediaResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  report?: AccountResearchResult["report"];
+  downloaded?: Array<{ awemeId: string; reused: boolean; artifactIds: string[] }>;
+  failed?: Array<{ awemeId: string; message: string }>;
 }
 
 interface CaptureWorkflowInput {
@@ -145,6 +154,7 @@ interface Window {
     importMedia: () => Promise<ImportMediaResult>;
     searchAssets: (query: string) => Promise<AssetSearchResult>;
     researchAccount: (input: { sourceInput: string; count?: number }) => Promise<AccountResearchResult>;
+    downloadResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<DownloadResearchMediaResult>;
     createCaptureWorkflow: (input: CaptureWorkflowInput) => Promise<CaptureWorkflowResult>;
     importTake: (shootTaskId: string) => Promise<ImportTakeResult>;
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;
