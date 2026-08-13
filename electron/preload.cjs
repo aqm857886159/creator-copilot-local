@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("desktop", {
   proposeEdit: (projectId) => ipcRenderer.invoke("desktop:propose-edit", projectId),
   renderEdit: (input) => ipcRenderer.invoke("desktop:render-edit", input),
   exportExchange: (input) => ipcRenderer.invoke("desktop:export-exchange", input),
+  createPublishPackage: (input) => ipcRenderer.invoke("desktop:create-publish-package", input),
   openWorkspaceFile: (relativePath) => ipcRenderer.invoke("desktop:open-workspace-file", relativePath),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
 });

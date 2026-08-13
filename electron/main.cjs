@@ -1,7 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, shell, utilityProcess } = require("electron");
 const { createHash, randomUUID } = require("node:crypto");
 const { existsSync, mkdirSync, realpathSync } = require("node:fs");
-const { mkdir: makeDirectory, rm: removeFile, writeFile } = require("node:fs/promises");
+const { mkdir: makeDirectory, readFile, rm: removeFile, writeFile } = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -24,7 +24,8 @@ async function getDesktopRuntime() {
       import(pathToFileURL(path.join(runtimeRoot, "providers", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "agent-runtime", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "research", "src", "index.js")).href),
-    ]).then(([media, analysis, creation, exchange, storage, providers, agentRuntime, research]) => ({ media, analysis, creation, exchange, storage, providers, agentRuntime, research, mediaImporter: new media.LocalMediaImporter() }));
+      import(pathToFileURL(path.join(runtimeRoot, "publishing", "src", "index.js")).href),
+    ]).then(([media, analysis, creation, exchange, storage, providers, agentRuntime, research, publishing]) => ({ media, analysis, creation, exchange, storage, providers, agentRuntime, research, publishing, mediaImporter: new media.LocalMediaImporter() }));
   }
   return desktopRuntimePromise;
 }
@@ -523,6 +524,46 @@ ipcMain.handle("desktop:export-exchange", async (_event, raw) => {
     return { ok: true, renderRunId: raw.renderRunId, outputs };
   } catch (error) {
     return { ok: false, errorCode: "exchange_export_failed", message: error instanceof Error ? error.message : "交换格式导出失败" };
+  }
+});
+
+ipcMain.handle("desktop:create-publish-package", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.renderRunId !== "string" || typeof raw.title !== "string" || !raw.title.trim()) throw new Error("发布包参数无效");
+    const run = workspace.catalog.getRenderRun(raw.renderRunId);
+    if (!run || run.state !== "succeeded" || !run.manifestRelativePath) throw new Error("只有成功的渲染结果才能生成发布包");
+    const spec = workspace.catalog.getFrozenEditSpec(run.frozenEditSpecId);
+    if (!spec || spec.projectId !== run.projectId) throw new Error("发布包对应的冻结剪辑规格不存在");
+    const runtime = await getDesktopRuntime();
+    const manifestPath = path.resolve(workspace.workspacePath, run.manifestRelativePath);
+    const root = realpathSync(workspace.workspacePath);
+    if (!existsSync(manifestPath)) throw new Error("渲染 manifest 文件不存在");
+    const canonicalManifestPath = realpathSync(manifestPath);
+    if (canonicalManifestPath !== root && !canonicalManifestPath.startsWith(`${root}${path.sep}`)) throw new Error("渲染 manifest 越过工作区");
+    const renderManifest = runtime.exchange.RenderManifestSchema.parse(JSON.parse(await readFile(canonicalManifestPath, "utf8")));
+    const video = renderManifest.outputs.find((output) => output.kind === "video");
+    if (!video) throw new Error("渲染 manifest 缺少视频输出");
+    const subtitle = renderManifest.outputs.find((output) => output.kind === "subtitle");
+    const packageId = `publish-${raw.renderRunId}`;
+    const result = await runtime.publishing.exportPublishPackage({
+      workspaceRoot: workspace.workspacePath,
+      packageId,
+      projectId: run.projectId,
+      renderRunId: raw.renderRunId,
+      platform: typeof raw.platform === "string" && raw.platform.trim() ? raw.platform.trim() : "抖音",
+      title: raw.title.trim(),
+      description: typeof raw.description === "string" ? raw.description : "",
+      hashtags: Array.isArray(raw.hashtags) ? raw.hashtags.filter((tag) => typeof tag === "string") : [],
+      rightsNote: typeof raw.rightsNote === "string" ? raw.rightsNote : undefined,
+      sourceArtifactIds: spec.assetLocks.map((lock) => lock.assetId),
+      sourceFiles: { video: path.resolve(workspace.workspacePath, video.relativePath), subtitle: subtitle ? path.resolve(workspace.workspacePath, subtitle.relativePath) : undefined, manifest: canonicalManifestPath },
+    });
+    const artifactIds = result.files.map((file) => `publish-${raw.renderRunId}-${file.kind}`);
+    workspace.catalog.insertArtifacts(result.files.map((file, index) => ({ schemaVersion: 1, artifactId: artifactIds[index], workspaceId: workspace.workspaceId, kind: `publish-${file.kind}`, relativePath: file.relativePath, mimeType: file.mimeType, contentHash: file.contentHash, byteSize: file.byteSize, parentArtifactIds: spec.assetLocks.map((lock) => lock.assetId), validationStatus: "valid" })));
+    return { ok: true, packageId, manifest: result.manifest, packageRelativePath: path.relative(workspace.workspacePath, result.packageDir).split(path.sep).join("/"), manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") };
+  } catch (error) {
+    return { ok: false, errorCode: "publish_package_failed", message: error instanceof Error ? error.message : "发布包生成失败" };
   }
 });
 

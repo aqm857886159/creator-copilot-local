@@ -1,7 +1,7 @@
 # V8 交换格式与发布复盘：施工记录
 
 日期：2026-08-14  
-状态：交换格式基线已落地；手动发布包与复盘数据仍待实现
+状态：交换格式基线与手动发布包已落地；指标录入、复盘建议持久化仍待实现
 
 ## 目标
 
@@ -85,3 +85,16 @@ V8-02 先做本地、不依赖平台登录的发布包：
 
 平台发布 connector、自动发布、`submission_unknown` 恢复和多平台差异化适配后置，不阻塞本地创作闭环。
 
+## 本次新增：手动发布包基线
+
+`packages/publishing/src/index.ts` 和 `desktop:create-publish-package` 已实现：
+
+- 从成功的 `RenderRun` 读取 MP4、SRT 和 render manifest；
+- 将文件复制到工作区内的 `publish/<packageId>/`，每个文件重新 hash 并记录 byte size；
+- 生成 `publish-package.manifest.json`，包含平台、标题、话题、版权提醒、源素材 artifact ID 和警告；
+- UI 在 AI 剪辑导出成功后提供“生成抖音发布包”，标题由用户确认，不自动发布；
+- 发布包源文件必须经过 realpath containment 检查，不能从工作区外偷渡文件。
+
+这一步只证明“从剪辑结果到可手动上传的本地交付物”可运行，不代表抖音发布 API 已接通。
+
+下一步会将 `Publication`、`MetricSnapshot`、`ReviewMemoryProposal` 写入 catalog：指标只能由用户手动录入或明确授权的 connector 写入；记忆建议必须带指标证据并经过用户确认，不能自动覆盖创作者表达偏好。

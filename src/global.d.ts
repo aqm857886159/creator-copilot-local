@@ -165,6 +165,16 @@ interface ExchangeExportResult {
   outputs?: Record<string, { relativePath: string; lossReportPath: string; report: { adapter: string; formatVersion: string; supported: string[]; losses: Array<{ kind: string; sourceId: string; severity: string; message: string }> } }>;
 }
 
+interface PublishPackageResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  packageId?: string;
+  packageRelativePath?: string;
+  manifestRelativePath?: string;
+  manifest?: { title: string; platform: string; files: Array<{ kind: string; relativePath: string }>; warnings: string[] };
+}
+
 interface Window {
   desktop?: {
     getInfo: () => Promise<DesktopInfo>;
@@ -180,6 +190,7 @@ interface Window {
     proposeEdit: (projectId: string) => Promise<EditProposalResult>;
     renderEdit: (input: { projectId: string; proposal: EditProposal }) => Promise<EditRenderResult>;
     exportExchange: (input: { renderRunId: string; formats: Array<"fcpxml" | "otio"> }) => Promise<ExchangeExportResult>;
+    createPublishPackage: (input: { renderRunId: string; platform?: string; title: string; description?: string; hashtags?: string[]; rightsNote?: string }) => Promise<PublishPackageResult>;
     openWorkspaceFile: (relativePath: string) => Promise<{ ok: boolean; message?: string }>;
     openExternal: (url: string) => Promise<{ ok: boolean; message?: string }>;
   };
