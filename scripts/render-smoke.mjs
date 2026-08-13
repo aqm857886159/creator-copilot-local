@@ -38,6 +38,7 @@ await makeFixture(aRollPath, "0x263238", 2.5, 440);
 await makeFixture(bRollPath, "0x607d8b", 1.5, 660);
 const [aRollHash, bRollHash] = await Promise.all([hashFile(aRollPath), hashFile(bRollPath)]);
 const { DEFAULT_VERTICAL_PROFILE, EditProposalSchema, exportRenderPackage, freezeEditProposal } = await import("../dist-electron/packages/exchange/src/index.js");
+const { SqliteCatalog } = await import("../dist-electron/packages/storage/src/catalog.js");
 const now = "2026-08-14T00:00:00.000Z";
 const proposal = EditProposalSchema.parse({
   schemaVersion: 1,
@@ -69,6 +70,25 @@ const result = await exportRenderPackage({
     "asset-b-roll": { assetId: "asset-b-roll", relativePath: "originals/b-roll.mp4", absolutePath: bRollPath, contentHash: bRollHash, durationMs: 1500, hasVideo: true, hasAudio: true },
   },
 });
+const metadataDir = join(root, ".creator-copilot");
+await mkdir(metadataDir, { recursive: true });
+const catalog = new SqliteCatalog(join(metadataDir, "catalog.sqlite"));
+catalog.createWorkspace({ id: "workspace-v3-smoke", name: "V3 render smoke", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
+const sourceArtifacts = [
+  { schemaVersion: 1, artifactId: "asset-a-roll", workspaceId: "workspace-v3-smoke", kind: "source", relativePath: "originals/a-roll.mp4", mimeType: "video/mp4", contentHash: aRollHash, byteSize: (await stat(aRollPath)).size, parentArtifactIds: [], validationStatus: "valid" },
+  { schemaVersion: 1, artifactId: "asset-b-roll", workspaceId: "workspace-v3-smoke", kind: "source", relativePath: "originals/b-roll.mp4", mimeType: "video/mp4", contentHash: bRollHash, byteSize: (await stat(bRollPath)).size, parentArtifactIds: [], validationStatus: "valid" },
+];
+catalog.insertArtifacts(sourceArtifacts);
+const renderJobId = "job-render-v3-smoke";
+catalog.insertJob({ schemaVersion: 1, id: renderJobId, kind: "edit.render", inputHash: "sha256:render-v3-smoke", state: "queued", attempt: 0, idempotencyKey: renderJobId, idempotencyScope: "workspace-v3-smoke", correlationId: renderJobId, artifactIds: [], createdAt: now, updatedAt: now });
+const leaseToken = catalog.claimJob(renderJobId, "render-smoke", new Date(now), 60_000);
+if (!leaseToken || !catalog.heartbeatJob(renderJobId, "render-smoke", leaseToken, new Date(now), 60_000)) throw new Error("render smoke job lease failed");
+const outputArtifactIds = result.manifest.outputs.map((output) => `artifact-render-v3-smoke-${output.kind}`).concat("artifact-render-v3-smoke-manifest");
+catalog.insertArtifacts(result.manifest.outputs.map((output) => ({ schemaVersion: 1, artifactId: `artifact-render-v3-smoke-${output.kind}`, workspaceId: "workspace-v3-smoke", kind: `render-${output.kind}`, relativePath: output.relativePath, mimeType: output.mimeType, contentHash: output.contentHash, byteSize: output.byteSize, parentArtifactIds: sourceArtifacts.map((artifact) => artifact.artifactId), validationStatus: "valid" })).concat([{ schemaVersion: 1, artifactId: "artifact-render-v3-smoke-manifest", workspaceId: "workspace-v3-smoke", kind: "render-manifest", relativePath: "exports/render-v3-smoke.manifest.json", mimeType: "application/json", contentHash: result.manifestHash, byteSize: result.manifestByteSize, parentArtifactIds: sourceArtifacts.map((artifact) => artifact.artifactId), validationStatus: "valid" }]));
+if (!catalog.transitionJob(renderJobId, "running", "succeeded", leaseToken, { artifactIds: outputArtifactIds, checkpoint: { manifestHash: result.manifestHash } })) throw new Error("render smoke job completion failed");
+const persistedArtifactCount = catalog.listArtifacts("workspace-v3-smoke").length;
+const persistedJob = catalog.getJob(renderJobId);
+catalog.close();
 const probe = JSON.parse(await run("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", result.outputPath]));
 const outputStats = await stat(result.outputPath);
 console.log(JSON.stringify({
@@ -77,4 +97,5 @@ console.log(JSON.stringify({
   output: { relativePath: "exports/render-v3-smoke.mp4", byteSize: outputStats.size, durationMs: Math.round(Number(probe.format.duration) * 1000), streams: probe.streams.map((stream) => ({ codecType: stream.codec_type, codec: stream.codec_name, width: stream.width, height: stream.height, sampleRate: stream.sample_rate })) },
   subtitle: { relativePath: "exports/render-v3-smoke.srt", exists: Boolean(result.subtitlePath) },
   manifest: { relativePath: "exports/render-v3-smoke.manifest.json", resolvedSpecHash: result.manifest.resolvedSpecHash, outputCount: result.manifest.outputs.length },
+  catalog: { schemaVersion: 8, persistedArtifactCount, jobState: persistedJob?.state, jobArtifactCount: persistedJob?.artifactIds.length ?? 0 },
 }));

@@ -43,6 +43,11 @@ async function initializeWorkspace(workspacePath) {
   const nextCatalog = new runtime.storage.SqliteCatalog(path.join(metadataDirectory, "catalog.sqlite"));
   const nextWorkspaceId = workspaceIdForPath(canonicalWorkspacePath);
   try {
+    // A previous Electron process may have died while a local media/render job
+    // or outbox message held a lease. Recover only expired leases; an active
+    // lease remains fenced until its owner times out.
+    nextCatalog.recoverExpiredLeases(new Date());
+    nextCatalog.recoverExpiredOutboxClaims(new Date());
     if (!nextCatalog.getWorkspace(nextWorkspaceId)) {
       const now = new Date().toISOString();
       nextCatalog.createWorkspace({ id: nextWorkspaceId, name: path.basename(canonicalWorkspacePath), rootPath: canonicalWorkspacePath, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
@@ -538,6 +543,8 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
 
 ipcMain.handle("desktop:render-edit", async (_event, raw) => {
   let renderRunId = null;
+  let renderJobId = null;
+  let renderJobLeaseToken = null;
   let renderWorkspace = null;
   let renderRuntime = null;
   try {
@@ -574,10 +581,62 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
     renderRunId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
     const renderNow = new Date().toISOString();
     workspace.catalog.saveRenderRun({ schemaVersion: 1, id: renderRunId, projectId: raw.projectId, frozenEditSpecId: frozen.id, state: "running", createdAt: renderNow, updatedAt: renderNow });
+    renderJobId = `job-${renderRunId}`;
+    workspace.catalog.insertJob({
+      schemaVersion: 1,
+      id: renderJobId,
+      kind: "edit.render",
+      inputHash: `sha256:${createHash("sha256").update(JSON.stringify({ projectId: raw.projectId, proposalId: proposal.id, assetLocks })).digest("hex")}`,
+      state: "queued",
+      attempt: 0,
+      idempotencyKey: renderRunId,
+      idempotencyScope: workspace.workspaceId,
+      correlationId: renderRunId,
+      artifactIds: [],
+      createdAt: renderNow,
+      updatedAt: renderNow,
+    });
+    renderJobLeaseToken = workspace.catalog.claimJob(renderJobId, "render-main", new Date(renderNow), 10 * 60 * 1000);
+    if (!renderJobLeaseToken || !workspace.catalog.heartbeatJob(renderJobId, "render-main", renderJobLeaseToken, new Date(renderNow), 10 * 60 * 1000)) throw new Error("渲染任务无法取得本地租约");
     const result = await runtime.exchange.exportRenderPackage({ workspaceRoot: workspace.workspacePath, renderId, frozenEditSpec: frozen, assets });
+    const parentArtifactIds = assetLocks.map((lock) => lock.assetId);
+    const outputArtifacts = result.manifest.outputs.map((output) => ({
+      schemaVersion: 1,
+      artifactId: `artifact-${renderId}-${output.kind}`,
+      workspaceId: workspace.workspaceId,
+      kind: `render-${output.kind}`,
+      relativePath: output.relativePath,
+      mimeType: output.mimeType,
+      contentHash: output.contentHash,
+      byteSize: output.byteSize,
+      parentArtifactIds,
+      validationStatus: "valid",
+    }));
+    outputArtifacts.push({
+      schemaVersion: 1,
+      artifactId: `artifact-${renderId}-manifest`,
+      workspaceId: workspace.workspaceId,
+      kind: "render-manifest",
+      relativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/"),
+      mimeType: "application/json",
+      contentHash: result.manifestHash,
+      byteSize: result.manifestByteSize,
+      parentArtifactIds,
+      validationStatus: "valid",
+    });
+    workspace.catalog.insertArtifacts(outputArtifacts);
+    const outputArtifactIds = outputArtifacts.map((artifact) => artifact.artifactId);
+    if (!workspace.catalog.transitionJob(renderJobId, "running", "succeeded", renderJobLeaseToken, { artifactIds: outputArtifactIds, checkpoint: { renderRunId, manifestHash: result.manifestHash, outputCount: outputArtifactIds.length } })) throw new Error("渲染任务完成状态未能持久化");
     workspace.catalog.saveRenderRun({ schemaVersion: 1, id: renderRunId, projectId: raw.projectId, frozenEditSpecId: frozen.id, state: "succeeded", manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/"), manifestHash: result.manifestHash, createdAt: renderNow, updatedAt: new Date().toISOString() });
-    return { ok: true, renderId, renderRunId, manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
+    return { ok: true, renderId, renderRunId, jobId: renderJobId, artifactIds: outputArtifactIds, manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
   } catch (error) {
+    if (renderJobId && renderJobLeaseToken && renderWorkspace) {
+      try {
+        renderWorkspace.catalog.transitionJob(renderJobId, "running", "failed", renderJobLeaseToken, { lastError: { code: "EDIT_RENDER_FAILED", message: error instanceof Error ? error.message : "AI 剪辑导出失败", retryable: true } });
+      } catch {
+        // If the lease expired, recovery will leave the job inspectable instead of overwriting a newer worker.
+      }
+    }
     if (renderRunId && renderWorkspace && renderRuntime) {
       const message = error instanceof Error ? error.message : "AI 剪辑导出失败";
       try {

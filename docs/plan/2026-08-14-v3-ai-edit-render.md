@@ -1,7 +1,7 @@
 # V3 AI 剪辑：提案到可交付视频
 
 日期：2026-08-14  
-状态：参考执行内核已完成；桌面 UI 和真实 AI 提案接入待下一小步  
+状态：参考执行内核、桌面 AI 粗剪 UI、本地 render Job/Artifact 回写已完成；Provider 提案的 CommandReceipt 仍待补齐
 对应路线图：`docs/Implementation-Plan-v0.2.md` 的 V4（产品名称为“AI 粗剪 / AI 剪辑”）
 
 ## 1. 为什么叫 AI 剪辑
@@ -69,7 +69,7 @@ npm run test:render:smoke
 
 当前实现是可运行的 reference execution kernel，还不是完整 UI 功能：
 
-- 尚未从本地素材库自动生成 `EditProposal`；下一步接 `AgentRuntimePort` 的 mock + 一个真实 Provider；
+- 已能从本地素材库生成可审阅 `EditProposal`，并通过 `AgentRuntimePort` 选择本地 fallback 或 APIMart AI SDK；仍需把 Provider 提案的 pending/submission_unknown 状态提升为持久化 CommandReceipt；
 - 当前 reference renderer 以连续单视频轨为基线，B-roll 先作为时间线上的可替换片段；多层 overlay、花字、ASS 烧录、转场和音频 ducking 需要在 RenderIR 合同中单独增加 golden fixture；
 - 当前导出交付是 MP4 + SRT + manifest；FCPXML、OTIO、剪映草稿必须读取同一 RenderIR，再输出 `CapabilityReport/LossReport`，不能反过来当事实源；
 - 当前没有让模型决定最终写盘路径、FFmpeg 参数或任意命令的权限。

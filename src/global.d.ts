@@ -191,6 +191,8 @@ interface EditRenderResult {
   message?: string;
   renderId?: string;
   renderRunId?: string;
+  jobId?: string;
+  artifactIds?: string[];
   files?: { video: string; subtitle: string | null; manifest: string };
 }
 

@@ -271,6 +271,17 @@ async function sha256File(path: string) {
   });
 }
 
+async function atomicWriteText(targetPath: string, body: string) {
+  await mkdir(dirname(targetPath), { recursive: true });
+  const temporaryPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    await writeFile(temporaryPath, body, "utf8");
+    await rename(temporaryPath, targetPath);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+}
+
 function sortByTimeline<T extends { id: string; timeline: TimeRange }>(clips: T[]) {
   return [...clips].sort((left, right) => left.timeline.startMs - right.timeline.startMs || left.timeline.endMs - right.timeline.endMs || left.id.localeCompare(right.id));
 }
@@ -553,8 +564,7 @@ export async function exportRenderPackage(input: {
   const outputStats = await stat(outputPath);
   outputs.push({ kind: "video", relativePath: relative(root, outputPath).split(sep).join("/"), contentHash: outputHash, byteSize: outputStats.size, mimeType: "video/mp4" });
   if (spec.outputProfile.subtitle === "srt" && subtitleText) {
-    await mkdir(dirname(subtitlePath), { recursive: true });
-    await writeFile(subtitlePath, subtitleText, "utf8");
+    await atomicWriteText(subtitlePath, subtitleText);
     const subtitleHash = await sha256File(subtitlePath);
     const subtitleStats = await stat(subtitlePath);
     outputs.push({ kind: "subtitle", relativePath: relative(root, subtitlePath).split(sep).join("/"), contentHash: subtitleHash, byteSize: subtitleStats.size, mimeType: "application/x-subrip" });
@@ -575,8 +585,7 @@ export async function exportRenderPackage(input: {
     createdAt: now,
   });
   const manifestBody = `${JSON.stringify(manifest, null, 2)}\n`;
-  await mkdir(dirname(manifestPath), { recursive: true });
-  await writeFile(manifestPath, manifestBody, "utf8");
+  await atomicWriteText(manifestPath, manifestBody);
   const manifestHash = await sha256File(manifestPath);
   const manifestStats = await stat(manifestPath);
   return { ir, manifest, outputPath, subtitlePath: subtitleText ? subtitlePath : undefined, manifestPath, manifestHash, manifestByteSize: manifestStats.size };
