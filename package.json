@@ -64,7 +64,7 @@
     "productName": "Creator Copilot Local",
     "directories": { "output": "release" },
     "asar": true,
-    "asarUnpack": ["node_modules/better-sqlite3/**/*", "electron/**/*"],
+    "asarUnpack": ["node_modules/better-sqlite3/**/*", "electron/**/*", "apps/desktop/analysis-worker.cjs"],
     "files": ["dist/**/*", "dist-electron/**/*", "electron/**/*", "apps/desktop/**/*", "package.json"],
     "mac": { "target": [{ "target": "dir", "arch": ["arm64"] }], "category": "public.app-category.video" },
     "win": { "target": [{ "target": "dir", "arch": ["x64"] }] },

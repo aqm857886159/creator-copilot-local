@@ -43,6 +43,7 @@
 
 - [x] `apps/desktop/main.cjs` 成为 package main 的兼容入口；旧 main 逻辑仍可回滚。
 - [x] 新 preload 路径在真实 macOS arm64 packaged UI smoke 中完成 IPC、SQLite 和 AI 剪辑导出闭环。
+- [x] utility worker 入口切换到 `apps/desktop/analysis-worker.cjs`，旧实现仍可回滚，打包时显式 unpack。
 - [ ] main/preload/utility 逻辑全部迁出旧 `electron/`。
 - [ ] root Vite/Express scaffold 完成 workspace package 化。
 - [ ] Windows x64 与 clean checkout 验证。

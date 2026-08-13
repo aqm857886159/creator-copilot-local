@@ -128,8 +128,16 @@ function proposalIdFromReceipt(receipt) {
 }
 
 function analysisWorkerScriptPath() {
-  const unpacked = path.join(process.resourcesPath, "app.asar.unpacked", "electron", "analysis-worker.cjs");
-  return app.isPackaged && existsSync(unpacked) ? unpacked : path.join(__dirname, "analysis-worker.cjs");
+  const unpackedCandidates = [
+    path.join(process.resourcesPath, "app.asar.unpacked", "apps", "desktop", "analysis-worker.cjs"),
+    path.join(process.resourcesPath, "app.asar.unpacked", "electron", "analysis-worker.cjs"),
+  ];
+  if (app.isPackaged) {
+    const unpacked = unpackedCandidates.find((candidate) => existsSync(candidate));
+    if (unpacked) return unpacked;
+  }
+  const localCandidates = [path.join(__dirname, "..", "apps", "desktop", "analysis-worker.cjs"), path.join(__dirname, "analysis-worker.cjs")];
+  return localCandidates.find((candidate) => existsSync(candidate)) ?? localCandidates[0];
 }
 
 function runAnalysisWorker(payload) {
