@@ -1357,10 +1357,17 @@ app.whenReady().then(() => {
           for (let attempt = 0; attempt < 40 && buttons().length === 0; attempt += 1) await wait(250);
           if (buttons().length === 0) throw new Error("React 页面没有挂载按钮；body=" + (document.body?.innerText ?? "").slice(0, 300));
           const clickText = (text, occurrence = 0) => {
-            const matches = buttons().filter((button) => button.textContent?.includes(text));
+            const matches = buttons().filter((button) => !button.disabled && button.textContent?.includes(text));
             const button = matches[occurrence];
             if (!button) throw new Error("找不到按钮：" + text + " #" + occurrence);
             button.click();
+          };
+          const waitFor = async (predicate, label) => {
+            for (let attempt = 0; attempt < 80; attempt += 1) {
+              if (predicate()) return;
+              await wait(250);
+            }
+            throw new Error("等待超时：" + label);
           };
           clickText("创作项目");
           await wait(300);
@@ -1369,8 +1376,9 @@ app.whenReady().then(() => {
           await wait(900);
           if (!document.querySelector(".capture-result")) throw new Error("拍摄包没有出现在创作页面");
           for (let index = 0; index < 3; index += 1) {
+            await waitFor(() => buttons().some((button) => !button.disabled && button.textContent?.includes("导入 Take")), "Take 导入按钮可用");
             clickText("导入 Take", index);
-            await wait(450);
+            await waitFor(() => buttons().filter((button) => button.classList.contains("take-chip")).length >= index + 1, "第 " + (index + 1) + " 个 Take 导入完成");
           }
           const takeButtons = buttons().filter((button) => button.classList.contains("take-chip"));
           if (takeButtons.length < 3) throw new Error("没有生成三条 Take");

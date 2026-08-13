@@ -36,7 +36,7 @@
 
 ```text
 root package.json       npm scripts、Vite 7、React 19、TypeScript 5.8、Vitest
-src/main.tsx            当前 renderer 入口
+apps/desktop/renderer/   当前 renderer 入口（root Vite 过渡构建）
 src/lib/api.ts          当前 API client
 src/types.ts            当前 UI 类型
 server/index.ts         当前 Express scaffold
@@ -199,7 +199,7 @@ interface AgentRuntimePort {
 - pnpm workspace、Node 24/Electron 43/TypeScript 6 版本锁定；
 - Electron main/preload/renderer 最小入口；
 - `contextIsolation`、sandbox、preload API allowlist、受控 workspace path；
-- 迁移现有 Vite UI 为暂时 `legacy-shell`，不迁移 Express 业务逻辑；
+- 迁移现有 Vite UI 为 `apps/desktop/renderer`，暂不迁移 Express 业务逻辑；
 - CI：依赖冻结、typecheck、test、build、secret scan、SPDX/NOTICE 检查；
 - macOS arm64 packaged app smoke；再增加 Windows x64 smoke。
 

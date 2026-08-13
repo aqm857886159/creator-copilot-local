@@ -40,6 +40,8 @@ clearTimeout(timeout);
 const smokeLine = stdout.split(/\r?\n/).map((line) => line.trim()).find((line) => line.startsWith("{\"ok\""));
 if (exitCode !== 0 || !smokeLine) {
   console.error(JSON.stringify({ ok: false, exitCode, stdout: stdout.slice(-3000), stderr: stderr.slice(-5000) }));
+  await rm(fixtureRoot, { recursive: true, force: true });
   process.exit(1);
 }
 console.log(smokeLine);
+await rm(fixtureRoot, { recursive: true, force: true });

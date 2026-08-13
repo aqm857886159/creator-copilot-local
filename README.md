@@ -11,7 +11,7 @@ npm install
 npm run dev:web
 ```
 
-迁移中的 workspace 入口也可使用 pnpm；当前包级命令只是兼容 wrapper，真实逻辑仍由 root scripts 负责：
+桌面端入口和 renderer 已迁入 `apps/desktop`；root Vite 仍是过渡构建器，Express 仅保留为历史 scaffold。迁移中的 workspace 入口也可使用 pnpm；当前包级命令只是兼容 wrapper，真实逻辑仍由 root scripts 负责：
 
 ```bash
 pnpm --filter @creator-copilot/desktop typecheck
@@ -45,6 +45,9 @@ npm run build
 
 # macOS arm64 目录打包 + preload/SQLite 启动 smoke
 npm run test:desktop:package
+
+# 打包应用真实用户旅途：创作项目 → 拍摄包 → 三个 Take → 本地分析 → AI 剪辑提案 → 导出
+npm run test:desktop:ui
 ```
 
 打包产物位于 `release/`，仅为本地未签名目录产物。

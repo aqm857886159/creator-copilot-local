@@ -11,9 +11,9 @@
 
 | 现有 scaffold | 目标位置/边界 | 当前动作 | 删除条件 |
 |---|---|---|---|
-| `src/main.tsx`、`src/app.tsx`、`src/components/*`、`src/styles.css` | `apps/desktop/renderer` 或后续 `packages/ui` | 先保留 root Vite 入口；`apps/desktop` 只作为桌面入口迁移的目标记录 | 新 renderer 构建、UI smoke 和 preload API 在 clean checkout 通过 |
-| `src/lib/api.ts` | `apps/desktop/renderer` 查询 client，写操作走 preload IPC | 不把旧 API client 直接升级为领域事实；现有页面逐步改用 `window.desktop` | 所有生产页面不再依赖 Express scaffold |
-| `src/types.ts`、`src/global.d.ts` | `packages/contracts` + renderer-only view model | 已经有部分领域类型在 `packages/*`；逐项迁移并保留兼容类型 | 无生产调用方引用旧重复类型 |
+| `src/main.tsx`、`src/app.tsx`、`src/components/*`、`src/styles.css` | `apps/desktop/renderer` 或后续 `packages/ui` | 已迁入 `apps/desktop/renderer`；root Vite 仍作为过渡构建器 | 新 renderer 构建、UI smoke 和 preload API 在 clean checkout 通过 |
+| `src/lib/api.ts` | `apps/desktop/renderer` 查询 client，写操作走 preload IPC | 已随 renderer 迁移；不把旧 API client升级为领域事实 | 所有生产页面不再依赖 Express scaffold |
+| `src/types.ts`、`src/global.d.ts` | `packages/contracts` + renderer-only view model | renderer 类型已迁入 `apps/desktop/renderer`，领域合同继续逐项收敛到 `packages/*` | 无生产调用方引用旧重复类型 |
 | `electron/main.cjs` | `apps/desktop/main` | 真实逻辑已迁入 `apps/desktop/main.cjs`；旧路径只保留 `require` 兼容入口 | main、IPC、worker 和 packaged smoke 全部从新路径直接运行 |
 | `electron/preload.cjs` | `apps/desktop/preload` | 当前新路径承载真实 preload；旧路径保留兼容转发 | 所有脚本、构建和发布产物只需要新路径 |
 | `electron/analysis-worker.cjs`、`electron/sidecars/*` | `apps/desktop/utility` 与可选 sidecar assets | 真实 worker/sidecar 已迁入 `apps/desktop`；旧 worker 入口保留兼容转发 | worker 协议、取消、崩溃恢复和 Windows 打包 smoke 通过 |
@@ -47,6 +47,7 @@
 - [x] utility worker 兼容 Electron `parentPort` 的 MessageEvent 数据封装，并保留旧 direct-payload 测试兼容。
 - [x] `pnpm-workspace.yaml` 与 `@creator-copilot/desktop` wrapper 已提供；pnpm 命令复用已验证的 root npm 脚本，避免双重构建逻辑。
 - [x] main/preload/utility/sidecar 事实源已迁出旧 `electron/`；旧目录只保留回滚入口。
+- [x] renderer 已迁入 `apps/desktop/renderer`，root Vite 仅作为过渡构建器。
 - [ ] root Vite/Express scaffold 完成 workspace package 化。
 - [ ] Windows x64 与 clean checkout 验证。
 
