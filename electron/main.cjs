@@ -214,6 +214,52 @@ async function analyzeLocalArtifact({ workspace, runtime, artifact }) {
   }
 }
 
+async function resolveFrozenRenderAssets({ workspace, runtime, frozen }) {
+  const assets = {};
+  const workspaceRoot = realpathSync(workspace.workspacePath);
+  for (const lock of frozen.assetLocks) {
+    const artifact = workspace.catalog.getArtifact(lock.assetId);
+    if (!artifact || artifact.workspaceId !== workspace.workspaceId) throw new Error(`冻结规格引用的素材不存在：${lock.assetId}`);
+    if (artifact.contentHash !== lock.contentHash) throw new Error(`素材 hash 已变化：${lock.assetId}`);
+    const absolutePath = path.resolve(workspace.workspacePath, artifact.relativePath);
+    if (!existsSync(absolutePath)) throw new Error(`素材文件不存在：${lock.assetId}`);
+    const canonicalPath = realpathSync(absolutePath);
+    if (canonicalPath !== workspaceRoot && !canonicalPath.startsWith(`${workspaceRoot}${path.sep}`)) throw new Error(`素材路径越过工作区：${lock.assetId}`);
+    const probe = await new runtime.media.FfmpegToolchain().probe(canonicalPath);
+    if (!probe.durationMs || probe.durationMs <= 0) throw new Error(`素材没有有效时长：${lock.assetId}`);
+    assets[lock.assetId] = { assetId: lock.assetId, relativePath: artifact.relativePath, absolutePath: canonicalPath, contentHash: artifact.contentHash, durationMs: probe.durationMs, hasVideo: probe.streams.some((stream) => stream.kind === "video"), hasAudio: probe.streams.some((stream) => stream.kind === "audio") };
+  }
+  return assets;
+}
+
+function renderOutputArtifacts({ workspace, renderId, result, parentArtifactIds }) {
+  const outputArtifacts = result.manifest.outputs.map((output) => ({
+    schemaVersion: 1,
+    artifactId: `artifact-${renderId}-${output.kind}`,
+    workspaceId: workspace.workspaceId,
+    kind: `render-${output.kind}`,
+    relativePath: output.relativePath,
+    mimeType: output.mimeType,
+    contentHash: output.contentHash,
+    byteSize: output.byteSize,
+    parentArtifactIds,
+    validationStatus: "valid",
+  }));
+  outputArtifacts.push({
+    schemaVersion: 1,
+    artifactId: `artifact-${renderId}-manifest`,
+    workspaceId: workspace.workspaceId,
+    kind: "render-manifest",
+    relativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/"),
+    mimeType: "application/json",
+    contentHash: result.manifestHash,
+    byteSize: result.manifestByteSize,
+    parentArtifactIds,
+    validationStatus: "valid",
+  });
+  return outputArtifacts;
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440,
@@ -728,6 +774,7 @@ ipcMain.handle("desktop:list-edit-proposal-recoveries", async (_event, projectId
 });
 
 ipcMain.handle("desktop:render-edit", async (_event, raw) => {
+  let renderId = null;
   let renderRunId = null;
   let renderJobId = null;
   let renderJobLeaseToken = null;
@@ -835,7 +882,7 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
       }
     }
     if (!frozenSpec) throw new Error("冻结剪辑规格没有生成");
-    const renderId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
+    renderId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
     const frozen = frozenSpec;
     renderRunId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
     const renderNow = new Date().toISOString();
@@ -905,7 +952,95 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
         // Preserve the original render error; recovery can inspect a running run after restart.
       }
     }
-    return { ok: false, errorCode: error && typeof error === "object" && "code" in error ? String(error.code) : "edit_render_failed", freezeReceipt, message: error instanceof Error ? error.message : "AI 剪辑导出失败" };
+    return { ok: false, errorCode: error && typeof error === "object" && "code" in error ? String(error.code) : "edit_render_failed", freezeReceipt, renderId, renderRunId, jobId: renderJobId, message: error instanceof Error ? error.message : "AI 剪辑导出失败" };
+  }
+});
+
+ipcMain.handle("desktop:list-render-recoveries", async (_event, projectId) => {
+  try {
+    const workspace = requireWorkspace();
+    if (typeof projectId !== "string" || !projectId) throw new Error("项目 ID 无效");
+    const project = workspace.catalog.getProject(projectId);
+    if (!project || project.workspaceId !== workspace.workspaceId) throw new Error("项目不存在或不属于当前工作区");
+    const items = workspace.catalog.listRenderRunsForProject(projectId).flatMap((renderRun) => {
+      const job = workspace.catalog.getJob(`job-${renderRun.id}`);
+      if (!job || job.state === "succeeded" || job.state === "cancelled") return [];
+      return [{ renderRun, job: { id: job.id, state: job.state, attempt: job.attempt, lastError: job.lastError } }];
+    });
+    return { ok: true, items };
+  } catch (error) {
+    return { ok: false, errorCode: "render_recovery_list_failed", message: error instanceof Error ? error.message : "无法读取渲染恢复状态" };
+  }
+});
+
+ipcMain.handle("desktop:retry-render", async (_event, raw) => {
+  let workspace = null;
+  let runtime = null;
+  let renderRun = null;
+  let job = null;
+  let leaseToken = null;
+  try {
+    workspace = requireWorkspace();
+    if (!raw || typeof raw.projectId !== "string" || typeof raw.renderRunId !== "string") throw new Error("渲染重试参数无效");
+    const project = workspace.catalog.getProject(raw.projectId);
+    if (!project || project.workspaceId !== workspace.workspaceId) throw new Error("项目不存在或不属于当前工作区");
+    renderRun = workspace.catalog.getRenderRun(raw.renderRunId);
+    if (!renderRun || renderRun.projectId !== raw.projectId) throw new Error("渲染运行不存在或不属于当前项目");
+    const frozen = workspace.catalog.getFrozenEditSpec(renderRun.frozenEditSpecId);
+    if (!frozen || frozen.projectId !== raw.projectId) throw new Error("渲染重试对应的 FrozenEditSpec 不存在");
+    const jobId = `job-${renderRun.id}`;
+    job = workspace.catalog.getJob(jobId);
+    if (!job) throw new Error("渲染重试对应的 Job 不存在");
+    if (job.state === "succeeded") throw new Error("这次渲染已经成功，无需重试");
+    if (["claimed", "running"].includes(job.state)) return { ok: false, status: "running", renderRunId: renderRun.id, jobId, message: "渲染任务仍在运行，请等待当前任务完成。" };
+    if (["failed", "timed_out"].includes(job.state)) {
+      if (!workspace.catalog.transitionJob(job.id, job.state, "retry_wait", undefined, { retryAfter: new Date().toISOString(), lastError: undefined })) throw new Error("失败渲染任务无法进入重试队列");
+      job = workspace.catalog.getJob(job.id);
+    }
+    if (job?.state === "needs_attention") {
+      if (!workspace.catalog.transitionJob(job.id, "needs_attention", "queued", undefined, { lastError: undefined })) throw new Error("需要人工处理的渲染任务无法重新排队");
+      job = workspace.catalog.getJob(job.id);
+    }
+    if (job?.state === "retry_wait") {
+      if (!workspace.catalog.transitionJob(job.id, "retry_wait", "queued")) throw new Error("渲染任务无法重新排队");
+      job = workspace.catalog.getJob(job.id);
+    }
+    if (!job || job.state !== "queued") throw new Error(`当前渲染状态不可重试：${job?.state ?? "unknown"}`);
+    const now = new Date();
+    leaseToken = workspace.catalog.claimJob(job.id, "render-main", now, 10 * 60 * 1000);
+    if (!leaseToken || !workspace.catalog.heartbeatJob(job.id, "render-main", leaseToken, new Date(), 10 * 60 * 1000)) throw new Error("渲染重试任务无法取得本地租约");
+    job = workspace.catalog.getJob(job.id);
+    if (!job) throw new Error("渲染重试 Job 在取得租约后消失");
+    runtime = await getDesktopRuntime();
+    const assets = await resolveFrozenRenderAssets({ workspace, runtime, frozen });
+    const renderId = `${renderRun.id}-attempt-${job.attempt}`;
+    const renderNow = new Date().toISOString();
+    workspace.catalog.saveRenderRun({ ...renderRun, state: "running", error: undefined, updatedAt: renderNow });
+    const result = await runtime.exchange.exportRenderPackage({ workspaceRoot: workspace.workspacePath, renderId, frozenEditSpec: frozen, assets });
+    const parentArtifactIds = frozen.assetLocks.map((lock) => lock.assetId);
+    const outputArtifacts = renderOutputArtifacts({ workspace, renderId, result, parentArtifactIds });
+    workspace.catalog.insertArtifacts(outputArtifacts);
+    if (!workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: outputArtifacts.map((artifact) => artifact.artifactId), checkpoint: { renderRunId: renderRun.id, renderId, manifestHash: result.manifestHash, outputCount: outputArtifacts.length } })) throw new Error("渲染重试完成状态未能持久化");
+    workspace.catalog.saveRenderRun({ ...renderRun, state: "succeeded", manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/"), manifestHash: result.manifestHash, updatedAt: new Date().toISOString() });
+    return { ok: true, frozenEditSpecId: frozen.id, renderId, renderRunId: renderRun.id, jobId: job.id, artifactIds: outputArtifacts.map((artifact) => artifact.artifactId), manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "AI 剪辑重试失败";
+    if (workspace && job && leaseToken) {
+      try {
+        workspace.catalog.transitionJob(job.id, "running", "failed", leaseToken, { lastError: { code: "EDIT_RENDER_RETRY_FAILED", message, retryable: true } });
+      } catch {
+        // A stale lease is intentionally not allowed to overwrite a newer worker.
+      }
+    }
+    if (workspace && renderRun) {
+      try {
+        const current = workspace.catalog.getRenderRun(renderRun.id);
+        if (current) workspace.catalog.saveRenderRun({ ...current, state: "failed", error: { code: "edit_render_retry_failed", message }, updatedAt: new Date().toISOString() });
+      } catch {
+        // Keep the original failure observable in the Job when persistence itself fails.
+      }
+    }
+    return { ok: false, errorCode: "edit_render_retry_failed", renderRunId: renderRun?.id, jobId: job?.id, message };
   }
 });
 

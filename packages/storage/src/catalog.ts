@@ -709,6 +709,14 @@ export class SqliteCatalog {
     return RenderRunRecordSchema.parse({ schemaVersion: 1, ...record, manifestRelativePath: row.manifestRelativePath ?? undefined, manifestHash: row.manifestHash ?? undefined, error: errorJson ? parseJson(errorJson, "render run error") : undefined });
   }
 
+  listRenderRunsForProject(projectId: string) {
+    const rows = this.db.prepare("SELECT id FROM render_runs WHERE project_id = ? ORDER BY updated_at DESC, id DESC").all(projectId) as Array<{ id: string }>;
+    return rows.flatMap((row) => {
+      const run = this.getRenderRun(row.id);
+      return run ? [run] : [];
+    });
+  }
+
   saveAnalysisFacts(rawFacts: AnalysisFact[]) {
     const facts = rawFacts.map((fact) => AnalysisFactSchema.parse(fact));
     const transaction = this.db.transaction(() => {

@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld("desktop", {
   reconcileEditProposal: (input) => ipcRenderer.invoke("desktop:reconcile-edit-proposal", input),
   listEditProposalRecoveries: (projectId) => ipcRenderer.invoke("desktop:list-edit-proposal-recoveries", projectId),
   renderEdit: (input) => ipcRenderer.invoke("desktop:render-edit", input),
+  listRenderRecoveries: (projectId) => ipcRenderer.invoke("desktop:list-render-recoveries", projectId),
+  retryRender: (input) => ipcRenderer.invoke("desktop:retry-render", input),
   exportExchange: (input) => ipcRenderer.invoke("desktop:export-exchange", input),
   createPublishPackage: (input) => ipcRenderer.invoke("desktop:create-publish-package", input),
   listPublications: () => ipcRenderer.invoke("desktop:list-publications"),

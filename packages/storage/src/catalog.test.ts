@@ -314,6 +314,7 @@ describe("SqliteCatalog", () => {
     catalog.saveRenderRun({ schemaVersion: 1, id: "render-run-creation", projectId: "project-creation", frozenEditSpecId: frozen.id, state: "running", createdAt: now, updatedAt: now });
     catalog.saveRenderRun({ schemaVersion: 1, id: "render-run-creation", projectId: "project-creation", frozenEditSpecId: frozen.id, state: "succeeded", manifestRelativePath: "exports/render.manifest.json", manifestHash: "sha256:manifest", createdAt: now, updatedAt: now });
     expect(catalog.getRenderRun("render-run-creation")).toMatchObject({ state: "succeeded", manifestHash: "sha256:manifest" });
+    expect(catalog.listRenderRunsForProject("project-creation").map((run) => run.id)).toEqual(["render-run-creation"]);
     const publication = catalog.savePublication({ schemaVersion: 1, id: "publication-creation", projectId: "project-creation", packageId: "publish-render-run-creation", platform: "抖音", status: "published", publishedAt: now, createdAt: now, updatedAt: now });
     const metrics = MetricSnapshotSchema.parse({ schemaVersion: 1, id: "metric-creation", publicationId: publication.id, capturedAt: now, window: "24h", source: "manual", metrics: { views: 1200, likes: 90, comments: 12, shares: 8, saves: 11, completionRate: 0.38, averageWatchSeconds: 16, newFollowers: 5 }, notes: "手动录入" });
     catalog.saveMetricSnapshot(metrics);

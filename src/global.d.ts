@@ -216,6 +216,13 @@ interface EditRenderResult {
   files?: { video: string; subtitle: string | null; manifest: string };
 }
 
+interface RenderRecoveryListResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  items?: Array<{ renderRun: { schemaVersion: 1; id: string; projectId: string; frozenEditSpecId: string; state: string; manifestRelativePath?: string; manifestHash?: string; error?: { code: string; message: string } }; job: { id: string; state: string; attempt: number; lastError?: { code: string; message: string; retryable: boolean } } }>;
+}
+
 interface ReconcileEditProposalResult {
   ok: boolean;
   errorCode?: string;
@@ -318,6 +325,8 @@ interface Window {
     reconcileEditProposal: (input: { idempotencyScope: string; idempotencyKey: string; action: "user_confirmed_not_submitted" }) => Promise<ReconcileEditProposalResult>;
     listEditProposalRecoveries: (projectId: string) => Promise<EditProposalRecoveryListResult>;
     renderEdit: (input: { projectId: string; proposal: EditProposal }) => Promise<EditRenderResult>;
+    listRenderRecoveries: (projectId: string) => Promise<RenderRecoveryListResult>;
+    retryRender: (input: { projectId: string; renderRunId: string }) => Promise<EditRenderResult & { status?: "running" }>;
     exportExchange: (input: { renderRunId: string; formats: Array<"fcpxml" | "otio"> }) => Promise<ExchangeExportResult>;
     createPublishPackage: (input: { renderRunId: string; platform?: string; title: string; description?: string; hashtags?: string[]; rightsNote?: string }) => Promise<PublishPackageResult>;
     listPublications: () => Promise<PublicationListResult>;
