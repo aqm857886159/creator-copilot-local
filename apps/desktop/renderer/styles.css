@@ -317,7 +317,32 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .topic-history-row > span:last-child { display: inline-flex; align-items: center; gap: 5px; color: #71836b; font-size: 10px; white-space: nowrap; }
 .spin { animation: topic-spin .85s linear infinite; }
 @keyframes topic-spin { to { transform: rotate(360deg); } }
+.radar-video-detail-toggle { margin-left: auto; }
+.radar-video-detail-toggle:disabled { color: #aaa196; cursor: not-allowed; }
+.radar-video-detail-toggle .rotated { transform: rotate(180deg); }
+.radar-video-analysis { margin-top: 14px; padding-top: 14px; border-top: 1px solid #e8e1d6; }
+.radar-analysis-stats { display: flex; flex-wrap: wrap; gap: 12px; color: #958c80; font-size: 10px; }
+.radar-analysis-stats strong { color: #5d7457; font-size: 14px; font-weight: 650; }
+.radar-opening { margin-top: 12px; padding: 10px 11px; border-radius: 7px; background: #f2eee6; }
+.radar-opening p { margin: 5px 0 0; color: #625b52; font-size: 11px; line-height: 1.55; }
+.radar-timeline { display: flex; flex-direction: column; margin-top: 13px; }
+.radar-timeline-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid #eee8df; }
+.radar-timeline-row time { display: inline-flex; align-items: flex-start; gap: 4px; color: #8d857a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; line-height: 1.5; }
+.radar-timeline-row strong { color: #5b6857; font-size: 10px; font-weight: 650; }
+.radar-timeline-row p { margin: 4px 0 0; color: #665f56; font-size: 11px; line-height: 1.5; }
+.radar-timeline-row small { display: block; margin-top: 4px; color: #988f84; font-size: 9px; line-height: 1.45; }
+.radar-analysis-empty { margin-top: 12px; padding: 10px; border-radius: 7px; color: #9b9184; background: #f5f0e8; font-size: 10px; line-height: 1.5; }
+.radar-analysis-gap { margin: 10px 0 0; color: #a06c58; font-size: 10px; }
+.radar-opportunities { padding: 19px; border: 1px solid #d9dfd3; border-radius: 11px; background: #edf2e9; }
+.radar-opportunity-disclaimer { margin: 12px 0 0; color: #74816e; font-size: 11px; line-height: 1.55; }
+.radar-opportunity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.radar-opportunity { padding: 14px; border: 1px solid #d8e0d1; border-radius: 8px; background: rgba(255, 255, 251, .68); }
+.radar-opportunity h4 { margin: 0; color: #4d5e49; font-family: Georgia, "Songti SC", serif; font-size: 16px; font-weight: 500; line-height: 1.4; }
+.radar-opportunity p { margin: 8px 0 0; color: #687563; font-size: 11px; line-height: 1.6; }
+.radar-opportunity small { display: block; margin-top: 9px; padding-top: 8px; border-top: 1px solid #e0e7db; color: #8a9884; font-size: 9px; line-height: 1.5; }
+.radar-opportunity-evidence { margin-top: 8px; color: #708168; font-size: 9px; }
 @media (max-width: 980px) { .topic-source-grid, .topic-radar-quote-lines { grid-template-columns: 1fr; }.topic-opportunity-grid { grid-template-columns: 1fr; }.topic-radar-fields { grid-template-columns: minmax(0, 1fr) 1fr 1fr; } }
+@media (max-width: 980px) { .radar-opportunity-grid { grid-template-columns: 1fr; }.radar-timeline-row { grid-template-columns: 78px minmax(0, 1fr); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .001ms !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; } }
 @media (max-width: 1180px) { .sidebar { width: 220px; }.page-content { padding-right: 28px; padding-left: 28px; }.topbar { padding-right: 28px; padding-left: 28px; }.project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .review-grid { grid-template-columns: 1fr; } }

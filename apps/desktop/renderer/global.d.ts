@@ -59,9 +59,10 @@ interface AccountResearchResult {
     sourceInput: string;
     secUserId: string;
     profile: { nickname?: string; signature?: string; followerCount?: number; followingCount?: number; awemeCount?: number };
-    videos: Array<{ awemeId: string; description?: string; createTime?: string; shareUrl?: string; durationMs?: number; statistics: Record<string, number>; mediaAnalysisStatus: string; evidenceIds: string[]; analysisFactIds: string[]; artifactIds: string[] }>;
+    videos: Array<{ awemeId: string; description?: string; createTime?: string; shareUrl?: string; durationMs?: number; statistics: Record<string, number>; mediaAnalysisStatus: string; evidenceIds: string[]; analysisFactIds: string[]; artifactIds: string[]; analysis?: { status: "partial" | "completed"; analyzedAt?: string; summary?: string; factCount: number; shotCount: number; transcriptCount: number; ocrCount: number; missingKinds: string[]; openingText: string[]; timeline: Array<{ id: string; startMs: number; endMs: number; shotFactId?: string; transition?: string; transcript: Array<{ factId: string; startMs: number; endMs: number; text: string }>; ocr: Array<{ factId: string; startMs: number; endMs: number; text: string }> }> } }>;
     coverage: { requested: number; received: number; metadataAnalyzed: number; mediaAnalyzed: number; missingMedia: number; hasMore: boolean; note: string };
     findings: Array<{ id: string; kind: string; title: string; detail: string; evidenceIds: string[] }>;
+    opportunities: Array<{ id: string; title: string; angle: string; whyNow: string; sourceVideoIds: string[]; evidenceIds: string[]; status: "candidate" }>;
     evidence: Array<{ id: string; type: string; sourceId: string; label: string; payload: Record<string, unknown>; capturedAt: string }>;
   };
 }

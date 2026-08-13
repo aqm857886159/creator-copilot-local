@@ -18,8 +18,40 @@ export const BenchmarkVideoSchema = z.object({
   artifactIds: z.array(id).default([]),
   mediaAnalysisStatus: z.enum(["not_requested", "metadata_only", "queued", "partial", "completed", "failed"]),
   analysisFactIds: z.array(id).default([]),
+  analysis: z.object({
+    status: z.enum(["partial", "completed"]),
+    analyzedAt: z.string().datetime({ offset: true }).optional(),
+    summary: z.string().max(500).optional(),
+    factCount: z.number().int().nonnegative(),
+    shotCount: z.number().int().nonnegative(),
+    transcriptCount: z.number().int().nonnegative(),
+    ocrCount: z.number().int().nonnegative(),
+    missingKinds: z.array(z.enum(["shot", "transcript", "ocr"])).max(3),
+    openingText: z.array(z.string().min(1).max(500)).max(8),
+    timeline: z.array(z.object({
+      id,
+      startMs: z.number().int().nonnegative(),
+      endMs: z.number().int().positive(),
+      shotFactId: id.optional(),
+      transition: z.string().optional(),
+      transcript: z.array(z.object({ factId: id, startMs: z.number().int().nonnegative(), endMs: z.number().int().positive(), text: z.string().min(1).max(500) }).strict()).max(30),
+      ocr: z.array(z.object({ factId: id, startMs: z.number().int().nonnegative(), endMs: z.number().int().positive(), text: z.string().min(1).max(500) }).strict()).max(30),
+    }).strict()).max(500),
+  }).strict().optional(),
 }).strict();
 export type BenchmarkVideo = z.infer<typeof BenchmarkVideoSchema>;
+
+export const AccountResearchOpportunitySchema = z.object({
+  schemaVersion: z.literal(1),
+  id,
+  title: z.string().min(1).max(200),
+  angle: z.string().min(1).max(500),
+  whyNow: z.string().min(1).max(500),
+  sourceVideoIds: z.array(id).min(1).max(10),
+  evidenceIds: z.array(id).min(1).max(20),
+  status: z.literal("candidate"),
+}).strict();
+export type AccountResearchOpportunity = z.infer<typeof AccountResearchOpportunitySchema>;
 
 export const ResearchEvidenceSchema = z.object({
   schemaVersion: z.literal(1),
@@ -43,6 +75,7 @@ export const AccountResearchReportSchema = z.object({
   videos: z.array(BenchmarkVideoSchema),
   coverage: z.object({ requested: z.number().int().positive(), received: z.number().int().nonnegative(), metadataAnalyzed: z.number().int().nonnegative(), mediaAnalyzed: z.number().int().nonnegative(), mediaPartiallyAnalyzed: z.number().int().nonnegative().default(0), missingMedia: z.number().int().nonnegative(), hasMore: z.boolean(), note: z.string().min(1) }).strict(),
   findings: z.array(z.object({ id, kind: z.enum(["metadata_pattern", "topic_opportunity", "needs_media_analysis", "media_pattern"]), title: id, detail: z.string().min(1), evidenceIds: z.array(id) }).strict()),
+  opportunities: z.array(AccountResearchOpportunitySchema).max(20).default([]),
   evidence: z.array(ResearchEvidenceSchema),
   createdAt: z.string().datetime({ offset: true }),
 }).strict();
@@ -60,6 +93,7 @@ export type ResearchAnalysisUpdate = {
   factIds: string[];
   summary: string;
   analyzedAt: string;
+  facts?: ResearchMediaFactSummary["facts"];
 };
 
 export type ResearchMediaFactSummary = {
@@ -68,6 +102,51 @@ export type ResearchMediaFactSummary = {
   facts: Array<{ id: string; artifactId: string; kind: "transcript" | "ocr" | "shot" | "caption" | "label"; startMs: number; endMs: number; text: string; labels: string[]; contentHash: string }>;
   analyzedAt: string;
 };
+
+type ResearchTimelineFact = ResearchMediaFactSummary["facts"][number];
+
+function overlap(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number) {
+  return Math.min(leftEnd, rightEnd) > Math.max(leftStart, rightStart);
+}
+
+function shortText(value: string, max = 90) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+}
+
+function timelineForFacts(awemeId: string, facts: ResearchTimelineFact[]) {
+  const shots = facts.filter((fact) => fact.kind === "shot").sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
+  const transcripts = facts.filter((fact) => fact.kind === "transcript").sort((left, right) => left.startMs - right.startMs);
+  const ocr = facts.filter((fact) => fact.kind === "ocr").sort((left, right) => left.startMs - right.startMs);
+  if (shots.length === 0) return [];
+  return shots.map((shot, index) => ({
+    id: `timeline-${awemeId}-${index + 1}`,
+    startMs: shot.startMs,
+    endMs: shot.endMs,
+    shotFactId: shot.id,
+    transition: shot.labels.find((label) => ["cut", "dissolve", "fade", "unknown"].includes(label)) ?? undefined,
+    transcript: transcripts.filter((fact) => overlap(fact.startMs, fact.endMs, shot.startMs, shot.endMs)).slice(0, 30).map((fact) => ({ factId: fact.id, startMs: fact.startMs, endMs: fact.endMs, text: shortText(fact.text, 500) })),
+    ocr: ocr.filter((fact) => overlap(fact.startMs, fact.endMs, shot.startMs, shot.endMs)).slice(0, 30).map((fact) => ({ factId: fact.id, startMs: fact.startMs, endMs: fact.endMs, text: shortText(fact.text, 500) })),
+  }));
+}
+
+function analysisForVideo(awemeId: string, status: ResearchAnalysisUpdate["status"], facts: ResearchTimelineFact[], analyzedAt: string, summary: string) {
+  const shots = facts.filter((fact) => fact.kind === "shot");
+  const transcripts = facts.filter((fact) => fact.kind === "transcript").sort((left, right) => left.startMs - right.startMs);
+  const ocr = facts.filter((fact) => fact.kind === "ocr");
+  return {
+    status,
+    analyzedAt,
+    summary: shortText(summary, 500),
+    factCount: facts.length,
+    shotCount: shots.length,
+    transcriptCount: transcripts.length,
+    ocrCount: ocr.length,
+    missingKinds: (["shot", "transcript", "ocr"] as const).filter((kind) => !facts.some((fact) => fact.kind === kind)),
+    openingText: transcripts.filter((fact) => fact.startMs < 3_000).slice(0, 8).map((fact) => shortText(fact.text, 500)),
+    timeline: timelineForFacts(awemeId, facts),
+  };
+}
 
 function profilePayload(profile: TikHubProfile) {
   return { nickname: profile.nickname, signature: profile.signature, followerCount: profile.followerCount, followingCount: profile.followingCount, awemeCount: profile.awemeCount };
@@ -124,17 +203,23 @@ export function attachResearchMedia(report: AccountResearchReport, attachments: 
 
 export function attachResearchAnalysis(report: AccountResearchReport, updates: ResearchAnalysisUpdate[]) {
   const updateByAwemeId = new Map(updates.map((update) => [update.awemeId, update]));
-  const evidence = [...report.evidence];
+  const evidence = new Map(report.evidence.map((item) => [item.id, item]));
   const videos = report.videos.map((video) => {
     const update = updateByAwemeId.get(video.awemeId);
     if (!update) return video;
     const evidenceId = `evidence-media-${video.awemeId}-${update.analyzedAt.replace(/[^0-9]/g, "")}`;
-    evidence.push(ResearchEvidenceSchema.parse({ schemaVersion: 1, id: evidenceId, type: "media_fact", sourceId: video.awemeId, label: "本地媒体分析摘要", payload: { artifactIds: video.artifactIds, factIds: update.factIds, summary: update.summary, analyzedAt: update.analyzedAt }, capturedAt: update.analyzedAt }));
-    return BenchmarkVideoSchema.parse({ ...video, mediaAnalysisStatus: update.status, analysisFactIds: [...new Set(update.factIds)], evidenceIds: [...new Set([...video.evidenceIds, evidenceId])] });
+    evidence.set(evidenceId, ResearchEvidenceSchema.parse({ schemaVersion: 1, id: evidenceId, type: "media_fact", sourceId: video.awemeId, label: "本地媒体分析摘要", payload: { artifactIds: video.artifactIds, factIds: update.factIds, summary: update.summary, analyzedAt: update.analyzedAt }, capturedAt: update.analyzedAt }));
+    return BenchmarkVideoSchema.parse({
+      ...video,
+      mediaAnalysisStatus: update.status,
+      analysisFactIds: [...new Set(update.factIds)],
+      analysis: update.facts ? analysisForVideo(video.awemeId, update.status, update.facts, update.analyzedAt, update.summary) : video.analysis,
+      evidenceIds: [...new Set([...video.evidenceIds, evidenceId])],
+    });
   });
   const mediaAnalyzed = videos.filter((video) => video.mediaAnalysisStatus === "completed").length;
   const mediaPartiallyAnalyzed = videos.filter((video) => video.mediaAnalysisStatus === "partial").length;
-  return AccountResearchReportSchema.parse({ ...report, videos, evidence, coverage: { ...report.coverage, mediaAnalyzed, mediaPartiallyAnalyzed, note: `已完成 ${mediaAnalyzed} 条，部分完成 ${mediaPartiallyAnalyzed} 条；ASR/OCR 未配置时会保留已完成的镜头事实。` }, findings: [{ id: `finding-analysis-${report.secUserId}`, kind: "needs_media_analysis", title: mediaPartiallyAnalyzed > 0 ? "镜头事实已就绪，仍有分析缺口" : "媒体拆解已完成", detail: mediaPartiallyAnalyzed > 0 ? "镜头切点已写入素材库；请配置中文 ASR/OCR 后补齐文案和画面文字。" : "本地媒体事实已写入素材库，可用于 AI 剪辑提案和账号模式分析。", evidenceIds: videos.flatMap((video) => video.evidenceIds) }] });
+  return AccountResearchReportSchema.parse({ ...report, videos, evidence: [...evidence.values()], coverage: { ...report.coverage, mediaAnalyzed, mediaPartiallyAnalyzed, note: `已完成 ${mediaAnalyzed} 条，部分完成 ${mediaPartiallyAnalyzed} 条；ASR/OCR 未配置时会保留已完成的镜头事实。` }, findings: [{ id: `finding-analysis-${report.secUserId}`, kind: "needs_media_analysis", title: mediaPartiallyAnalyzed > 0 ? "镜头事实已就绪，仍有分析缺口" : "媒体拆解已完成", detail: mediaPartiallyAnalyzed > 0 ? "镜头切点已写入素材库；请配置中文 ASR/OCR 后补齐文案和画面文字。" : "本地媒体事实已写入素材库，可用于 AI 剪辑提案和账号模式分析。", evidenceIds: videos.flatMap((video) => video.evidenceIds) }] });
 }
 
 /**
@@ -173,7 +258,21 @@ export function attachResearchMediaPatterns(report: AccountResearchReport, summa
     evidenceIds: [evidenceId],
   };
   const findings = [patternFinding, ...report.findings.filter((finding) => finding.kind !== "media_pattern")];
-  return AccountResearchReportSchema.parse({ ...report, evidence: [...report.evidence, evidence], findings });
+  const opportunities = validSummaries.flatMap((summary) => {
+    const video = report.videos.find((candidate) => candidate.awemeId === summary.awemeId);
+    if (!video) return [];
+    const transcript = summary.facts.filter((fact) => fact.kind === "transcript").sort((left, right) => left.startMs - right.startMs)[0];
+    const sourceEvidenceIds = [...video.evidenceIds, evidenceId];
+    const title = transcript ? `把“${shortText(transcript.text, 36)}”换成你的真实案例` : `沿用 ${video.awemeId} 的画面节奏，换成你的观点`;
+    const angle = transcript
+      ? `保留“先抛具体判断、再展开解释”的开头结构，改用你亲身经历或可核验资料，不复述对标账号原话。`
+      : `参考已观察到的镜头切换节奏，补一条能证明你观点的 B-roll，再用自己的口播完成解释。`;
+    return [AccountResearchOpportunitySchema.parse({ schemaVersion: 1, id: `account-opportunity-${report.secUserId}-${summary.awemeId}`, title, angle, whyNow: `来自 ${summary.awemeId} 的本地时间码事实；这是待审阅的切入假设，不代表该账号整体因果规律。`, sourceVideoIds: [summary.awemeId], evidenceIds: sourceEvidenceIds.slice(0, 20), status: "candidate" })];
+  });
+  const opportunityFindings = opportunities.map((opportunity) => ({ id: `finding-${opportunity.id}`, kind: "topic_opportunity" as const, title: opportunity.title, detail: opportunity.angle, evidenceIds: opportunity.evidenceIds }));
+  const evidenceById = new Map(report.evidence.map((item) => [item.id, item]));
+  evidenceById.set(evidence.id, evidence);
+  return AccountResearchReportSchema.parse({ ...report, evidence: [...evidenceById.values()], opportunities, findings: [...opportunityFindings, ...findings.filter((finding) => finding.kind !== "topic_opportunity")] });
 }
 
 export function markResearchMediaFailures(report: AccountResearchReport, awemeIds: string[]) {

@@ -16,15 +16,25 @@ describe("benchmark account research", () => {
     const attached = attachResearchMedia(report, [{ awemeId: "aweme-1", artifactIds: ["source-1", "proxy-1"], attachedAt: "2026-08-14T00:01:00.000Z" }]);
     expect(attached.videos[0]).toMatchObject({ mediaAnalysisStatus: "queued", artifactIds: ["source-1", "proxy-1"] });
     expect(attached.coverage.missingMedia).toBe(0);
-    const analyzed = attachResearchAnalysis(attached, [{ awemeId: "aweme-1", status: "partial", factIds: ["fact-shot-1"], summary: "检测到 3 个镜头；中文 ASR/OCR 尚未配置。", analyzedAt: "2026-08-14T00:02:00.000Z" }]);
-    expect(analyzed.videos[0]).toMatchObject({ mediaAnalysisStatus: "partial", analysisFactIds: ["fact-shot-1"] });
+    const analyzedFacts = [
+      { id: "fact-shot-1", artifactId: "source-1", kind: "shot" as const, startMs: 0, endMs: 2_000, text: "镜头 cut", labels: ["cut", "ffmpeg-scene"], contentHash: "sha256:source-1" },
+      { id: "fact-transcript-1", artifactId: "source-1", kind: "transcript" as const, startMs: 0, endMs: 1_500, text: "先讲具体经验", labels: [], contentHash: "sha256:source-1" },
+      { id: "fact-ocr-1", artifactId: "source-1", kind: "ocr" as const, startMs: 500, endMs: 1_500, text: "一个反常识观点", labels: ["ocr"], contentHash: "sha256:source-1" },
+    ];
+    const analyzed = attachResearchAnalysis(attached, [{ awemeId: "aweme-1", status: "partial", factIds: analyzedFacts.map((fact) => fact.id), facts: analyzedFacts, summary: "检测到 1 个镜头；中文 ASR/OCR 尚未配置。", analyzedAt: "2026-08-14T00:02:00.000Z" }]);
+    expect(analyzed.videos[0]).toMatchObject({ mediaAnalysisStatus: "partial", analysisFactIds: ["fact-shot-1", "fact-transcript-1", "fact-ocr-1"] });
     expect(analyzed.coverage.mediaPartiallyAnalyzed).toBe(1);
+    expect(analyzed.videos[0].analysis).toMatchObject({ shotCount: 1, transcriptCount: 1, ocrCount: 1, openingText: ["先讲具体经验"], timeline: [{ transcript: [{ text: "先讲具体经验" }], ocr: [{ text: "一个反常识观点" }] }] });
     expect(analyzed.evidence.some((evidence) => evidence.type === "media_fact")).toBe(true);
     const patterned = attachResearchMediaPatterns(analyzed, [{ awemeId: "aweme-1", artifactIds: ["source-1"], analyzedAt: "2026-08-14T00:02:00.000Z", facts: [
       { id: "fact-shot-1", artifactId: "source-1", kind: "shot", startMs: 0, endMs: 2_000, text: "镜头 cut", labels: ["cut"], contentHash: "sha256:source-1" },
       { id: "fact-transcript-1", artifactId: "source-1", kind: "transcript", startMs: 0, endMs: 1_500, text: "先讲具体经验", labels: [], contentHash: "sha256:source-1" },
     ] }]);
-    expect(patterned.findings[0]).toMatchObject({ kind: "media_pattern", title: "已拆解 1 条作品的镜头与文字事实" });
+    expect(patterned.findings.some((finding) => finding.kind === "media_pattern")).toBe(true);
+    expect(patterned.opportunities[0]).toMatchObject({ sourceVideoIds: ["aweme-1"], status: "candidate" });
+    const repeated = attachResearchMediaPatterns(patterned, [{ awemeId: "aweme-1", artifactIds: ["source-1"], analyzedAt: "2026-08-14T00:02:00.000Z", facts: analyzedFacts }]);
+    expect(repeated.evidence.filter((evidence) => evidence.id === "evidence-media-pattern-MS4wLjABAAAAfixture-1786665720000")).toHaveLength(1);
+    expect(repeated.opportunities).toHaveLength(1);
     expect(patterned.evidence.at(-1)?.payload).toMatchObject({ totalShotCount: 1, transcriptSegmentCount: 1 });
   });
 

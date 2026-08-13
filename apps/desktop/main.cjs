@@ -589,7 +589,7 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         job = workspace.catalog.getJob(jobId);
       } else if (job.state === "succeeded") {
         const reusedFacts = workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, limit: 100 });
-        updates.push({ awemeId: video.awemeId, status: video.mediaAnalysisStatus === "completed" ? "completed" : "partial", factIds: reusedFacts.map((fact) => fact.id), summary: "已复用已完成的本地分析任务。", analyzedAt: now.toISOString() });
+        updates.push({ awemeId: video.awemeId, status: video.mediaAnalysisStatus === "completed" ? "completed" : "partial", factIds: reusedFacts.map((fact) => fact.id), facts: reusedFacts, summary: "已复用已完成的本地分析任务。", analyzedAt: now.toISOString() });
         factSummaries.push({ awemeId: video.awemeId, artifactIds: video.artifactIds, facts: reusedFacts, analyzedAt: now.toISOString() });
         jobs.push({ id: job.id, state: job.state, reused: true });
         continue;
@@ -623,7 +623,7 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         const workerResult = await runAnalysisWorker({ jobId: job.id, sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, whisperModelPath: process.env.WHISPER_MODEL_PATH, whisperBinaryPath: process.env.WHISPER_BINARY_PATH, fasterWhisperModelPath: process.env.FASTER_WHISPER_MODEL, fasterWhisperPythonPath: process.env.FASTER_WHISPER_PYTHON, fasterWhisperScriptPath: process.env.FASTER_WHISPER_SCRIPT ?? path.join(__dirname, "sidecars", "faster-whisper-sidecar.py"), fasterWhisperDevice: process.env.FASTER_WHISPER_DEVICE, fasterWhisperComputeType: process.env.FASTER_WHISPER_COMPUTE_TYPE, visionScriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(__dirname, "sidecars", "apple-vision-ocr.swift"), visionBinaryPath: process.env.APPLE_VISION_OCR_BINARY, visionSampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) });
         workspace.catalog.saveAnalysisFacts(workerResult.facts);
         workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: workerResult.shotCount, factIds: workerResult.facts.map((fact) => fact.id), asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus } });
-        updates.push({ awemeId: video.awemeId, status: workerResult.asrReady && workerResult.ocrReady ? "completed" : "partial", factIds: workerResult.facts.map((fact) => fact.id), summary: workerResult.summary, analyzedAt: createdAt });
+        updates.push({ awemeId: video.awemeId, status: workerResult.asrReady && workerResult.ocrReady ? "completed" : "partial", factIds: workerResult.facts.map((fact) => fact.id), facts: workerResult.facts, summary: workerResult.summary, analyzedAt: createdAt });
         factSummaries.push({ awemeId: video.awemeId, artifactIds: video.artifactIds, facts: workerResult.facts, analyzedAt: createdAt });
         jobs.push({ id: job.id, state: "succeeded", factCount: workerResult.facts.length });
       } catch (error) {
