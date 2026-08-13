@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.storage.json",
+  "compilerOptions": {
+    "outDir": "./.tsbuild/media"
+  },
+  "include": ["packages/media"]
+}

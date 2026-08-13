@@ -33,4 +33,4 @@ npm test
 npm run build
 ```
 
-本次结果：`npm run typecheck`、`npm test`（3 files / 13 tests）、`npm run build` 均通过。仍未作为发布门：跨进程 crash/WAL backup、Electron packaged IPC、真实媒体 fixture、跨库 Agent recovery。
+V1 切片验证：`npm run typecheck`、contracts/storage 相关测试（2 files / 11 tests）、`npm run build` 均通过；当前仓库全量测试已随 V2a 增加到 4 files / 15 tests。仍未作为发布门：跨进程 crash/WAL backup、Electron packaged IPC、真实媒体 fixture、跨库 Agent recovery。
