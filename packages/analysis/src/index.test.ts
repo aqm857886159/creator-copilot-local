@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { FfmpegSceneDetector, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
+import { writeFile } from "node:fs/promises";
+import { AppleVisionOcr, FfmpegSceneDetector, ocrFacts, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
 
 describe("local analysis facts", () => {
   it("normalizes whisper.cpp timestamp variants into bounded transcript segments", () => {
@@ -29,5 +30,19 @@ describe("local analysis facts", () => {
     const facts = shotFacts({ workspaceId: "workspace-1", artifactId: "artifact-1", shots, providerKey: "ffmpeg-scene", contentHash: "sha256:video", createdAt: "2026-08-14T00:00:00.000Z" });
     expect(facts).toHaveLength(3);
     expect(facts[1]).toMatchObject({ kind: "shot", labels: ["cut", "ffmpeg-scene"] });
+  });
+
+  it("normalizes Apple Vision OCR output into time-bounded cues and facts", async () => {
+    const ocr = new AppleVisionOcr({ scriptPath: "/tmp/apple-vision-ocr.swift", sampleIntervalMs: 1000, runner: async (binary, args) => {
+      if (binary === "ffmpeg") {
+        const outputPattern = args.at(-1)!;
+        await writeFile(outputPattern.replace("%05d", "00001"), "fixture");
+        return { stdout: "", stderr: "" };
+      }
+      return { stdout: JSON.stringify([{ path: args.at(-1), text: "画面文字", confidence: 0.91, bbox: { x: 0.1, y: 0.2, width: 0.4, height: 0.1 } }]), stderr: "" };
+    } });
+    const cues = await ocr.recognize("/tmp/video.mp4", 2500);
+    expect(cues).toMatchObject([{ startMs: 0, endMs: 1000, text: "画面文字", confidence: 0.91 }]);
+    expect(ocrFacts({ workspaceId: "workspace-1", artifactId: "artifact-1", cues, providerKey: "apple-vision", modelKey: "VNRecognizeTextRequest", contentHash: "sha256:video", createdAt: "2026-08-14T00:00:00.000Z" })[0]).toMatchObject({ kind: "ocr", text: "画面文字" });
   });
 });

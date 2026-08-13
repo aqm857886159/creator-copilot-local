@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -160,12 +160,55 @@ export class FfmpegSceneDetector {
   }
 }
 
+type VisionOcrItem = { path?: string; text?: string; confidence?: number; bbox?: { x?: number; y?: number; width?: number; height?: number } };
+
+export class AppleVisionOcr {
+  constructor(private readonly options: { scriptPath: string; binaryPath?: string; ffmpegPath?: string; sampleIntervalMs?: number; runner?: AnalysisCommandRunner }) {}
+
+  async recognize(inputPath: string, durationMs: number, signal?: AbortSignal) {
+    if (process.platform !== "darwin") throw new Error("Apple Vision OCR 仅支持 macOS；请改用跨平台 OCR adapter");
+    if (!this.options.scriptPath) throw new Error("Apple Vision OCR 脚本路径未配置");
+    if (!Number.isInteger(durationMs) || durationMs <= 0) throw new Error("OCR 需要有效的视频时长");
+    const sampleIntervalMs = this.options.sampleIntervalMs ?? 1000;
+    if (!Number.isInteger(sampleIntervalMs) || sampleIntervalMs < 250) throw new Error("OCR 抽帧间隔不能小于 250ms");
+    const runner = this.options.runner ?? defaultRunner;
+    const outputDirectory = join(tmpdir(), `creator-copilot-vision-${process.pid}-${Date.now()}`);
+    await mkdir(outputDirectory, { recursive: true });
+    try {
+      await runner(this.options.ffmpegPath ?? "ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", inputPath, "-vf", `fps=1/${sampleIntervalMs / 1000}`, "-q:v", "3", join(outputDirectory, "frame-%05d.jpg")], signal);
+      const frameNames = (await readdir(outputDirectory)).filter((name) => /^frame-\d+\.jpg$/.test(name)).sort();
+      if (frameNames.length === 0) return [];
+      const result = await runner(this.options.binaryPath ?? "swift", [this.options.scriptPath, ...frameNames.map((name) => join(outputDirectory, name))], signal);
+      const parsed = JSON.parse(result.stdout) as unknown;
+      const items = Array.isArray(parsed) ? parsed : typeof parsed === "object" && parsed && Array.isArray((parsed as { items?: unknown }).items) ? (parsed as { items: unknown[] }).items : [];
+      return items.flatMap((raw, index) => {
+        if (typeof raw !== "object" || !raw) return [];
+        const item = raw as VisionOcrItem;
+        const fileName = typeof item.path === "string" ? item.path.split(/[\\/]/).pop() ?? "" : frameNames[index] ?? "";
+        const match = fileName.match(/frame-(\d+)\.jpg$/);
+        const frameIndex = match ? Math.max(0, Number(match[1]) - 1) : index;
+        const startMs = Math.min(durationMs - 1, frameIndex * sampleIntervalMs);
+        const endMs = Math.min(durationMs, Math.max(startMs + 1, startMs + sampleIntervalMs));
+        const text = typeof item.text === "string" ? item.text.trim() : "";
+        if (!text || endMs <= startMs) return [];
+        return [OcrCueSchema.parse({ schemaVersion: 1, id: `ocr-${frameIndex + 1}-${index + 1}`, startMs, endMs, text, confidence: typeof item.confidence === "number" ? item.confidence : undefined, bbox: item.bbox && typeof item.bbox.x === "number" && typeof item.bbox.y === "number" && typeof item.bbox.width === "number" && typeof item.bbox.height === "number" ? item.bbox : undefined })];
+      });
+    } finally {
+      await rm(outputDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+}
+
 export function transcriptFacts(input: { workspaceId: string; artifactId: string; segments: TranscriptSegment[]; providerKey: string; modelKey?: string; contentHash: string; createdAt: string }) {
   return input.segments.map((segment) => AnalysisFactSchema.parse({ schemaVersion: 1, id: `${input.artifactId}-${segment.id}`, workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "transcript", startMs: segment.startMs, endMs: segment.endMs, text: segment.text, labels: [], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, createdAt: input.createdAt }));
 }
 
 export function shotFacts(input: { workspaceId: string; artifactId: string; shots: ShotFact[]; providerKey: string; modelKey?: string; contentHash: string; createdAt: string }) {
   return input.shots.map((shot) => AnalysisFactSchema.parse({ schemaVersion: 1, id: `${input.artifactId}-${shot.id}`, workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "shot", startMs: shot.startMs, endMs: shot.endMs, text: `镜头 ${shot.transition}`, labels: [shot.transition, shot.detector], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, createdAt: input.createdAt }));
+}
+
+export function ocrFacts(input: { workspaceId: string; artifactId: string; cues: OcrCue[]; providerKey: string; modelKey?: string; contentHash: string; createdAt: string }) {
+  return input.cues.map((cue) => AnalysisFactSchema.parse({ schemaVersion: 1, id: `${input.artifactId}-${cue.id}`, workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "ocr", startMs: cue.startMs, endMs: cue.endMs, text: cue.text, labels: ["ocr"], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, createdAt: input.createdAt }));
 }
 
 export function searchQueryForFts(query: string) {

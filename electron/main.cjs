@@ -284,15 +284,30 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         const createdAt = new Date().toISOString();
         const facts = runtime.analysis.shotFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, shots, providerKey: "ffmpeg-scene", modelKey: "showinfo", contentHash: artifact.contentHash, createdAt });
         let asrStatus = "未配置中文 whisper.cpp 模型";
+        let asrReady = false;
         if (process.env.WHISPER_MODEL_PATH) {
           const segments = await new runtime.analysis.WhisperCppTranscriber({ modelPath: process.env.WHISPER_MODEL_PATH, binaryPath: process.env.WHISPER_BINARY_PATH, language: "zh" }).transcribe(canonicalPath);
           facts.push(...runtime.analysis.transcriptFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, segments, providerKey: "whisper.cpp", modelKey: path.basename(process.env.WHISPER_MODEL_PATH), contentHash: artifact.contentHash, createdAt }));
           asrStatus = `ASR 已完成（${segments.length} 段）`;
+          asrReady = true;
+        }
+        let ocrStatus = "未配置 Apple Vision OCR";
+        let ocrReady = false;
+        const visionScript = process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(process.cwd(), "scripts", "apple-vision-ocr.swift");
+        if (process.platform === "darwin" && existsSync(visionScript)) {
+          try {
+            const cues = await new runtime.analysis.AppleVisionOcr({ scriptPath: visionScript, binaryPath: process.env.APPLE_VISION_OCR_BINARY, sampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) }).recognize(canonicalPath, durationMs);
+            facts.push(...runtime.analysis.ocrFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, cues, providerKey: "apple-vision", modelKey: "VNRecognizeTextRequest", contentHash: artifact.contentHash, createdAt }));
+            ocrStatus = `OCR 已完成（${cues.length} 条）`;
+            ocrReady = true;
+          } catch (error) {
+            ocrStatus = `OCR 失败：${error instanceof Error ? error.message : "未知错误"}`;
+          }
         }
         workspace.catalog.saveAnalysisFacts(facts);
-        const summary = `镜头粗切 ${shots.length} 段；${asrStatus}；OCR 尚未配置。`;
-        workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: shots.length, factIds: facts.map((fact) => fact.id), asrStatus, ocrStatus: "not_configured" } });
-        updates.push({ awemeId: video.awemeId, status: "partial", factIds: facts.map((fact) => fact.id), summary, analyzedAt: createdAt });
+        const summary = `镜头粗切 ${shots.length} 段；${asrStatus}；${ocrStatus}。`;
+        workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: shots.length, factIds: facts.map((fact) => fact.id), asrStatus, ocrStatus } });
+        updates.push({ awemeId: video.awemeId, status: asrReady && ocrReady ? "completed" : "partial", factIds: facts.map((fact) => fact.id), summary, analyzedAt: createdAt });
         jobs.push({ id: job.id, state: "succeeded", factCount: facts.length });
       } catch (error) {
         const message = error instanceof Error ? error.message : "本地媒体分析失败";

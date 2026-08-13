@@ -1,7 +1,7 @@
 # V6 本地分析事实与素材检索
 
 日期：2026-08-14  
-状态：分析合同、whisper.cpp adapter、FFmpeg scene baseline、SQLite FTS5 和素材库页面已完成；真实中文模型权重与 OCR 后端待单独安装验收
+状态：分析合同、whisper.cpp adapter、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5 和素材库页面已完成；真实中文 whisper 权重与 OCR 质量仍待单独安装/评测验收
 
 ## 1. 选型决策
 
@@ -9,7 +9,7 @@
 
 - ASR baseline：`WhisperCppTranscriber`，模型路径显式配置，默认语言 `zh`；
 - 镜头 baseline：`FfmpegSceneDetector`，读取 `showinfo` 时间点并生成有界的 `ShotFact/AnalysisFact`；它是粗切事实，不等于 TransNetV2 语义镜头理解；
-- OCR：暂不伪造已安装状态，下一步接 Apple Vision 或 RapidOCR/PaddleOCR adapter；
+- OCR baseline：`AppleVisionOcr`，FFmpeg 抽帧后调用 `scripts/apple-vision-ocr.swift`；非 macOS 或脚本不可用时保留明确缺口，跨平台 OCR 仍可替换为 RapidOCR/PaddleOCR；
 - 检索：SQLite FTS5 + 结构化 workspace/artifact 过滤，向量索引后置。
 
 这样素材导入、事实回流和搜索合同可以先被产品验证，不会因为 1.7B/7B 模型包、Python 环境或跨平台原生库矩阵阻塞主链路。
@@ -54,15 +54,22 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 - whisper.cpp timestamp 字符串、秒和毫秒变体；
 - transcript → AnalysisFact；
 - ffmpeg `showinfo` 时间点 → bounded `ShotFact` → searchable `AnalysisFact`；
+- macOS Vision OCR cue → searchable `AnalysisFact`，不改写 OCR 原文；
 - runner 可替换、临时目录清理；
 - schema v5 迁移；
 - FTS5 写入、查询、kind 过滤、重启后查询；
 - 导入产物进入 catalog，素材库可读取。
 
+本机真实 smoke（2026-08-14）：
+
+- `/opt/homebrew/bin/ffmpeg` 抽取 1 秒视频帧；
+- `swift scripts/apple-vision-ocr.swift` 返回测试画面文字、置信度和 bbox；
+- 这只证明 macOS runtime/脚本边界可运行，不代表中文口播字幕的识别率、花字去重或跨平台可用性已验收。
+
 ## 4. 仍未声称完成的能力
 
 - 没有模型权重时，不声称本机已完成中文 ASR；
-- 没有 OCR worker 时，不声称 OCR 已完成；
+- Vision OCR adapter 可运行不等于中文 OCR 质量已验收；需要真实画面 fixture、准确率、重复文本合并和内存峰值评测；
 - FFmpeg scene baseline 只代表粗切时间事实，不声称已经完成语义镜头拆解或视觉理解；
 - FTS5 不是语义向量检索，素材量超过约 300 个镜头后再评估向量 adapter；
 - FTS 查询命中失败时的 LIKE 降级只为可用性保底，不替代中文分词质量评测。
@@ -70,7 +77,7 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 ## 5. 下一步执行
 
 1. 选定并记录一个中文 whisper.cpp 模型权重（大小、许可证、hash、内存峰值、CER/时间码 fixture）；
-2. 接 Apple Vision 或 RapidOCR/PaddleOCR 的本地 adapter，输出同一 `OcrCue/AnalysisFact`；
+2. 为 Apple Vision 增加真实中文字幕/花字 fixture，评估识别率、时间覆盖和抽帧成本；Windows/Linux 再接 RapidOCR/PaddleOCR adapter，保持同一 `OcrCue/AnalysisFact` 合同；
 3. 在粗切事实之上再评估 PySceneDetect/TransNetV2 精修，输出同一 `ShotFact`；
 4. 导入 Job 统一调度 ASR/OCR/shot，单条失败进入 `needs_attention`，不阻塞其他素材；
 5. 用真实时间码事实增强 AI 剪辑提案和素材匹配证据。
