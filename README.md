@@ -2,7 +2,7 @@
 
 本地优先的内容创作助手，首个工作流聚焦抖音真人深度口播：研究、选题、脚本、分镜、拍摄包、素材库、AI 粗剪、导出和复盘。
 
-当前仓库处于 V0 基线阶段：已提供可运行的 React UI 壳、Electron main/preload 安全边界和实施文档；领域数据库、媒体管线和 AI Provider 将按实施计划逐阶段接入。
+当前仓库处于 V0–V8 逐步施工中：已提供 React UI、Electron main/preload 安全边界、SQLite catalog、本地媒体管线、AI 粗剪、TikHub 研究、交换格式、发布包和复盘页面。仍未完成的能力以实施计划和施工记录为准，不把开发壳 smoke 当成跨平台发布完成。
 
 ## 本地运行
 
@@ -31,4 +31,9 @@ npm run dev:desktop
 npm run typecheck
 npm test
 npm run build
+
+# macOS arm64 目录打包 + preload/SQLite 启动 smoke
+npm run test:desktop:package
 ```
+
+打包产物位于 `release/`，仅为本地未签名目录产物。

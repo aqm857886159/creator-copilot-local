@@ -1,6 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, shell, utilityProcess } = require("electron");
 const { createHash, randomUUID } = require("node:crypto");
-const { existsSync, mkdirSync, realpathSync } = require("node:fs");
+const { existsSync, mkdirSync, mkdtempSync, realpathSync } = require("node:fs");
 const { mkdir: makeDirectory, readFile, rm: removeFile, stat: statFile, writeFile } = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
@@ -138,6 +138,7 @@ function createWindow() {
   } else {
     void window.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   }
+  return window;
 }
 
 ipcMain.handle("desktop:get-info", () => ({
@@ -686,7 +687,26 @@ ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
 });
 
 app.whenReady().then(() => {
-  createWindow();
+  const window = createWindow();
+  if (process.argv.includes("--smoke")) {
+    window.webContents.once("did-finish-load", async () => {
+      try {
+        const result = await window.webContents.executeJavaScript("window.desktop?.getInfo ? window.desktop.getInfo() : null");
+        if (!result || typeof result.platform !== "string" || typeof result.arch !== "string") throw new Error("preload IPC smoke 返回值无效");
+        const runtime = await getDesktopRuntime();
+        const smokeRoot = mkdtempSync(path.join(os.tmpdir(), "creator-copilot-desktop-smoke-"));
+        const smokeCatalog = new runtime.storage.SqliteCatalog(path.join(smokeRoot, "catalog.sqlite"));
+        const schemaVersion = smokeCatalog.schemaVersion();
+        smokeCatalog.close();
+        await removeFile(smokeRoot, { recursive: true, force: true });
+        console.log(JSON.stringify({ ok: true, smoke: "preload-ipc+runtime-sqlite", platform: result.platform, arch: result.arch, schemaVersion }));
+        app.exit(0);
+      } catch (error) {
+        console.error(JSON.stringify({ ok: false, smoke: "preload-ipc", message: error instanceof Error ? error.message : "preload IPC smoke 失败" }));
+        app.exit(1);
+      }
+    });
+  }
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

@@ -2,6 +2,8 @@
   "name": "creator-copilot-local",
   "private": true,
   "version": "0.1.0",
+  "description": "Local-first content creation copilot desktop app",
+  "author": "Creator Copilot Contributors",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -10,6 +12,8 @@
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc -b && tsc -p tsconfig.desktop.runtime.json && vite build",
     "build:desktop": "npm run build",
+    "package:desktop": "npm run build && node scripts/package-desktop.mjs",
+    "test:desktop:package": "npm run package:desktop && node scripts/desktop-package-smoke.mjs",
     "start:desktop": "electron . --load-dist",
     "dev:desktop": "concurrently -k -n web,electron -c cyan,yellow \"npm:dev:web\" \"wait-on http://127.0.0.1:4316 && electron .\"",
     "start": "tsx server/index.ts",
@@ -44,6 +48,18 @@
     "typescript": "~5.8.3",
     "vite": "^7.1.3",
     "vitest": "^3.2.4",
-    "wait-on": "^8.0.3"
+    "wait-on": "^8.0.3",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "local.creator.copilot",
+    "productName": "Creator Copilot Local",
+    "directories": { "output": "release" },
+    "asar": true,
+    "asarUnpack": ["node_modules/better-sqlite3/**/*"],
+    "files": ["dist/**/*", "dist-electron/**/*", "electron/**/*", "package.json"],
+    "mac": { "target": [{ "target": "dir", "arch": ["arm64"] }], "category": "public.app-category.video" },
+    "win": { "target": [{ "target": "dir", "arch": ["x64"] }] },
+    "linux": { "target": [{ "target": "dir", "arch": ["x64"] }] }
   }
 }

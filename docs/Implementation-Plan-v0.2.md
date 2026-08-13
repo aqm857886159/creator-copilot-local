@@ -192,6 +192,8 @@ interface AgentRuntimePort {
 
 **依赖：无。**
 
+**当前状态（2026-08-14）：** macOS arm64 目录打包、preload IPC 和打包后 SQLite runtime smoke 已通过；Windows、签名、公证、CI clean checkout、utility worker 打包 smoke 和最终 pnpm workspace 迁移仍未完成。详见 [V0 打包施工记录](./plan/2026-08-14-v0-packaged-desktop-smoke.md)。
+
 代码任务：
 
 - pnpm workspace、Node 24/Electron 43/TypeScript 6 版本锁定；
