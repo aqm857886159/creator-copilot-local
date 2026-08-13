@@ -10,13 +10,14 @@
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc -b && vite build",
     "build:desktop": "npm run build",
-    "start:desktop": "electron .",
+    "start:desktop": "electron . --load-dist",
     "dev:desktop": "concurrently -k -n web,electron -c cyan,yellow \"npm:dev:web\" \"wait-on http://127.0.0.1:4316 && electron .\"",
     "start": "tsx server/index.ts",
     "test": "vitest run",
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "better-sqlite3": "^12.4.1",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "lucide-react": "^0.468.0",
@@ -26,6 +27,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.3",
     "@types/multer": "^2.0.0",

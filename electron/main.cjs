@@ -1,7 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const path = require("node:path");
 
-const isDevelopment = !app.isPackaged;
+const isDevelopment = !app.isPackaged && !process.argv.includes("--load-dist");
 
 function createWindow() {
   const window = new BrowserWindow({
