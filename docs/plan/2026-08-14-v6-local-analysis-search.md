@@ -83,4 +83,4 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 2. 为 Apple Vision 增加真实中文字幕/花字 fixture，评估识别率、时间覆盖和抽帧成本；Windows/Linux 再接 RapidOCR/PaddleOCR adapter，保持同一 `OcrCue/AnalysisFact` 合同；
 3. 在粗切事实之上再评估 PySceneDetect/TransNetV2 精修，输出同一 `ShotFact`；
 4. 将分析 Job 的失败、磁盘满、worker 崩溃和取消路径补成桌面 E2E；单条失败进入 `needs_attention`，不阻塞其他素材；
-5. 用真实时间码事实增强 AI 剪辑提案和素材匹配证据。
+5. 已将本地时间码事实增强到 AI 剪辑提案和素材匹配证据；下一步评估跨素材语义重排和视觉模型，而不是绕过事实索引直接让模型选文件。

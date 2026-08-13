@@ -195,6 +195,7 @@ interface EditProposalResult {
   jobId?: string;
   project?: { id: string; title: string };
   missing?: Array<{ shotId: string; taskId?: string; reason: string; instruction: string }>;
+  analysisFacts?: Array<{ id: string; artifactId: string; kind: string; startMs: number; endMs: number; text: string; labels: string[]; providerKey: string }>;
   proposal?: EditProposal;
   assetLocks?: Array<{ assetId: string; contentHash: string }>;
   provider?: { providerKey: string; modelKey?: string; responseHash?: string };

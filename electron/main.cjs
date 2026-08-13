@@ -606,17 +606,21 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
     if (!script || !storyboard || tasks.length === 0) throw new Error("项目还没有完整的脚本、分镜或拍摄任务");
     const takesByTask = {};
     const assetFacts = {};
+    const analysisFactsByAsset = {};
     for (const task of tasks) {
       const takes = workspace.catalog.listTakes(task.id);
       takesByTask[task.id] = takes;
       for (const take of takes) {
         const artifact = workspace.catalog.getArtifact(take.assetId);
-        if (artifact) assetFacts[take.assetId] = { contentHash: artifact.contentHash, durationMs: take.durationMs };
+        if (artifact) {
+          assetFacts[take.assetId] = { contentHash: artifact.contentHash, durationMs: take.durationMs };
+          analysisFactsByAsset[take.assetId] = workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, artifactId: take.assetId, limit: 100 });
+        }
       }
     }
     const providerKey = configuredEditProvider();
     const modelKey = configuredEditModel();
-    const selectedTakeFacts = Object.entries(takesByTask).flatMap(([taskId, takes]) => takes.filter((take) => take.status === "selected").map((take) => ({ taskId, takeId: take.id, assetId: take.assetId, contentHash: assetFacts[take.assetId]?.contentHash, durationMs: assetFacts[take.assetId]?.durationMs }))).sort((left, right) => `${left.taskId}:${left.takeId}`.localeCompare(`${right.taskId}:${right.takeId}`));
+    const selectedTakeFacts = Object.entries(takesByTask).flatMap(([taskId, takes]) => takes.filter((take) => take.status === "selected").map((take) => ({ taskId, takeId: take.id, assetId: take.assetId, contentHash: assetFacts[take.assetId]?.contentHash, durationMs: assetFacts[take.assetId]?.durationMs, analysisFacts: (analysisFactsByAsset[take.assetId] ?? []).map((fact) => ({ id: fact.id, startMs: fact.startMs, endMs: fact.endMs, contentHash: fact.contentHash })) }))).sort((left, right) => `${left.taskId}:${left.takeId}`.localeCompare(`${right.taskId}:${right.takeId}`));
     const inputFingerprint = createHash("sha256").update(JSON.stringify({ projectId, scriptRevision: script.revision, storyboardRevision: storyboard.revision, providerKey, modelKey, selectedTakeFacts })).digest("hex").slice(0, 24);
     const command = {
       schemaVersion: 1,
@@ -639,7 +643,7 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
       const proposalId = proposalIdFromReceipt(storedPending);
       const cachedProposal = proposalId ? workspace.catalog.getEditProposal(proposalId) : undefined;
       const cachedMissing = storedPending.errorDetails && typeof storedPending.errorDetails === "object" && Array.isArray(storedPending.errorDetails.missing) ? storedPending.errorDetails.missing : [];
-      return { ok: Boolean(cachedProposal), status: cachedProposal ? "ready" : storedPending.status === "pending" ? "pending" : "needs_material", receipt: storedPending, proposal: cachedProposal, missing: cachedMissing, provider: storedPending.errorDetails?.provider };
+      return { ok: Boolean(cachedProposal), status: cachedProposal ? "ready" : storedPending.status === "pending" ? "pending" : "needs_material", receipt: storedPending, proposal: cachedProposal, missing: cachedMissing, analysisFacts: Object.values(analysisFactsByAsset).flat(), provider: storedPending.errorDetails?.provider };
     }
     const finishFailure = (failure, from, leaseToken, cancelled = false) => {
       const targetStatus = failure.submissionUnknown ? "pending" : "rejected";
@@ -658,7 +662,7 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
     let result;
     try {
       const runtime = await getDesktopRuntime();
-      result = await getEditAgent(runtime).proposeEdit({ projectId, script, storyboard, tasks, takesByTask, assetFacts, now: new Date().toISOString() });
+      result = await getEditAgent(runtime).proposeEdit({ projectId, script, storyboard, tasks, takesByTask, assetFacts, analysisFacts: analysisFactsByAsset, now: new Date().toISOString() });
     } catch (error) {
       return finishFailure(proposalFailure(error, providerKey), "running", leaseToken);
     }
@@ -670,7 +674,7 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
         events: [{ id: `event-${command.correlationId}-completed`, aggregateType: "project", aggregateId: projectId, aggregateRevision: project.revision, type: "edit.proposal.completed", payload: { jobId, proposalId: result.proposal?.id, status: result.status, provider: result.provider }, actorType: "system", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: new Date().toISOString() }],
       };
     });
-    return { ok: true, ...result, receipt: completed, jobId, project: { id: project.id, title: project.title } };
+    return { ok: true, ...result, analysisFacts: Object.values(analysisFactsByAsset).flat(), receipt: completed, jobId, project: { id: project.id, title: project.title } };
   } catch (error) {
     return { ok: false, errorCode: "edit_proposal_failed", message: error instanceof Error ? error.message : "AI 剪辑提案生成失败" };
   }

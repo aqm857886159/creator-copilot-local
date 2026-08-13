@@ -25,6 +25,14 @@ describe("agent edit proposal runtime", () => {
     expect(result).toMatchObject({ status: "needs_material", missing: [{ shotId: "shot-1", reason: "take_not_selected" }] });
   });
 
+  it("allows only indexed analysis facts as proposal evidence", () => {
+    const analysisFacts = { "asset-1": [{ schemaVersion: 1 as const, id: "fact-1", workspaceId: "workspace-1", artifactId: "asset-1", kind: "transcript" as const, startMs: 100, endMs: 900, text: "观点文本", labels: [], providerKey: "whisper.cpp", modelKey: "ggml-small", contentHash: "sha256:asset-1", createdAt: now }] };
+    const draft = { schemaVersion: 1, operations: [{ shotId: "shot-1", sourceAssetId: "asset-1", sourceSegment: { startMs: 100, endMs: 1_900 }, role: "a_roll", reason: "引用口播事实", evidenceIds: ["fact-1"], confidence: 0.9 }], subtitles: [], missingMaterial: [] };
+    const result = materializeEditProposalDraft({ ...input, analysisFacts }, draft);
+    expect(result.proposal?.operations[0].evidenceIds).toEqual(["fact-1", "shot-1"]);
+    expect(() => materializeEditProposalDraft({ ...input, analysisFacts }, { ...draft, operations: [{ ...draft.operations[0], evidenceIds: ["fabricated-fact"] }] })).toThrow("未确认的证据");
+  });
+
   it("turns an AI SDK draft into a reviewable proposal without bypassing material locks", async () => {
     const fetcher: typeof fetch = async () => new Response(JSON.stringify({
       id: "response-edit-proposal",
