@@ -22,7 +22,11 @@ async function getRuntime() {
 
 if (!parentPort) throw new Error("analysis worker 缺少 parentPort");
 
-parentPort.on("message", async (message) => {
+parentPort.on("message", async (event) => {
+  // Electron's parentPort emits a MessageEvent-like object (`{ data, ports }`),
+  // while older local tests passed the payload directly. Normalize both so the
+  // worker protocol remains compatible during the desktop entry migration.
+  const message = event && typeof event === "object" && "data" in event ? event.data : event;
   const requestId = message && typeof message.requestId === "string" ? message.requestId : "unknown";
   try {
     const payload = message?.payload;

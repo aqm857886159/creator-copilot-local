@@ -1,7 +1,7 @@
 # V6 本地分析事实与素材检索
 
 日期：2026-08-14  
-状态：分析合同、whisper.cpp adapter、可选 faster-whisper Python sidecar、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作、本地分析 Job 和质量评测合同 smoke 已完成；真实中文 ASR/OCR 质量仍待获授权媒体 fixture 验收
+状态：分析合同、whisper.cpp adapter、可选 faster-whisper Python sidecar、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作、本地分析 Job、打包 utility worker 回写和质量评测合同 smoke 已完成；真实中文 ASR/OCR 质量仍待获授权媒体 fixture 验收
 
 ## 1. 选型决策
 
@@ -87,4 +87,4 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 3. 在粗切事实之上再评估 PySceneDetect/TransNetV2 精修，输出同一 `ShotFact`；
 4. 将分析 Job 的失败、磁盘满、worker 崩溃和取消路径补成桌面 E2E；单条失败进入 `needs_attention`，不阻塞其他素材；
 5. 已将本地时间码事实增强到 AI 剪辑提案和素材匹配证据；下一步评估跨素材语义重排和视觉模型，而不是绕过事实索引直接让模型选文件。
-6. 质量评测记录见 [Local-Analysis-Quality-Evaluation-v0.1.md](../Local-Analysis-Quality-Evaluation-v0.1.md)；`npm run test:analysis:quality` 只验证评测器合同，下一道门是获授权中文口播 fixture、CER/WER、OCR precision/recall 和跨平台 Python/ONNX 打包。
+6. 真实 macOS arm64 UI smoke 已覆盖“导入 → apps/desktop utility worker 镜头分析 → SQLite 事实回写 → AI 剪辑导出”；质量评测记录见 [Local-Analysis-Quality-Evaluation-v0.1.md](../Local-Analysis-Quality-Evaluation-v0.1.md)；`npm run test:analysis:quality` 只验证评测器合同，下一道门是获授权中文口播 fixture、CER/WER、OCR precision/recall 和跨平台 Python/ONNX 打包。

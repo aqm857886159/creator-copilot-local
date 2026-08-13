@@ -29,7 +29,7 @@ const candidates = process.platform === "darwin"
 const executable = candidates.find((candidate) => existsSync(candidate));
 if (!executable) throw new Error(`未找到打包应用，请先运行 npm run package:desktop：${candidates.join(", ")}`);
 
-const child = spawn(executable, ["--ui-smoke", "--no-sandbox"], { cwd: root, env: { ...process.env, UI_SMOKE_WORKSPACE: workspacePath, UI_SMOKE_SOURCE_PATH: sourcePath, AI_EDIT_PROVIDER: "local-fallback", ELECTRON_ENABLE_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+const child = spawn(executable, ["--ui-smoke", "--no-sandbox"], { cwd: root, env: { ...process.env, UI_SMOKE_WORKSPACE: workspacePath, UI_SMOKE_SOURCE_PATH: sourcePath, AI_EDIT_PROVIDER: "local-fallback", APPLE_VISION_OCR_SCRIPT: "", ELECTRON_ENABLE_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
 let stdout = "";
 let stderr = "";
 child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });

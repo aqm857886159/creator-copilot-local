@@ -1376,6 +1376,13 @@ app.whenReady().then(() => {
           if (takeButtons.length < 3) throw new Error("没有生成三条 Take");
           for (const button of takeButtons.slice(0, 3)) button.click();
           await wait(500);
+          const assetsBeforeAnalysis = await window.desktop.searchAssets("");
+          const sourceArtifact = assetsBeforeAnalysis.artifacts?.find((artifact) => artifact.kind === "source");
+          if (!sourceArtifact) throw new Error("UI smoke 没有找到导入后的 source artifact");
+          const analysis = await window.desktop.analyzeAsset({ artifactId: sourceArtifact.artifactId });
+          if (!analysis.ok || analysis.status !== "succeeded") throw new Error("UI smoke 的本地素材分析没有成功：" + (analysis.message ?? "unknown"));
+          const analyzedAssets = await window.desktop.searchAssets("");
+          if (!analyzedAssets.facts?.some((fact) => fact.kind === "shot" && fact.artifactId === sourceArtifact.artifactId)) throw new Error("UI smoke 没有回写镜头事实");
           clickText("进入 AI 剪辑");
           await wait(350);
           clickText("生成 AI 剪辑提案");
@@ -1386,7 +1393,7 @@ app.whenReady().then(() => {
           if (!document.querySelector(".render-success")) throw new Error("AI 剪辑没有成功导出");
           const workspaceText = document.querySelector(".workspace-state")?.textContent ?? "";
           const projectId = workspaceText.match(/project-[a-z0-9-]+/i)?.[0] ?? null;
-          return { ok: true, title: document.querySelector(".render-success h3")?.textContent ?? null, proposalRows: document.querySelectorAll(".proposal-row").length, projectId };
+          return { ok: true, title: document.querySelector(".render-success h3")?.textContent ?? null, proposalRows: document.querySelectorAll(".proposal-row").length, projectId, analysisFactCount: analyzedAssets.facts?.length ?? 0 };
         })()`);
         if (!result?.ok) throw new Error("UI smoke 没有返回成功结果");
         const workspace = requireWorkspace();
