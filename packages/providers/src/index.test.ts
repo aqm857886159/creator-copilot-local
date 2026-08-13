@@ -81,6 +81,11 @@ describe("provider adapters", () => {
     await expect(connector.fetchUserPosts({ secUserId: "MS4wLjABAAAAexample", count: 21 })).rejects.toThrow("1–20");
   });
 
+  it("normalizes the current nested App V3 profile response", async () => {
+    const connector = new TikHubDouyinConnector({ apiKey: "secret-test-key", baseUrl: "https://api.example.test", fetcher: async () => jsonResponse({ data: { user: { nickname: "嵌套账号", signature: "一个签名", follower_count: 456, following_count: 12, aweme_count: 8 } } }) });
+    await expect(connector.fetchProfile("MS4wLjABAAAAnested")).resolves.toMatchObject({ nickname: "嵌套账号", signature: "一个签名", followerCount: 456, followingCount: 12, awemeCount: 8 });
+  });
+
   it("reads dynamic TikHub endpoint pricing before a discovery request", async () => {
     const connector = new TikHubDouyinConnector({ apiKey: "secret-test-key", baseUrl: "https://api.example.test", fetcher: async (input) => {
       expect(String(input)).toContain("get_endpoint_info");

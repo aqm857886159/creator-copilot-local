@@ -1,7 +1,7 @@
 # V7：对标账号证据雷达（metadata-first）
 
 日期：2026-08-14  
-状态：metadata-first、选中作品本地化、本地镜头分析 Job 和样本级镜头/ASR/OCR 模式摘要已实现；中文 ASR/OCR 仍按能力配置后置
+状态：metadata-first、选中作品本地化、本地镜头分析 Job 和样本级镜头/ASR/OCR 模式摘要已实现；中文 ASR/OCR 仍按能力配置后置；已补受控真实账号链路 smoke
 
 ## 产品名称与用户结果
 
@@ -44,6 +44,19 @@
 - 账号资料、单作品、作品统计、最高画质播放链接是独立接口；不能把作品列表返回当作已完成播放量、媒体下载或镜头分析。
 - 临时结果 URL 和公开内容权限需要记录来源、抓取时间、过期时间和失败原因；私密内容不进入事实库。
 - 官方目录还提供热搜、话题、音乐、榜单、评论、粉丝和星图等接口。它们是后续“热点/选题雷达”的候选连接器，不放入首轮默认请求，避免成本和合规边界失控。
+
+## 受控真实联调（2026-08-14）
+
+真实联调只验证“账号资料 + 最新 1 条作品元数据”的第一段链路，不下载视频、不调用高画质接口、不翻第二页。脚本先通过官方 `get_endpoint_info` 读取两条端点的动态价格，超过本次预算就中止；执行还需要第二个显式确认变量，避免后台或 CI 误触付费：
+
+```bash
+ACCOUNT_RESEARCH_LIVE=1 \
+ACCOUNT_RESEARCH_CONFIRM=1 \
+ACCOUNT_RESEARCH_MAX_COST_USD=0.02 \
+npm run test:account-research:live
+```
+
+脚本为 `scripts/account-research-smoke.mjs`。输出只包含请求数量、动态报价、字段是否存在、结果数量和响应 hash，不打印 API key、`sec_user_id`、昵称或原始响应。2026-08-14 真实运行报价为 `$0.002`，资料接口返回成功且能读到 `data.user` 中的公开账号字段；选用的 smoke 账号本次作品接口返回 0 条，因此结果标记为 `metadata_only`，不能把它当作“有作品样本”的质量证据。这个 smoke 证明的是供应商合同和归一化字段可用，不证明抖音账号研究已经完成；后续深度拆解仍须用户选择作品后才调用高画质下载和本地 ASR/OCR/镜头分析。
 
 详细端点、APIMart 统一模型网关和小额联调记录集中在 [`Provider-Official-Integration-Research-v0.1.md`](../Provider-Official-Integration-Research-v0.1.md)。后续测试脚本只能从 `.env` 读取本机凭证，不得把 key 写入 fixture、日志或 UI。
 

@@ -454,7 +454,18 @@ export class TikHubDouyinConnector implements ResearchConnector {
     const normalizedId = id.parse(secUserId);
     const result = await this.get("/api/v1/douyin/app/v3/handler_user_profile", { sec_user_id: normalizedId });
     const data = dataPayload(result.body);
-    return { secUserId: normalizedId, nickname: firstString(data, ["nickname", "nickname_full"]), signature: firstString(data, ["signature", "desc"]), followerCount: typeof data.follower_count === "number" ? data.follower_count : undefined, followingCount: typeof data.following_count === "number" ? data.following_count : undefined, awemeCount: typeof data.aweme_count === "number" ? data.aweme_count : undefined, raw: data } satisfies TikHubProfile;
+    // App V3 currently nests the public user object under data.user. Keep the
+    // direct-data fallback for older responses and fixtures.
+    const user = typeof data.user === "object" && data.user !== null ? data.user as Record<string, unknown> : data;
+    return {
+      secUserId: normalizedId,
+      nickname: firstString(user, ["nickname", "nickname_full"]),
+      signature: firstString(user, ["signature", "desc"]),
+      followerCount: typeof user.follower_count === "number" ? user.follower_count : undefined,
+      followingCount: typeof user.following_count === "number" ? user.following_count : undefined,
+      awemeCount: typeof user.aweme_count === "number" ? user.aweme_count : undefined,
+      raw: data,
+    } satisfies TikHubProfile;
   }
 
   async fetchUserPosts(input: { secUserId: string; maxCursor?: number; count?: number; sortType?: 0 | 1 }) {
