@@ -136,6 +136,38 @@ export class WhisperCppTranscriber {
   }
 }
 
+/**
+ * Optional Python sidecar adapter for the faster-whisper stack already used
+ * by the internal e-cut pipeline. The sidecar is never selected implicitly:
+ * callers must provide both a Python executable and an explicit model name or
+ * local model directory. This keeps packaged desktop installs honest when a
+ * model runtime is not present.
+ */
+export class FasterWhisperSidecarTranscriber {
+  constructor(private readonly options: { modelPath: string; scriptPath: string; pythonPath?: string; language?: string; device?: string; computeType?: string; runner?: AnalysisCommandRunner }) {}
+
+  async transcribe(inputPath: string, signal?: AbortSignal) {
+    if (!this.options.modelPath) throw new Error("faster-whisper 模型路径未配置");
+    if (!this.options.scriptPath) throw new Error("faster-whisper sidecar 脚本路径未配置");
+    const runner = this.options.runner ?? defaultRunner;
+    const result = await runner(this.options.pythonPath ?? "python3", [
+      this.options.scriptPath,
+      "--input", inputPath,
+      "--model", this.options.modelPath,
+      "--language", this.options.language ?? "zh",
+      "--device", this.options.device ?? "cpu",
+      "--compute-type", this.options.computeType ?? "int8",
+    ], signal);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(result.stdout);
+    } catch {
+      throw new Error("faster-whisper sidecar 没有返回可解析的 JSON");
+    }
+    return parseWhisperJson(payload, this.options.language ?? "zh");
+  }
+}
+
 export function parseSceneTimestamps(output: string, durationMs: number) {
   if (!Number.isInteger(durationMs) || durationMs <= 0) throw new Error("镜头检测需要有效的视频时长");
   const timestamps = [...output.matchAll(/pts_time[:=]([0-9]+(?:\.[0-9]+)?)/g)].map((match) => Math.round(Number(match[1]) * 1000)).filter((value) => Number.isFinite(value) && value > 0 && value < durationMs);

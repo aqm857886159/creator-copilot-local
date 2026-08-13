@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { writeFile } from "node:fs/promises";
-import { AppleVisionOcr, FfmpegSceneDetector, ocrFacts, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
+import { AppleVisionOcr, FasterWhisperSidecarTranscriber, FfmpegSceneDetector, ocrFacts, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
 
 describe("local analysis facts", () => {
   it("normalizes whisper.cpp timestamp variants into bounded transcript segments", () => {
@@ -18,6 +18,13 @@ describe("local analysis facts", () => {
     const transcriber = new WhisperCppTranscriber({ modelPath: "/models/ggml-small.bin", runner: async (binary, args) => { calls.push({ binary, args }); return { stdout: JSON.stringify({ segments: [{ start: 0, end: 1.2, text: "测试转写" }] }), stderr: "" }; } });
     await expect(transcriber.transcribe("/tmp/input.wav")).resolves.toMatchObject([{ text: "测试转写", startMs: 0, endMs: 1200 }]);
     expect(calls[0]).toMatchObject({ binary: "whisper-cli", args: expect.arrayContaining(["-m", "/models/ggml-small.bin", "-oj", "-np", "-l", "zh"]) });
+  });
+
+  it("keeps faster-whisper behind an explicit Python sidecar contract", async () => {
+    const calls: Array<{ binary: string; args: string[] }> = [];
+    const transcriber = new FasterWhisperSidecarTranscriber({ modelPath: "/models/faster-whisper-small", scriptPath: "/sidecars/faster-whisper-sidecar.py", pythonPath: "/venv/bin/python", runner: async (binary, args) => { calls.push({ binary, args }); return { stdout: JSON.stringify({ language: "zh", segments: [{ start: 3.66, end: 5.3, text: "一天天坚持", language: "zh" }] }), stderr: "" }; } });
+    await expect(transcriber.transcribe("/workspace/source.mp4")).resolves.toMatchObject([{ text: "一天天坚持", startMs: 3660, endMs: 5300 }]);
+    expect(calls[0]).toMatchObject({ binary: "/venv/bin/python", args: expect.arrayContaining(["--model", "/models/faster-whisper-small", "--language", "zh", "--compute-type", "int8"]) });
   });
 
   it("turns ffmpeg showinfo scene points into bounded shot facts", async () => {

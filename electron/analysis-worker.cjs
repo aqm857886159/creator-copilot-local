@@ -31,11 +31,16 @@ parentPort.on("message", async (message) => {
     const shots = await new runtime.analysis.FfmpegSceneDetector().detect(payload.sourcePath, payload.durationMs);
     const createdAt = typeof payload.createdAt === "string" ? payload.createdAt : new Date().toISOString();
     const facts = runtime.analysis.shotFacts({ workspaceId: payload.workspaceId, artifactId: payload.artifactId, shots, providerKey: "ffmpeg-scene", modelKey: "showinfo", contentHash: payload.contentHash, createdAt });
-    let asrStatus = "未配置中文 whisper.cpp 模型";
+    let asrStatus = "未配置本地 ASR 模型";
     let asrReady = false;
     if (typeof payload.whisperModelPath === "string" && payload.whisperModelPath) {
       const segments = await new runtime.analysis.WhisperCppTranscriber({ modelPath: payload.whisperModelPath, binaryPath: payload.whisperBinaryPath, language: "zh" }).transcribe(payload.sourcePath);
       facts.push(...runtime.analysis.transcriptFacts({ workspaceId: payload.workspaceId, artifactId: payload.artifactId, segments, providerKey: "whisper.cpp", modelKey: path.basename(payload.whisperModelPath), contentHash: payload.contentHash, createdAt }));
+      asrStatus = `ASR 已完成（${segments.length} 段）`;
+      asrReady = true;
+    } else if (typeof payload.fasterWhisperModelPath === "string" && payload.fasterWhisperModelPath && typeof payload.fasterWhisperPythonPath === "string" && payload.fasterWhisperPythonPath && typeof payload.fasterWhisperScriptPath === "string" && payload.fasterWhisperScriptPath) {
+      const segments = await new runtime.analysis.FasterWhisperSidecarTranscriber({ modelPath: payload.fasterWhisperModelPath, scriptPath: payload.fasterWhisperScriptPath, pythonPath: payload.fasterWhisperPythonPath, language: "zh", device: payload.fasterWhisperDevice, computeType: payload.fasterWhisperComputeType }).transcribe(payload.sourcePath);
+      facts.push(...runtime.analysis.transcriptFacts({ workspaceId: payload.workspaceId, artifactId: payload.artifactId, segments, providerKey: "faster-whisper", modelKey: path.basename(payload.fasterWhisperModelPath), contentHash: payload.contentHash, createdAt }));
       asrStatus = `ASR 已完成（${segments.length} 段）`;
       asrReady = true;
     }

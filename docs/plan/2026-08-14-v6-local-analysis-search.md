@@ -1,13 +1,14 @@
 # V6 本地分析事实与素材检索
 
 日期：2026-08-14  
-状态：分析合同、whisper.cpp adapter、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作和本地分析 Job 已完成；真实中文 whisper 权重与 OCR 质量仍待单独安装/评测验收
+状态：分析合同、whisper.cpp adapter、可选 faster-whisper Python sidecar、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作和本地分析 Job 已完成；真实中文 ASR/OCR 质量仍待独立 fixture 验收
 
 ## 1. 选型决策
 
 当前机器已存在 `/opt/homebrew/bin/whisper-cli`，说明 whisper.cpp 是可用的本地执行入口；但没有发现已安装的模型权重，也没有把未经验证的权重下载到仓库。因此本阶段把“事实合同”和“可替换执行器”先落地：
 
 - ASR baseline：`WhisperCppTranscriber`，模型路径显式配置，默认语言 `zh`；
+- 可选 ASR sidecar：`FasterWhisperSidecarTranscriber`，复用内部 e-cut 已验证的 Python runtime 方向，但必须显式提供 Python、sidecar 和模型路径，不随桌面包偷偷下载或假装内置；
 - 镜头 baseline：`FfmpegSceneDetector`，读取 `showinfo` 时间点并生成有界的 `ShotFact/AnalysisFact`；它是粗切事实，不等于 TransNetV2 语义镜头理解；
 - OCR baseline：`AppleVisionOcr`，FFmpeg 抽帧后调用 `scripts/apple-vision-ocr.swift`；非 macOS 或脚本不可用时保留明确缺口，跨平台 OCR 仍可替换为 RapidOCR/PaddleOCR；
 - 检索：SQLite FTS5 + 结构化 workspace/artifact 过滤，向量索引后置。
@@ -73,7 +74,7 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 
 ## 4. 仍未声称完成的能力
 
-- 没有模型权重时，不声称本机已完成中文 ASR；
+- 本机已有 faster-whisper small 缓存并通过离线 sidecar smoke，但没有真值字幕和质量报告前，不声称中文 ASR 已达标；
 - Vision OCR adapter 可运行不等于中文 OCR 质量已验收；需要真实画面 fixture、准确率、重复文本合并和内存峰值评测；
 - FFmpeg scene baseline 只代表粗切时间事实，不声称已经完成语义镜头拆解或视觉理解；
 - FTS5 不是语义向量检索，素材量超过约 300 个镜头后再评估向量 adapter；
@@ -86,3 +87,4 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 3. 在粗切事实之上再评估 PySceneDetect/TransNetV2 精修，输出同一 `ShotFact`；
 4. 将分析 Job 的失败、磁盘满、worker 崩溃和取消路径补成桌面 E2E；单条失败进入 `needs_attention`，不阻塞其他素材；
 5. 已将本地时间码事实增强到 AI 剪辑提案和素材匹配证据；下一步评估跨素材语义重排和视觉模型，而不是绕过事实索引直接让模型选文件。
+6. 质量评测记录见 [Local-Analysis-Quality-Evaluation-v0.1.md](../Local-Analysis-Quality-Evaluation-v0.1.md)；下一道门是获授权中文口播 fixture、CER/WER、OCR precision/recall 和跨平台 Python/ONNX 打包。
