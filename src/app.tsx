@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   BarChart3,
@@ -54,6 +54,14 @@ export function App() {
   const [mediaImport, setMediaImport] = useState<ImportMediaResult | null>(null);
   const [mediaImporting, setMediaImporting] = useState(false);
   const [captureWorkflow, setCaptureWorkflow] = useState<CaptureWorkflowResult | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (!window.desktop) return () => { active = false; };
+    void window.desktop.getInfo().then((info) => {
+      if (active && info.workspacePath) setWorkspacePath(info.workspacePath);
+    });
+    return () => { active = false; };
+  }, []);
   const visibleProjects = useMemo(
     () =>
       demoWorkspace.projects.filter((project) =>

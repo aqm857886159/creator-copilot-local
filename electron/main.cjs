@@ -294,6 +294,7 @@ ipcMain.handle("desktop:get-info", () => ({
   appVersion: app.getVersion(),
   platform: process.platform,
   arch: process.arch,
+  workspacePath: selectedWorkspacePath,
 }));
 
 ipcMain.handle("desktop:choose-workspace", async () => {
@@ -675,6 +676,15 @@ ipcMain.handle("desktop:propose-edit", async (_event, request) => {
     const modelKey = configuredEditModel();
     const selectedTakeFacts = Object.entries(takesByTask).flatMap(([taskId, takes]) => takes.filter((take) => take.status === "selected").map((take) => ({ taskId, takeId: take.id, assetId: take.assetId, contentHash: assetFacts[take.assetId]?.contentHash, durationMs: assetFacts[take.assetId]?.durationMs, analysisFacts: (analysisFactsByAsset[take.assetId] ?? []).map((fact) => ({ id: fact.id, startMs: fact.startMs, endMs: fact.endMs, contentHash: fact.contentHash })) }))).sort((left, right) => `${left.taskId}:${left.takeId}`.localeCompare(`${right.taskId}:${right.takeId}`));
     const inputFingerprint = createHash("sha256").update(JSON.stringify({ projectId, scriptRevision: script.revision, storyboardRevision: storyboard.revision, providerKey, modelKey, retryNonce, selectedTakeFacts })).digest("hex").slice(0, 24);
+    const proposalInput = {
+      projectId,
+      scriptRevision: script.revision,
+      storyboardRevision: storyboard.revision,
+      providerKey,
+      ...(modelKey ? { modelKey } : {}),
+      ...(retryNonce ? { retryNonce } : {}),
+      selectedTakeFacts,
+    };
     const command = {
       schemaVersion: 1,
       commandId: `command-edit-proposal-${randomUUID()}`,
@@ -684,13 +694,18 @@ ipcMain.handle("desktop:propose-edit", async (_event, request) => {
       idempotencyKey: `edit-proposal:${projectId}:${script.revision}:${storyboard.revision}:${inputFingerprint}`,
       idempotencyScope: workspace.workspaceId,
       correlationId: `run-edit-proposal-${randomUUID()}`,
-      input: { projectId, scriptRevision: script.revision, storyboardRevision: storyboard.revision, providerKey, modelKey, retryNonce, selectedTakeFacts },
+      input: proposalInput,
     };
     const jobId = `job-${command.correlationId}`;
-    const pending = workspace.catalog.executeCommand(command, () => ({
-      receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "pending", target: command.target, jobIds: [jobId], eventIds: [`event-${command.correlationId}-requested`], artifactIds: [], approvalRequired: false },
-      events: [{ id: `event-${command.correlationId}-requested`, aggregateType: "project", aggregateId: projectId, aggregateRevision: project.revision, type: "edit.proposal.requested", payload: { jobId, providerKey, modelKey }, actorType: "user", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: new Date().toISOString() }],
-    }));
+    const pending = workspace.catalog.executeCommand(command, () => {
+      const timestamp = new Date().toISOString();
+      workspace.catalog.insertJob({ schemaVersion: 1, id: jobId, kind: "edit.proposal", inputHash: `sha256:${inputFingerprint}`, state: "queued", attempt: 0, idempotencyKey: command.idempotencyKey, idempotencyScope: workspace.workspaceId, providerKey, externalJobId: undefined, artifactIds: [], correlationId: command.correlationId, createdAt: timestamp, updatedAt: timestamp });
+      return {
+        receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "pending", target: command.target, jobIds: [jobId], eventIds: [`event-${command.correlationId}-requested`], artifactIds: [], approvalRequired: false },
+        events: [{ id: `event-${command.correlationId}-requested`, aggregateType: "project", aggregateId: projectId, aggregateRevision: project.revision, type: "edit.proposal.requested", payload: { jobId, providerKey, modelKey }, actorType: "user", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: timestamp }],
+        outbox: [],
+      };
+    });
     const storedPending = workspace.catalog.getReceipt(workspace.workspaceId, command.idempotencyKey)?.receipt ?? pending;
     if (pending.status === "duplicate") {
       const proposalId = proposalIdFromReceipt(storedPending);
@@ -1200,7 +1215,9 @@ ipcMain.handle("desktop:import-take", async (_event, shootTaskId) => {
     if (typeof shootTaskId !== "string" || !shootTaskId) throw new Error("拍摄任务无效");
     const task = workspace.catalog.getShootTask(shootTaskId);
     if (!task) throw new Error("拍摄任务不存在");
-    const result = await dialog.showOpenDialog({ properties: ["openFile"], title: `为“${task.title}”导入 Take`, filters: [{ name: "视频", extensions: ["mp4", "mov", "m4v", "webm", "mkv", "avi"] }] });
+    const result = process.argv.includes("--ui-smoke") && process.env.UI_SMOKE_SOURCE_PATH
+      ? { canceled: false, filePaths: [process.env.UI_SMOKE_SOURCE_PATH] }
+      : await dialog.showOpenDialog({ properties: ["openFile"], title: `为“${task.title}”导入 Take`, filters: [{ name: "视频", extensions: ["mp4", "mov", "m4v", "webm", "mkv", "avi"] }] });
     if (result.canceled || result.filePaths.length === 0) return { ok: false, errorCode: "cancelled", message: "已取消导入" };
     const runtime = await getDesktopRuntime();
     const imported = await runtime.mediaImporter.import({ workspaceRoot: workspace.workspacePath, sourcePath: result.filePaths[0] });
@@ -1255,7 +1272,13 @@ ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
 });
 
 app.whenReady().then(() => {
-  const window = createWindow();
+  const start = async () => {
+    if (process.argv.includes("--ui-smoke")) {
+      const smokeWorkspace = process.env.UI_SMOKE_WORKSPACE;
+      if (!smokeWorkspace) throw new Error("UI_SMOKE_WORKSPACE 未配置");
+      await initializeWorkspace(smokeWorkspace);
+    }
+    const window = createWindow();
   if (process.argv.includes("--smoke")) {
     window.webContents.once("did-finish-load", async () => {
       try {
@@ -1275,8 +1298,68 @@ app.whenReady().then(() => {
       }
     });
   }
+  if (process.argv.includes("--ui-smoke")) {
+    window.webContents.once("did-finish-load", async () => {
+      const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+      try {
+        await wait(700);
+        const result = await window.webContents.executeJavaScript(`(async () => {
+          const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+          const buttons = () => [...document.querySelectorAll("button")];
+          for (let attempt = 0; attempt < 40 && buttons().length === 0; attempt += 1) await wait(250);
+          if (buttons().length === 0) throw new Error("React 页面没有挂载按钮；body=" + (document.body?.innerText ?? "").slice(0, 300));
+          const clickText = (text, occurrence = 0) => {
+            const matches = buttons().filter((button) => button.textContent?.includes(text));
+            const button = matches[occurrence];
+            if (!button) throw new Error("找不到按钮：" + text + " #" + occurrence);
+            button.click();
+          };
+          clickText("创作项目");
+          await wait(300);
+          if (!document.querySelector("h1")?.textContent?.includes("脚本、分镜与拍摄包")) throw new Error("没有进入创作项目页面");
+          clickText("生成并导出拍摄包");
+          await wait(900);
+          if (!document.querySelector(".capture-result")) throw new Error("拍摄包没有出现在创作页面");
+          for (let index = 0; index < 3; index += 1) {
+            clickText("导入 Take", index);
+            await wait(450);
+          }
+          const takeButtons = buttons().filter((button) => button.classList.contains("take-chip"));
+          if (takeButtons.length < 3) throw new Error("没有生成三条 Take");
+          for (const button of takeButtons.slice(0, 3)) button.click();
+          await wait(500);
+          clickText("进入 AI 粗剪");
+          await wait(350);
+          clickText("生成 AI 提案");
+          await wait(1_000);
+          if (!document.querySelector(".proposal-list")) throw new Error("AI 提案没有出现在页面；body=" + (document.body?.innerText ?? "").slice(-1200));
+          clickText("确认并导出");
+          await wait(2_500);
+          if (!document.querySelector(".render-success")) throw new Error("AI 剪辑没有成功导出");
+          const workspaceText = document.querySelector(".workspace-state")?.textContent ?? "";
+          const projectId = workspaceText.match(/project-[a-z0-9-]+/i)?.[0] ?? null;
+          return { ok: true, title: document.querySelector(".render-success h3")?.textContent ?? null, proposalRows: document.querySelectorAll(".proposal-row").length, projectId };
+        })()`);
+        if (!result?.ok) throw new Error("UI smoke 没有返回成功结果");
+        const workspace = requireWorkspace();
+        if (!result.projectId) throw new Error("UI smoke 没有返回项目 ID");
+        const renderRuns = workspace.catalog.listRenderRunsForProject(result.projectId);
+        if (!renderRuns.some((run) => run.state === "succeeded")) throw new Error("UI smoke 的 SQLite 没有成功 render run");
+        console.log(JSON.stringify({ ok: true, smoke: "electron-ui-creation-import-proposal-render", ui: result, workspace: workspace.workspacePath, renderRuns: renderRuns.map((run) => ({ id: run.id, state: run.state, manifestHash: run.manifestHash })) }));
+        app.exit(0);
+      } catch (error) {
+        console.error(JSON.stringify({ ok: false, smoke: "electron-ui-creation-import-proposal-render", message: error instanceof Error ? error.message : "Electron UI smoke 失败" }));
+        app.exit(1);
+      }
+    });
+  }
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+  };
+  void start().catch((error) => {
+    console.error(JSON.stringify({ ok: false, smoke: "electron-startup", message: error instanceof Error ? error.message : "Electron 启动失败" }));
+    app.exit(1);
   });
 });
 

@@ -2,6 +2,7 @@ interface DesktopInfo {
   appVersion: string;
   platform: string;
   arch: string;
+  workspacePath?: string | null;
 }
 
 interface ChooseWorkspaceResult {
