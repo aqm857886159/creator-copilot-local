@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell, utilityProcess } = require("electron");
 const { createHash, randomUUID } = require("node:crypto");
 const { existsSync, mkdirSync, realpathSync } = require("node:fs");
 const { rm: removeFile } = require("node:fs/promises");
@@ -73,6 +73,41 @@ function getEditAgent(runtime) {
 function getTikHubConnector(runtime) {
   if (!process.env.TIKHUB_API_KEY) throw new Error("TikHub API key 未配置");
   return new runtime.providers.TikHubDouyinConnector({ apiKey: process.env.TIKHUB_API_KEY, baseUrl: process.env.TIKHUB_BASE_URL ?? "https://api.tikhub.dev" });
+}
+
+function runAnalysisWorker(payload) {
+  if (!utilityProcess || typeof utilityProcess.fork !== "function") throw new Error("当前 Electron 不支持 utility process");
+  const workerPath = path.join(__dirname, "analysis-worker.cjs");
+  return new Promise((resolve, reject) => {
+    const requestId = randomUUID();
+    const worker = utilityProcess.fork(workerPath);
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      worker.kill();
+      reject(new Error("媒体分析 worker 超时"));
+    }, 10 * 60 * 1000);
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+      worker.kill();
+    };
+    worker.on("message", (message) => {
+      if (!message || message.requestId !== requestId) return;
+      finish(() => {
+        if (message.ok) resolve(message.result);
+        else reject(new Error(typeof message.error === "string" ? message.error : "媒体分析 worker 失败"));
+      });
+    });
+    worker.on("exit", (code) => {
+      if (settled) return;
+      finish(() => reject(new Error(`媒体分析 worker 异常退出（${code ?? "unknown"}）`)));
+    });
+    worker.postMessage({ requestId, payload });
+  });
 }
 
 function createWindow() {
@@ -280,35 +315,12 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         const probe = await new runtime.media.FfmpegToolchain().probe(canonicalPath);
         const durationMs = probe.durationMs ?? video.durationMs;
         if (!durationMs || durationMs <= 0) throw new Error("素材没有可用时长");
-        const shots = await new runtime.analysis.FfmpegSceneDetector().detect(canonicalPath, durationMs);
         const createdAt = new Date().toISOString();
-        const facts = runtime.analysis.shotFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, shots, providerKey: "ffmpeg-scene", modelKey: "showinfo", contentHash: artifact.contentHash, createdAt });
-        let asrStatus = "未配置中文 whisper.cpp 模型";
-        let asrReady = false;
-        if (process.env.WHISPER_MODEL_PATH) {
-          const segments = await new runtime.analysis.WhisperCppTranscriber({ modelPath: process.env.WHISPER_MODEL_PATH, binaryPath: process.env.WHISPER_BINARY_PATH, language: "zh" }).transcribe(canonicalPath);
-          facts.push(...runtime.analysis.transcriptFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, segments, providerKey: "whisper.cpp", modelKey: path.basename(process.env.WHISPER_MODEL_PATH), contentHash: artifact.contentHash, createdAt }));
-          asrStatus = `ASR 已完成（${segments.length} 段）`;
-          asrReady = true;
-        }
-        let ocrStatus = "未配置 Apple Vision OCR";
-        let ocrReady = false;
-        const visionScript = process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(process.cwd(), "scripts", "apple-vision-ocr.swift");
-        if (process.platform === "darwin" && existsSync(visionScript)) {
-          try {
-            const cues = await new runtime.analysis.AppleVisionOcr({ scriptPath: visionScript, binaryPath: process.env.APPLE_VISION_OCR_BINARY, sampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) }).recognize(canonicalPath, durationMs);
-            facts.push(...runtime.analysis.ocrFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, cues, providerKey: "apple-vision", modelKey: "VNRecognizeTextRequest", contentHash: artifact.contentHash, createdAt }));
-            ocrStatus = `OCR 已完成（${cues.length} 条）`;
-            ocrReady = true;
-          } catch (error) {
-            ocrStatus = `OCR 失败：${error instanceof Error ? error.message : "未知错误"}`;
-          }
-        }
-        workspace.catalog.saveAnalysisFacts(facts);
-        const summary = `镜头粗切 ${shots.length} 段；${asrStatus}；${ocrStatus}。`;
-        workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: shots.length, factIds: facts.map((fact) => fact.id), asrStatus, ocrStatus } });
-        updates.push({ awemeId: video.awemeId, status: asrReady && ocrReady ? "completed" : "partial", factIds: facts.map((fact) => fact.id), summary, analyzedAt: createdAt });
-        jobs.push({ id: job.id, state: "succeeded", factCount: facts.length });
+        const workerResult = await runAnalysisWorker({ sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, whisperModelPath: process.env.WHISPER_MODEL_PATH, whisperBinaryPath: process.env.WHISPER_BINARY_PATH, visionScriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(process.cwd(), "scripts", "apple-vision-ocr.swift"), visionBinaryPath: process.env.APPLE_VISION_OCR_BINARY, visionSampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) });
+        workspace.catalog.saveAnalysisFacts(workerResult.facts);
+        workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: workerResult.shotCount, factIds: workerResult.facts.map((fact) => fact.id), asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus } });
+        updates.push({ awemeId: video.awemeId, status: workerResult.asrReady && workerResult.ocrReady ? "completed" : "partial", factIds: workerResult.facts.map((fact) => fact.id), summary: workerResult.summary, analyzedAt: createdAt });
+        jobs.push({ id: job.id, state: "succeeded", factCount: workerResult.facts.length });
       } catch (error) {
         const message = error instanceof Error ? error.message : "本地媒体分析失败";
         workspace.catalog.transitionJob(job.id, "running", "failed", leaseToken, { lastError: { code: "MEDIA_ANALYSIS_FAILED", message, retryable: true } });

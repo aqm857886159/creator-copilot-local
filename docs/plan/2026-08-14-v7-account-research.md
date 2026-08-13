@@ -30,7 +30,7 @@
 - `packages/storage/src/catalog.ts`：schema v6 的 `research_reports` 表及保存/读取/列表 API。
 - `electron/main.cjs`：`desktop:research-account`，凭证只在 main 进程读取，报告写入当前工作区 catalog。
 - `electron/main.cjs`：`desktop:download-research-media`，一次最多 5 条，逐条下载、导入、代理化、缩略图化；局部失败不回滚已成功素材。
-- `electron/main.cjs`：`desktop:analyze-research-media`，为每条作品创建或恢复 `media.analysis` Job，取得 lease 后写入镜头事实；没有中文模型时保留 partial 状态，不伪造 ASR/OCR。
+- `electron/main.cjs`：`desktop:analyze-research-media`，为每条作品创建或恢复 `media.analysis` Job，取得 lease 后由 `electron/analysis-worker.cjs` 执行 FFmpeg/ASR/OCR，main 只回写事实和 Job receipt；没有中文模型时保留 partial 状态，不伪造 ASR/OCR。
 - `src/components/account-radar-workbench.tsx`：账号输入、10/20 条范围、覆盖状态、作品选择、显式本地化动作和证据缺口展示。
 - `packages/providers/src/index.ts`：TikHub `ResearchConnector`，将 provider 响应归一化为 profile/posts 页面。
 
