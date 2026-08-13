@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachResearchMedia, buildAccountResearchReport } from "./index";
+import { attachResearchAnalysis, attachResearchMedia, buildAccountResearchReport } from "./index";
 
 describe("benchmark account research", () => {
   it("builds a metadata-first evidence report with explicit coverage", async () => {
@@ -16,6 +16,10 @@ describe("benchmark account research", () => {
     const attached = attachResearchMedia(report, [{ awemeId: "aweme-1", artifactIds: ["source-1", "proxy-1"], attachedAt: "2026-08-14T00:01:00.000Z" }]);
     expect(attached.videos[0]).toMatchObject({ mediaAnalysisStatus: "queued", artifactIds: ["source-1", "proxy-1"] });
     expect(attached.coverage.missingMedia).toBe(0);
+    const analyzed = attachResearchAnalysis(attached, [{ awemeId: "aweme-1", status: "partial", factIds: ["fact-shot-1"], summary: "检测到 3 个镜头；中文 ASR/OCR 尚未配置。", analyzedAt: "2026-08-14T00:02:00.000Z" }]);
+    expect(analyzed.videos[0]).toMatchObject({ mediaAnalysisStatus: "partial", analysisFactIds: ["fact-shot-1"] });
+    expect(analyzed.coverage.mediaPartiallyAnalyzed).toBe(1);
+    expect(analyzed.evidence.some((evidence) => evidence.type === "media_fact")).toBe(true);
   });
 
   it("rejects an unbounded first request", async () => {

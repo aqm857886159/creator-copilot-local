@@ -52,6 +52,15 @@ interface DownloadResearchMediaResult {
   failed?: Array<{ awemeId: string; message: string }>;
 }
 
+interface AnalyzeResearchMediaResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  report?: AccountResearchResult["report"];
+  failed?: Array<{ awemeId: string; message: string }>;
+  jobs?: Array<{ id: string; state: string; reused?: boolean; factCount?: number }>;
+}
+
 interface CaptureWorkflowInput {
   projectTitle: string;
   blocks: Array<{ kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; visualNeed: "none" | "support" | "must_show" }>;
@@ -155,6 +164,7 @@ interface Window {
     searchAssets: (query: string) => Promise<AssetSearchResult>;
     researchAccount: (input: { sourceInput: string; count?: number }) => Promise<AccountResearchResult>;
     downloadResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<DownloadResearchMediaResult>;
+    analyzeResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<AnalyzeResearchMediaResult>;
     createCaptureWorkflow: (input: CaptureWorkflowInput) => Promise<CaptureWorkflowResult>;
     importTake: (shootTaskId: string) => Promise<ImportTakeResult>;
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;

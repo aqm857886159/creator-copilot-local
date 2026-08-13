@@ -14,14 +14,15 @@ export const BenchmarkVideoSchema = z.object({
   statistics: z.record(z.number().nonnegative()),
   evidenceIds: z.array(id),
   artifactIds: z.array(id).default([]),
-  mediaAnalysisStatus: z.enum(["not_requested", "metadata_only", "queued", "completed", "failed"]),
+  mediaAnalysisStatus: z.enum(["not_requested", "metadata_only", "queued", "partial", "completed", "failed"]),
+  analysisFactIds: z.array(id).default([]),
 }).strict();
 export type BenchmarkVideo = z.infer<typeof BenchmarkVideoSchema>;
 
 export const ResearchEvidenceSchema = z.object({
   schemaVersion: z.literal(1),
   id,
-  type: z.enum(["profile", "video_metadata", "metric", "coverage"]),
+  type: z.enum(["profile", "video_metadata", "metric", "coverage", "media_fact"]),
   sourceId: id,
   label: id,
   payload: z.record(z.unknown()),
@@ -38,7 +39,7 @@ export const AccountResearchReportSchema = z.object({
   secUserId: id,
   profile: z.object({ nickname: z.string().optional(), signature: z.string().optional(), followerCount: z.number().nonnegative().optional(), followingCount: z.number().nonnegative().optional(), awemeCount: z.number().nonnegative().optional() }).strict(),
   videos: z.array(BenchmarkVideoSchema),
-  coverage: z.object({ requested: z.number().int().positive(), received: z.number().int().nonnegative(), metadataAnalyzed: z.number().int().nonnegative(), mediaAnalyzed: z.number().int().nonnegative(), missingMedia: z.number().int().nonnegative(), hasMore: z.boolean(), note: z.string().min(1) }).strict(),
+  coverage: z.object({ requested: z.number().int().positive(), received: z.number().int().nonnegative(), metadataAnalyzed: z.number().int().nonnegative(), mediaAnalyzed: z.number().int().nonnegative(), mediaPartiallyAnalyzed: z.number().int().nonnegative().default(0), missingMedia: z.number().int().nonnegative(), hasMore: z.boolean(), note: z.string().min(1) }).strict(),
   findings: z.array(z.object({ id, kind: z.enum(["metadata_pattern", "topic_opportunity", "needs_media_analysis"]), title: id, detail: z.string().min(1), evidenceIds: z.array(id) }).strict()),
   evidence: z.array(ResearchEvidenceSchema),
   createdAt: z.string().datetime({ offset: true }),
@@ -49,6 +50,14 @@ export type ResearchMediaAttachment = {
   awemeId: string;
   artifactIds: string[];
   attachedAt: string;
+};
+
+export type ResearchAnalysisUpdate = {
+  awemeId: string;
+  status: "partial" | "completed";
+  factIds: string[];
+  summary: string;
+  analyzedAt: string;
 };
 
 function profilePayload(profile: TikHubProfile) {
@@ -83,7 +92,7 @@ export async function buildAccountResearchReport(input: { workspaceId: string; s
   const mapped = posts.items.map((video) => videoToBenchmark(video, capturedAt));
   const coverageEvidenceId = `evidence-coverage-${secUserId}-${capturedAt.replace(/[^0-9]/g, "")}`;
   const evidence = [ResearchEvidenceSchema.parse({ schemaVersion: 1, id: `evidence-profile-${secUserId}`, type: "profile", sourceId: secUserId, label: "账号资料快照", payload: profilePayload(profile), capturedAt }), ...mapped.map((item) => item.evidence), ResearchEvidenceSchema.parse({ schemaVersion: 1, id: coverageEvidenceId, type: "coverage", sourceId: secUserId, label: "首轮覆盖范围", payload: { requested: count, received: mapped.length, hasMore: posts.hasMore, mediaAnalysisStatus: "metadata_only" }, capturedAt })];
-  const report = AccountResearchReportSchema.parse({ schemaVersion: 1, id: `account-research-${secUserId}-${capturedAt.replace(/[^0-9]/g, "")}`, workspaceId: input.workspaceId, providerKey: posts.providerKey, sourceInput: input.sourceInput, secUserId, profile: profilePayload(profile), videos: mapped.map((item) => item.video), coverage: { requested: count, received: mapped.length, metadataAnalyzed: mapped.length, mediaAnalyzed: 0, missingMedia: mapped.length, hasMore: posts.hasMore, note: "当前为公开元数据首轮；选择具体作品后才下载并执行 ASR/OCR/镜头分析。" }, findings: [{ id: `finding-needs-media-${secUserId}`, kind: "needs_media_analysis", title: "待选择作品做画面拆解", detail: "元数据已取得；请从列表选择 3–5 条，再执行本地媒体分析。", evidenceIds: [coverageEvidenceId] }], evidence, createdAt: capturedAt });
+  const report = AccountResearchReportSchema.parse({ schemaVersion: 1, id: `account-research-${secUserId}-${capturedAt.replace(/[^0-9]/g, "")}`, workspaceId: input.workspaceId, providerKey: posts.providerKey, sourceInput: input.sourceInput, secUserId, profile: profilePayload(profile), videos: mapped.map((item) => item.video), coverage: { requested: count, received: mapped.length, metadataAnalyzed: mapped.length, mediaAnalyzed: 0, mediaPartiallyAnalyzed: 0, missingMedia: mapped.length, hasMore: posts.hasMore, note: "当前为公开元数据首轮；选择具体作品后才下载并执行 ASR/OCR/镜头分析。" }, findings: [{ id: `finding-needs-media-${secUserId}`, kind: "needs_media_analysis", title: "待选择作品做画面拆解", detail: "元数据已取得；请从列表选择 3–5 条，再执行本地媒体分析。", evidenceIds: [coverageEvidenceId] }], evidence, createdAt: capturedAt });
   return report;
 }
 
@@ -102,6 +111,21 @@ export function attachResearchMedia(report: AccountResearchReport, attachments: 
     findings: [{ id: `finding-needs-media-${report.secUserId}`, kind: "needs_media_analysis", title: "本地素材已就绪，等待画面拆解", detail: "已写入素材库。下一步执行 ASR、OCR 和镜头检测，结论会回挂到作品证据。", evidenceIds: report.findings.flatMap((finding) => finding.evidenceIds) }],
   });
   return updated;
+}
+
+export function attachResearchAnalysis(report: AccountResearchReport, updates: ResearchAnalysisUpdate[]) {
+  const updateByAwemeId = new Map(updates.map((update) => [update.awemeId, update]));
+  const evidence = [...report.evidence];
+  const videos = report.videos.map((video) => {
+    const update = updateByAwemeId.get(video.awemeId);
+    if (!update) return video;
+    const evidenceId = `evidence-media-${video.awemeId}-${update.analyzedAt.replace(/[^0-9]/g, "")}`;
+    evidence.push(ResearchEvidenceSchema.parse({ schemaVersion: 1, id: evidenceId, type: "media_fact", sourceId: video.awemeId, label: "本地媒体分析摘要", payload: { artifactIds: video.artifactIds, factIds: update.factIds, summary: update.summary, analyzedAt: update.analyzedAt }, capturedAt: update.analyzedAt }));
+    return BenchmarkVideoSchema.parse({ ...video, mediaAnalysisStatus: update.status, analysisFactIds: [...new Set(update.factIds)], evidenceIds: [...new Set([...video.evidenceIds, evidenceId])] });
+  });
+  const mediaAnalyzed = videos.filter((video) => video.mediaAnalysisStatus === "completed").length;
+  const mediaPartiallyAnalyzed = videos.filter((video) => video.mediaAnalysisStatus === "partial").length;
+  return AccountResearchReportSchema.parse({ ...report, videos, evidence, coverage: { ...report.coverage, mediaAnalyzed, mediaPartiallyAnalyzed, note: `已完成 ${mediaAnalyzed} 条，部分完成 ${mediaPartiallyAnalyzed} 条；ASR/OCR 未配置时会保留已完成的镜头事实。` }, findings: [{ id: `finding-analysis-${report.secUserId}`, kind: "needs_media_analysis", title: mediaPartiallyAnalyzed > 0 ? "镜头事实已就绪，仍有分析缺口" : "媒体拆解已完成", detail: mediaPartiallyAnalyzed > 0 ? "镜头切点已写入素材库；请配置中文 ASR/OCR 后补齐文案和画面文字。" : "本地媒体事实已写入素材库，可用于 AI 剪辑提案和账号模式分析。", evidenceIds: videos.flatMap((video) => video.evidenceIds) }] });
 }
 
 export function markResearchMediaFailures(report: AccountResearchReport, awemeIds: string[]) {

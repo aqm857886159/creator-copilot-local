@@ -17,13 +17,14 @@ async function getDesktopRuntime() {
     const runtimeRoot = path.join(__dirname, "..", "dist-electron", "packages");
     desktopRuntimePromise = Promise.all([
       import(pathToFileURL(path.join(runtimeRoot, "media", "src", "index.js")).href),
+      import(pathToFileURL(path.join(runtimeRoot, "analysis", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "creation", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "exchange", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "storage", "src", "catalog.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "providers", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "agent-runtime", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "research", "src", "index.js")).href),
-    ]).then(([media, creation, exchange, storage, providers, agentRuntime, research]) => ({ media, creation, exchange, storage, providers, agentRuntime, research, mediaImporter: new media.LocalMediaImporter() }));
+    ]).then(([media, analysis, creation, exchange, storage, providers, agentRuntime, research]) => ({ media, analysis, creation, exchange, storage, providers, agentRuntime, research, mediaImporter: new media.LocalMediaImporter() }));
   }
   return desktopRuntimePromise;
 }
@@ -217,6 +218,95 @@ ipcMain.handle("desktop:download-research-media", async (_event, raw) => {
     return { ok: true, report: updated, downloaded, failed };
   } catch (error) {
     return { ok: false, errorCode: "research_media_download_failed", message: error instanceof Error ? error.message : "研究素材下载失败" };
+  }
+});
+
+ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.reportId !== "string" || !Array.isArray(raw.awemeIds)) throw new Error("媒体分析选择参数无效");
+    const awemeIds = [...new Set(raw.awemeIds.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
+    if (awemeIds.length < 1 || awemeIds.length > 5) throw new Error("一次只能分析 1–5 条作品");
+    const report = workspace.catalog.getResearchReport(raw.reportId);
+    if (!report || report.workspaceId !== workspace.workspaceId) throw new Error("研究报告不存在或不属于当前工作区");
+    const selected = report.videos.filter((video) => awemeIds.includes(video.awemeId));
+    if (selected.length !== awemeIds.length) throw new Error("选择的作品不在当前研究报告中");
+    const runtime = await getDesktopRuntime();
+    const updates = [];
+    const failed = [];
+    const jobs = [];
+    for (const video of selected) {
+      const sourceArtifactId = video.artifactIds[0];
+      const artifact = sourceArtifactId ? workspace.catalog.getArtifact(sourceArtifactId) : undefined;
+      if (!artifact) {
+        failed.push({ awemeId: video.awemeId, message: "作品尚未本地化，无法开始分析" });
+        continue;
+      }
+      const inputHash = `sha256:${createHash("sha256").update(JSON.stringify({ artifactId: artifact.artifactId, contentHash: artifact.contentHash, pipeline: "analysis-v1" })).digest("hex")}`;
+      const jobId = `analysis-${artifact.artifactId}`;
+      const now = new Date();
+      let job = workspace.catalog.getJob(jobId);
+      if (!job) {
+        const timestamp = now.toISOString();
+        workspace.catalog.insertJob({ schemaVersion: 1, id: jobId, kind: "media.analysis", inputHash, state: "queued", attempt: 0, idempotencyKey: `analysis-${artifact.artifactId}-${artifact.contentHash}`, idempotencyScope: workspace.workspaceId, providerKey: "local", artifactIds: [artifact.artifactId], correlationId: randomUUID(), createdAt: timestamp, updatedAt: timestamp });
+        job = workspace.catalog.getJob(jobId);
+      } else if (job.state === "succeeded") {
+        updates.push({ awemeId: video.awemeId, status: video.mediaAnalysisStatus === "completed" ? "completed" : "partial", factIds: video.analysisFactIds, summary: "已复用已完成的本地分析任务。", analyzedAt: now.toISOString() });
+        jobs.push({ id: job.id, state: job.state, reused: true });
+        continue;
+      } else if (["failed", "needs_attention", "timed_out"].includes(job.state)) {
+        const recoveryState = job.state === "needs_attention" ? "queued" : "retry_wait";
+        workspace.catalog.transitionJob(job.id, job.state, recoveryState, undefined, { retryAfter: now.toISOString(), lastError: undefined });
+        job = workspace.catalog.getJob(job.id);
+      }
+      if (!job) throw new Error(`分析任务创建失败：${artifact.artifactId}`);
+      workspace.catalog.recoverExpiredLeases(now);
+      const leaseToken = workspace.catalog.claimJob(job.id, "analysis-main", now, 120_000);
+      if (!leaseToken) {
+        failed.push({ awemeId: video.awemeId, message: "分析任务正在运行或无法取得租约" });
+        continue;
+      }
+      const heartbeatAt = new Date();
+      if (!workspace.catalog.heartbeatJob(job.id, "analysis-main", leaseToken, heartbeatAt, 120_000)) {
+        failed.push({ awemeId: video.awemeId, message: "分析任务租约已失效，请重试" });
+        continue;
+      }
+      try {
+        const absolutePath = path.resolve(workspace.workspacePath, artifact.relativePath);
+        const root = realpathSync(workspace.workspacePath);
+        if (!existsSync(absolutePath)) throw new Error("本地素材文件不存在");
+        const canonicalPath = realpathSync(absolutePath);
+        if (canonicalPath !== root && !canonicalPath.startsWith(`${root}${path.sep}`)) throw new Error("分析素材路径越过工作区");
+        const probe = await new runtime.media.FfmpegToolchain().probe(canonicalPath);
+        const durationMs = probe.durationMs ?? video.durationMs;
+        if (!durationMs || durationMs <= 0) throw new Error("素材没有可用时长");
+        const shots = await new runtime.analysis.FfmpegSceneDetector().detect(canonicalPath, durationMs);
+        const createdAt = new Date().toISOString();
+        const facts = runtime.analysis.shotFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, shots, providerKey: "ffmpeg-scene", modelKey: "showinfo", contentHash: artifact.contentHash, createdAt });
+        let asrStatus = "未配置中文 whisper.cpp 模型";
+        if (process.env.WHISPER_MODEL_PATH) {
+          const segments = await new runtime.analysis.WhisperCppTranscriber({ modelPath: process.env.WHISPER_MODEL_PATH, binaryPath: process.env.WHISPER_BINARY_PATH, language: "zh" }).transcribe(canonicalPath);
+          facts.push(...runtime.analysis.transcriptFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, segments, providerKey: "whisper.cpp", modelKey: path.basename(process.env.WHISPER_MODEL_PATH), contentHash: artifact.contentHash, createdAt }));
+          asrStatus = `ASR 已完成（${segments.length} 段）`;
+        }
+        workspace.catalog.saveAnalysisFacts(facts);
+        const summary = `镜头粗切 ${shots.length} 段；${asrStatus}；OCR 尚未配置。`;
+        workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: shots.length, factIds: facts.map((fact) => fact.id), asrStatus, ocrStatus: "not_configured" } });
+        updates.push({ awemeId: video.awemeId, status: "partial", factIds: facts.map((fact) => fact.id), summary, analyzedAt: createdAt });
+        jobs.push({ id: job.id, state: "succeeded", factCount: facts.length });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "本地媒体分析失败";
+        workspace.catalog.transitionJob(job.id, "running", "failed", leaseToken, { lastError: { code: "MEDIA_ANALYSIS_FAILED", message, retryable: true } });
+        failed.push({ awemeId: video.awemeId, message });
+        jobs.push({ id: job.id, state: "failed" });
+      }
+    }
+    const updated = runtime.research.attachResearchAnalysis(workspace.catalog.getResearchReport(report.id) ?? report, updates);
+    workspace.catalog.saveResearchReport(updated);
+    if (updates.length === 0) return { ok: false, errorCode: "research_media_analysis_failed", message: failed[0]?.message ?? "没有作品完成分析", report: updated, failed, jobs };
+    return { ok: true, report: updated, failed, jobs };
+  } catch (error) {
+    return { ok: false, errorCode: "research_media_analysis_failed", message: error instanceof Error ? error.message : "本地媒体分析失败" };
   }
 });
 

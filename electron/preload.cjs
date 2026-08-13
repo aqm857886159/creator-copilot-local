@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("desktop", {
   searchAssets: (query) => ipcRenderer.invoke("desktop:search-assets", query),
   researchAccount: (input) => ipcRenderer.invoke("desktop:research-account", input),
   downloadResearchMedia: (input) => ipcRenderer.invoke("desktop:download-research-media", input),
+  analyzeResearchMedia: (input) => ipcRenderer.invoke("desktop:analyze-research-media", input),
   createCaptureWorkflow: (input) => ipcRenderer.invoke("desktop:create-capture-workflow", input),
   importTake: (shootTaskId) => ipcRenderer.invoke("desktop:import-take", shootTaskId),
   selectTake: (input) => ipcRenderer.invoke("desktop:select-take", input),

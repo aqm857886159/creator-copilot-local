@@ -1,7 +1,7 @@
 # V7：对标账号证据雷达（metadata-first）
 
 日期：2026-08-14  
-状态：metadata-first 与“选中作品后本地化”切片已实现；ASR/OCR/镜头拆解仍后置
+状态：metadata-first、选中作品本地化和本地镜头分析 Job 已实现；中文 ASR/OCR 仍按能力配置后置
 
 ## 产品名称与用户结果
 
@@ -18,7 +18,8 @@
 → 用户明确选择 1–5 条
 → 调用高画质链接接口并立即本地化
 → 写入素材库、代理、缩略图和 artifact ID
-→ 后续再做本地 ASR/OCR/镜头分析
+→ 创建/恢复本地分析 Job
+→ FFmpeg 镜头粗切；ASR/OCR 按配置执行
 ```
 
 “分析几十条”是研究目标，不等于首次点击就下载和调用视觉模型几十次。首轮先用便宜、可缓存的元数据筛选价值，再增量分析；任何付费动作都要有用户确认、预计请求数和可取消状态。
@@ -29,6 +30,7 @@
 - `packages/storage/src/catalog.ts`：schema v6 的 `research_reports` 表及保存/读取/列表 API。
 - `electron/main.cjs`：`desktop:research-account`，凭证只在 main 进程读取，报告写入当前工作区 catalog。
 - `electron/main.cjs`：`desktop:download-research-media`，一次最多 5 条，逐条下载、导入、代理化、缩略图化；局部失败不回滚已成功素材。
+- `electron/main.cjs`：`desktop:analyze-research-media`，为每条作品创建或恢复 `media.analysis` Job，取得 lease 后写入镜头事实；没有中文模型时保留 partial 状态，不伪造 ASR/OCR。
 - `src/components/account-radar-workbench.tsx`：账号输入、10/20 条范围、覆盖状态、作品选择、显式本地化动作和证据缺口展示。
 - `packages/providers/src/index.ts`：TikHub `ResearchConnector`，将 provider 响应归一化为 profile/posts 页面。
 
@@ -54,12 +56,14 @@
 | 作品缺分享链接/封面 | 仍保留 metadata-only 卡片 | 不伪造 URL |
 | 用户尚未选择作品 | 显示“待选中本地化”缺口 | 不自动下载或调用视觉模型 |
 | 只成功下载部分作品 | 显示成功/失败数量 | 已成功 artifact 保留；失败作品标记可重试，不重复成功项 |
+| ASR/OCR 模型未配置 | 显示“部分完成” | 镜头事实可用；Job 成功但明确记录 ASR/OCR 缺口 |
 | 进程重启 | 报告从 catalog 重新打开 | 不重新扣费 |
 
 当前验收门：`npm run typecheck`、`npm test`、`npm run build`；研究报告必须通过 schema、重启读取和 1–20 数量边界测试。真实联调只做健康、凭证和单账号小样本，禁止批量抓取。
 
 ## 下一步（不阻塞主链）
 
-1. 将本地化后的 artifact 交给分析 Job，执行 `ffprobe → ASR/OCR/shot`，逐项保存失败状态。
-2. 将本地 ASR/OCR/镜头事实挂回 `awemeId + artifactId + time range`，再生成账号级结构模式。
+1. 接 Apple Vision 或 RapidOCR/PaddleOCR 的本地 adapter，补齐 OCR `AnalysisFact`。
+2. 配置一个中文 whisper.cpp 模型，记录模型许可证、hash、内存和 CER；把 transcript facts 与镜头事实一起回挂 `awemeId + artifactId + time range`。
+3. 在已完成的事实之上生成账号级结构模式和选题机会。
 4. 另建热点/榜单连接器，使用缓存和预算门，不把 TikHub 的所有接口直接暴露给 Agent。
