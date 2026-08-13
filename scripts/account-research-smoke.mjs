@@ -29,19 +29,24 @@ if (!Number.isFinite(maxCostUsd) || maxCostUsd < 0) throw new Error("ACCOUNT_RES
 
 const profileEndpoint = "/api/v1/douyin/app/v3/handler_user_profile";
 const postsEndpoint = "/api/v1/douyin/app/v3/fetch_user_post_videos";
+const accountAnalysisEndpoint = "/api/v1/douyin/billboard/fetch_hot_account_item_analysis_list";
+const accountAnalysisBilled = process.env.ACCOUNT_ANALYSIS_BILLED_SMOKE === "1";
 const profilePrice = await connector.getEndpointInfo(profileEndpoint);
 // The provider rate-limits endpoint metadata aggressively; keep these calls sequential.
 const postsPrice = await connector.getEndpointInfo(postsEndpoint);
-const quotedCostUsd = profilePrice.costUsd + postsPrice.costUsd;
+const accountAnalysisPrice = accountAnalysisBilled ? await connector.getEndpointInfo(accountAnalysisEndpoint) : undefined;
+const quotedCostUsd = profilePrice.costUsd + postsPrice.costUsd + (accountAnalysisPrice?.costUsd ?? 0);
 console.log(JSON.stringify({
   provider: "tikhub",
   check: "account_research_quote",
   requestedPosts: 1,
-  endpointCount: 2,
+  endpointCount: accountAnalysisBilled ? 3 : 2,
   quotedCostUsd,
   maxCostUsd,
   profileRateLimit: profilePrice.rateLimit ?? null,
   postsRateLimit: postsPrice.rateLimit ?? null,
+  accountAnalysisRateLimit: accountAnalysisPrice?.rateLimit ?? null,
+  accountAnalysisBilled,
 }));
 if (quotedCostUsd > maxCostUsd) {
   throw new Error(`报价 ${quotedCostUsd} USD 超过 ACCOUNT_RESEARCH_MAX_COST_USD=${maxCostUsd}`);
@@ -62,3 +67,14 @@ console.log(JSON.stringify({
   metadataOnly: posts.items.length === 0,
   responseHashPresent: Boolean(posts.responseHash),
 }));
+if (accountAnalysisBilled) {
+  const analysis = await connector.fetchAccountWorkAnalysis({ secUserId, day: 7 });
+  console.log(JSON.stringify({
+    ok: analysis.secUserId === secUserId && analysis.day === 7,
+    provider: "tikhub",
+    check: "account_work_analysis",
+    day: analysis.day,
+    metricKeyCount: Object.keys(analysis.metrics).length,
+    responseHashPresent: Boolean(analysis.responseHash),
+  }));
+}

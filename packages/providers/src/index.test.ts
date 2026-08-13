@@ -138,4 +138,17 @@ describe("provider adapters", () => {
     await expect(connector.fetchVideoStatistics?.([])).rejects.toThrow();
     await expect(connector.fetchVideoStatistics?.(Array.from({ length: 51 }, (_, index) => `aweme-${index}`))).rejects.toThrow();
   });
+
+  it("normalizes the bounded account work analysis endpoint", async () => {
+    const urls: string[] = [];
+    const connector = new TikHubDouyinConnector({ apiKey: "secret-test-key", baseUrl: "https://api.example.test", fetcher: async (input) => {
+      urls.push(String(input));
+      return jsonResponse({ code: 200, data: { code: 200, data: { UserID: "MS4wLjABAAAAfixture", avg_like_count: 12.5, avg_comment_count: 3, percentile_like_count: 0.8, BaseResp: { status_code: 0 } } } });
+    } });
+    await expect(connector.fetchAccountWorkAnalysis?.({ secUserId: "MS4wLjABAAAAfixture" })).resolves.toMatchObject({ secUserId: "MS4wLjABAAAAfixture", day: 7, metrics: { avg_like_count: 12.5, avg_comment_count: 3, percentile_like_count: 0.8 } });
+    expect(urls[0]).toContain("fetch_hot_account_item_analysis_list");
+    expect(urls[0]).toContain("sec_uid=MS4wLjABAAAAfixture");
+    expect(urls[0]).toContain("day=7");
+    await expect(connector.fetchAccountWorkAnalysis?.({ secUserId: "MS4wLjABAAAAfixture", day: 31 })).rejects.toThrow();
+  });
 });

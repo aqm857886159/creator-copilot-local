@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld("desktop", {
   researchAccount: (input) => ipcRenderer.invoke("desktop:research-account", input),
   quoteAccountMetrics: (input) => ipcRenderer.invoke("desktop:quote-account-metrics", input),
   runAccountMetrics: (quoteId) => ipcRenderer.invoke("desktop:run-account-metrics", quoteId),
+  quoteAccountAnalysis: (input) => ipcRenderer.invoke("desktop:quote-account-analysis", input),
+  runAccountAnalysis: (quoteId) => ipcRenderer.invoke("desktop:run-account-analysis", quoteId),
   downloadResearchMedia: (input) => ipcRenderer.invoke("desktop:download-research-media", input),
   analyzeResearchMedia: (input) => ipcRenderer.invoke("desktop:analyze-research-media", input),
   quoteTopicRadar: (input) => ipcRenderer.invoke("desktop:quote-topic-radar", input),

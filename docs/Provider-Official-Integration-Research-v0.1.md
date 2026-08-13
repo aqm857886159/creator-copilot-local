@@ -54,6 +54,7 @@ TikHub 的 Search API、批量高清下载、星图画像和视频生成都不�
 - [单作品无版权限制 V3](https://docs.tikhub.io/406098636e0)
 - [播放统计](https://docs.tikhub.io/186826221e0)
 - [批量作品统计](https://docs.tikhub.io/256258480e0)
+- [账号作品分析（上周）](https://docs.tikhub.io/252393848e0)
 - [最高画质播放链接](https://docs.tikhub.io/312096107e0)
 - [低粉爆款榜](https://docs.tikhub.io/252393854e0)
 - [高完播率榜](https://docs.tikhub.io/252393855e0)
@@ -75,6 +76,7 @@ TikHub 的 Search API、批量高清下载、星图画像和视频生成都不�
 | App V3 单视频 | `GET /api/v1/douyin/app/v3/fetch_one_video?aweme_id=...` | 文案、作者、视频/图文元数据 |
 | V3 受限内容 | `fetch_one_video_v3` 可处理更多受限内容，但仍要遵守平台权利和用户授权 | 只作为显式 fallback，不自动下载 |
 | 播放量 | 标准作品接口可能不带播放数；单作品 `fetch_video_statistics` 一次最多 2 个 ID；批量 `fetch_multi_video_statistics` 一次最多 50 个 `aweme_ids`，官方页面当前标注 `$0.025/次` | 研究报告把“播放统计来源”单独标证据；产品只在报价确认后调用批量接口 |
+| 账号作品表现 | `GET /api/v1/douyin/billboard/fetch_hot_account_item_analysis_list`，参数 `sec_uid`、`day`（默认 7）；官方响应提示会计费，当前动态价格为 `$0.001` | 账号页的近 7 日聚合基准；只保存归一化数字和响应 hash，不把 `UserID/BaseResp` 等供应商内部字段暴露给 UI |
 | 高画质 | 单条高画质接口价格文档标为 `$0.005/次`；链接有时效性 | 用户点“下载到本地”后立即导入，绝不保存临时 URL 当资产路径 |
 | URL 解析 | Web `get_sec_user_id`、`get_aweme_id` | 粘贴主页/作品链接时先转稳定 ID |
 | 榜单 | 官方目录提供低粉爆款、高完播、高点赞、高涨粉等 Billboard 接口，并有关键词/垂类过滤能力 | 选题雷达的第二入口，必须有成本预估和缓存；不加入默认账号分析 |
@@ -102,6 +104,8 @@ TikHub 的 Search API、批量高清下载、星图画像和视频生成都不�
 | 星图趋势指南 | `GET /api/v1/douyin/xingtu_v2/get_content_trend_guide` | 动态 `$0.001` | 静态页面写 `$0.002/次`，与动态端点信息冲突；证明价格不能写死，星图能力后置 |
 
 批量统计的实现端点为 `GET /api/v1/douyin/app/v3/fetch_multi_video_statistics?aweme_ids=id1,id2,...`。官方单作品页面还特别提醒标准作品数据可能缺少 `play_count`，因此“作品列表拿到但播放量未知”是正常情况；批量接口是有边界的补齐动作，不应放进账号首轮默认请求。动态 `get_endpoint_info` 仍是本地报价的最终来源，官方页面价格变动时 UI 不写死历史值。
+
+账号聚合分析的实现端点为 `GET /api/v1/douyin/billboard/fetch_hot_account_item_analysis_list?sec_uid=...&day=7`。官方文档只保证“账号作品分析”语义，示例响应的 `data` 可能为空，因此 adapter 只接受有限的 `avg_*` / `percentile_*` 数字键；没有数字时报告保持原样，不凭空生成基准。脚本支持显式的 `ACCOUNT_ANALYSIS_BILLED_SMOKE=1`，默认不会调用该付费接口。
 
 低粉榜/高完播榜真实响应不是直接的 `data[]`，而是 `response.data.data.objs[]`；作品字段包含 `item_id/item_title/fans_cnt/play_cnt/score/like_rate/follow_rate` 等。搜索热榜位于 `response.data.data.search_list[]`，包含 `key_word/search_score/trends[]`。适配器已经用归一化对象屏蔽这层供应商嵌套，原始对象只作为受控证据。
 

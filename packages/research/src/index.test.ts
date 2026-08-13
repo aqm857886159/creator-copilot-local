@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACCOUNT_METRICS_ENDPOINT, attachResearchAnalysis, attachResearchMedia, attachResearchMediaPatterns, attachResearchMetrics, buildAccountResearchReport, createAccountMetricsQuote, createTopicRadarQuote, createTopicRadarReport, normalizeTopicRadarQuery } from "./index";
+import { ACCOUNT_METRICS_ENDPOINT, ACCOUNT_WORK_ANALYSIS_ENDPOINT, attachResearchAccountAnalysis, attachResearchAnalysis, attachResearchMedia, attachResearchMediaPatterns, attachResearchMetrics, buildAccountResearchReport, createAccountMetricsQuote, createAccountWorkAnalysisQuote, createTopicRadarQuote, createTopicRadarReport, normalizeTopicRadarQuery } from "./index";
 
 describe("benchmark account research", () => {
   it("builds a metadata-first evidence report with explicit coverage", async () => {
@@ -40,6 +40,11 @@ describe("benchmark account research", () => {
     const withMetrics = attachResearchMetrics(patterned, [{ awemeId: "aweme-1", statistics: { play_count: 12_345, share_count: 67 }, capturedAt: "2026-08-14T00:03:00.000Z", responseHash: "sha256:metrics" }]);
     expect(withMetrics.videos[0].statistics).toMatchObject({ play_count: 12_345, share_count: 67 });
     expect(withMetrics.evidence.some((evidence) => evidence.type === "metric")).toBe(true);
+    const accountAnalysisQuote = createAccountWorkAnalysisQuote({ workspaceId: "workspace-1", reportId: patterned.id, secUserId: patterned.secUserId, day: 7, price: { endpoint: ACCOUNT_WORK_ANALYSIS_ENDPOINT, costUsd: 0.001, allowFreeCredit: false, allowDiscount: false, rateLimit: "10/second" }, now: "2026-08-14T00:04:00.000Z" });
+    expect(accountAnalysisQuote).toMatchObject({ day: 7, costUsd: 0.001, endpoint: ACCOUNT_WORK_ANALYSIS_ENDPOINT });
+    const withAccountAnalysis = attachResearchAccountAnalysis(withMetrics, { day: 7, metrics: { avg_like_count: 12.5, percentile_like_count: 0.8 }, capturedAt: "2026-08-14T00:04:00.000Z", responseHash: "sha256:account-analysis" });
+    expect(withAccountAnalysis.accountAnalysis).toMatchObject({ day: 7, metrics: { avg_like_count: 12.5 } });
+    expect(withAccountAnalysis.evidence.some((evidence) => evidence.type === "account_analysis")).toBe(true);
     expect(patterned.evidence.at(-1)?.payload).toMatchObject({ totalShotCount: 1, transcriptSegmentCount: 1 });
   });
 

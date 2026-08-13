@@ -5,6 +5,7 @@ export * from "./topic-radar.js";
 
 const id = z.string().min(1);
 export const ACCOUNT_METRICS_ENDPOINT = "/api/v1/douyin/app/v3/fetch_multi_video_statistics";
+export const ACCOUNT_WORK_ANALYSIS_ENDPOINT = "/api/v1/douyin/billboard/fetch_hot_account_item_analysis_list";
 
 export const BenchmarkVideoSchema = z.object({
   schemaVersion: z.literal(1),
@@ -69,10 +70,25 @@ export const AccountMetricsQuoteSchema = z.object({
 }).strict();
 export type AccountMetricsQuote = z.infer<typeof AccountMetricsQuoteSchema>;
 
+export const AccountWorkAnalysisQuoteSchema = z.object({
+  schemaVersion: z.literal(1),
+  id,
+  workspaceId: id,
+  reportId: id,
+  secUserId: id,
+  day: z.number().int().positive().max(30),
+  endpoint: z.literal(ACCOUNT_WORK_ANALYSIS_ENDPOINT),
+  costUsd: z.number().nonnegative(),
+  rateLimit: z.string().optional(),
+  quotedAt: z.string().datetime({ offset: true }),
+  expiresAt: z.string().datetime({ offset: true }),
+}).strict();
+export type AccountWorkAnalysisQuote = z.infer<typeof AccountWorkAnalysisQuoteSchema>;
+
 export const ResearchEvidenceSchema = z.object({
   schemaVersion: z.literal(1),
   id,
-  type: z.enum(["profile", "video_metadata", "metric", "coverage", "media_fact"]),
+  type: z.enum(["profile", "video_metadata", "metric", "coverage", "media_fact", "account_analysis"]),
   sourceId: id,
   label: id,
   payload: z.record(z.unknown()),
@@ -92,6 +108,7 @@ export const AccountResearchReportSchema = z.object({
   coverage: z.object({ requested: z.number().int().positive(), received: z.number().int().nonnegative(), metadataAnalyzed: z.number().int().nonnegative(), mediaAnalyzed: z.number().int().nonnegative(), mediaPartiallyAnalyzed: z.number().int().nonnegative().default(0), missingMedia: z.number().int().nonnegative(), hasMore: z.boolean(), note: z.string().min(1) }).strict(),
   findings: z.array(z.object({ id, kind: z.enum(["metadata_pattern", "topic_opportunity", "needs_media_analysis", "media_pattern"]), title: id, detail: z.string().min(1), evidenceIds: z.array(id) }).strict()),
   opportunities: z.array(AccountResearchOpportunitySchema).max(20).default([]),
+  accountAnalysis: z.object({ schemaVersion: z.literal(1), day: z.number().int().positive().max(30), capturedAt: z.string().datetime({ offset: true }), metrics: z.record(z.number().finite()), evidenceId: id, responseHash: id }).strict().optional(),
   evidence: z.array(ResearchEvidenceSchema),
   createdAt: z.string().datetime({ offset: true }),
 }).strict();
@@ -126,12 +143,25 @@ export type ResearchMetricUpdate = {
   responseHash: string;
 };
 
+export type ResearchAccountAnalysisUpdate = {
+  day: number;
+  metrics: Record<string, number>;
+  capturedAt: string;
+  responseHash: string;
+};
+
 export function createAccountMetricsQuote(input: { workspaceId: string; reportId: string; awemeIds: string[]; price: TikHubEndpointInfo; now?: string; ttlMs?: number }) {
   const awemeIds = [...new Set(input.awemeIds.map((value) => id.parse(value)))];
   if (awemeIds.length < 1 || awemeIds.length > 50) throw new Error("一次最多补齐 50 条作品统计");
   const quotedAt = input.now ?? new Date().toISOString();
   const batchCount = Math.ceil(awemeIds.length / 50);
   return AccountMetricsQuoteSchema.parse({ schemaVersion: 1, id: `account-metrics-quote-${Date.parse(quotedAt)}-${awemeIds.length}`, workspaceId: input.workspaceId, reportId: input.reportId, awemeIds, endpoint: ACCOUNT_METRICS_ENDPOINT, batchCount, costUsd: Number((input.price.costUsd * batchCount).toFixed(6)), rateLimit: input.price.rateLimit, quotedAt, expiresAt: new Date(new Date(quotedAt).getTime() + (input.ttlMs ?? 10 * 60_000)).toISOString() });
+}
+
+export function createAccountWorkAnalysisQuote(input: { workspaceId: string; reportId: string; secUserId: string; day?: number; price: TikHubEndpointInfo; now?: string; ttlMs?: number }) {
+  const day = z.number().int().positive().max(30).default(7).parse(input.day);
+  const quotedAt = input.now ?? new Date().toISOString();
+  return AccountWorkAnalysisQuoteSchema.parse({ schemaVersion: 1, id: `account-work-analysis-quote-${Date.parse(quotedAt)}-${day}`, workspaceId: input.workspaceId, reportId: input.reportId, secUserId: id.parse(input.secUserId), day, endpoint: ACCOUNT_WORK_ANALYSIS_ENDPOINT, costUsd: Number(input.price.costUsd.toFixed(6)), rateLimit: input.price.rateLimit, quotedAt, expiresAt: new Date(new Date(quotedAt).getTime() + (input.ttlMs ?? 10 * 60_000)).toISOString() });
 }
 
 type ResearchTimelineFact = ResearchMediaFactSummary["facts"][number];
@@ -267,6 +297,17 @@ export function attachResearchMetrics(report: AccountResearchReport, updates: Re
   const metricFinding = updatedCount > 0 ? { id: `finding-metrics-${report.secUserId}`, kind: "metadata_pattern" as const, title: `已补齐 ${updatedCount} 条作品的播放统计`, detail: "播放、点赞、下载和分享数据来自 TikHub 单独统计接口；每条数据均保留抓取时间和响应 hash，可与本地拆解事实对照。", evidenceIds: videos.flatMap((video) => video.evidenceIds.filter((evidenceId) => evidenceId.startsWith("evidence-metric-"))) } : undefined;
   const findings = [ ...(metricFinding ? [metricFinding] : []), ...report.findings.filter((finding) => finding.id !== `finding-metrics-${report.secUserId}`) ];
   return AccountResearchReportSchema.parse({ ...report, videos, findings, evidence: [...evidenceById.values()] });
+}
+
+export function attachResearchAccountAnalysis(report: AccountResearchReport, update: ResearchAccountAnalysisUpdate) {
+  const capturedAt = new Date(update.capturedAt).toISOString();
+  const evidenceId = `evidence-account-analysis-${report.secUserId}-${update.day}-${capturedAt.replace(/[^0-9]/g, "")}`;
+  const evidence = ResearchEvidenceSchema.parse({ schemaVersion: 1, id: evidenceId, type: "account_analysis", sourceId: report.secUserId, label: `近 ${update.day} 日账号作品表现`, payload: { day: update.day, metrics: update.metrics, responseHash: update.responseHash }, capturedAt });
+  const findingId = `finding-account-analysis-${report.secUserId}`;
+  const finding = { id: findingId, kind: "metadata_pattern" as const, title: `已补充近 ${update.day} 日账号表现`, detail: "这是 TikHub 账号作品分析接口返回的聚合基准，不等同于单条作品的因果结论；详细数字和抓取时间可在证据中追溯。", evidenceIds: [evidenceId] };
+  const evidenceById = new Map(report.evidence.map((item) => [item.id, item]));
+  evidenceById.set(evidenceId, evidence);
+  return AccountResearchReportSchema.parse({ ...report, accountAnalysis: { schemaVersion: 1, day: update.day, capturedAt, metrics: update.metrics, evidenceId, responseHash: update.responseHash }, findings: [finding, ...report.findings.filter((candidate) => candidate.id !== findingId)], evidence: [...evidenceById.values()] });
 }
 
 /**

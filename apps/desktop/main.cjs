@@ -13,6 +13,7 @@ let catalog = null;
 let workspaceId = null;
 const pendingTopicRadarQuotes = new Map();
 const pendingAccountMetricsQuotes = new Map();
+const pendingAccountAnalysisQuotes = new Map();
 const activeAnalysisWorkers = new Map();
 
 async function getDesktopRuntime() {
@@ -64,6 +65,7 @@ async function initializeWorkspace(workspacePath) {
   selectedWorkspacePath = canonicalWorkspacePath;
   pendingTopicRadarQuotes.clear();
   pendingAccountMetricsQuotes.clear();
+  pendingAccountAnalysisQuotes.clear();
   return canonicalWorkspacePath;
 }
 
@@ -475,6 +477,51 @@ ipcMain.handle("desktop:run-account-metrics", async (_event, rawQuoteId) => {
     return { ok: true, report: updatedReport, updatedCount: updates.length, missingAwemeIds, message: missingAwemeIds.length > 0 ? `已补齐 ${updates.length} 条，另有 ${missingAwemeIds.length} 条未返回；不会自动重试。` : `已补齐 ${updates.length} 条作品的播放统计。` };
   } catch (error) {
     return { ok: false, errorCode: "account_metrics_run_failed", message: error instanceof Error ? error.message : "作品统计补齐失败" };
+  }
+});
+
+ipcMain.handle("desktop:quote-account-analysis", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.reportId !== "string") throw new Error("账号表现报价参数无效");
+    const report = workspace.catalog.getResearchReport(raw.reportId);
+    if (!report || report.workspaceId !== workspace.workspaceId) throw new Error("研究报告不存在或不属于当前工作区");
+    const day = raw.day === undefined ? 7 : Number(raw.day);
+    if (!Number.isInteger(day) || day < 1 || day > 30) throw new Error("账号表现分析时间范围必须是 1–30 天");
+    const runtime = await getDesktopRuntime();
+    const connector = getTikHubConnector(runtime);
+    if (typeof connector.fetchAccountWorkAnalysis !== "function") throw new Error("当前研究 Provider 不支持账号表现分析");
+    const price = await connector.getEndpointInfo(runtime.research.ACCOUNT_WORK_ANALYSIS_ENDPOINT);
+    const quote = runtime.research.createAccountWorkAnalysisQuote({ workspaceId: workspace.workspaceId, reportId: report.id, secUserId: report.secUserId, day, price, now: new Date().toISOString() });
+    pendingAccountAnalysisQuotes.set(quote.id, { workspaceId: workspace.workspaceId, quote, used: false });
+    return { ok: true, quote };
+  } catch (error) {
+    return { ok: false, errorCode: "account_analysis_quote_failed", message: error instanceof Error ? error.message : "无法取得账号表现报价" };
+  }
+});
+
+ipcMain.handle("desktop:run-account-analysis", async (_event, rawQuoteId) => {
+  try {
+    const workspace = requireWorkspace();
+    if (typeof rawQuoteId !== "string" || !rawQuoteId.trim()) throw new Error("账号表现报价无效");
+    const pending = pendingAccountAnalysisQuotes.get(rawQuoteId);
+    if (!pending || pending.workspaceId !== workspace.workspaceId) throw new Error("报价不存在、已重启失效或不属于当前工作区，请重新报价");
+    const now = new Date();
+    if (pending.used) throw new Error("报价已经使用，请重新报价");
+    if (new Date(pending.quote.expiresAt).getTime() <= now.getTime()) throw new Error("报价已过期，请重新报价");
+    pending.used = true;
+    const report = workspace.catalog.getResearchReport(pending.quote.reportId);
+    if (!report || report.workspaceId !== workspace.workspaceId) throw new Error("研究报告不存在或不属于当前工作区");
+    const runtime = await getDesktopRuntime();
+    const connector = getTikHubConnector(runtime);
+    if (typeof connector.fetchAccountWorkAnalysis !== "function") throw new Error("当前研究 Provider 不支持账号表现分析");
+    const result = await connector.fetchAccountWorkAnalysis({ secUserId: pending.quote.secUserId, day: pending.quote.day });
+    if (Object.keys(result.metrics).length === 0) return { ok: false, errorCode: "account_analysis_no_data", report, message: "TikHub 本次没有返回可用账号表现数据；报价已消耗，不会自动重试。" };
+    const updatedReport = runtime.research.attachResearchAccountAnalysis(report, { day: result.day, metrics: result.metrics, capturedAt: now.toISOString(), responseHash: result.responseHash });
+    workspace.catalog.saveResearchReport(updatedReport);
+    return { ok: true, report: updatedReport, message: `已补充近 ${result.day} 日账号表现基准。` };
+  } catch (error) {
+    return { ok: false, errorCode: "account_analysis_run_failed", message: error instanceof Error ? error.message : "账号表现分析失败" };
   }
 });
 

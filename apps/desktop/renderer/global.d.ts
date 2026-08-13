@@ -63,6 +63,7 @@ interface AccountResearchResult {
     coverage: { requested: number; received: number; metadataAnalyzed: number; mediaAnalyzed: number; missingMedia: number; hasMore: boolean; note: string };
     findings: Array<{ id: string; kind: string; title: string; detail: string; evidenceIds: string[] }>;
     opportunities: Array<{ id: string; title: string; angle: string; whyNow: string; sourceVideoIds: string[]; evidenceIds: string[]; status: "candidate" }>;
+    accountAnalysis?: { schemaVersion: 1; day: number; capturedAt: string; metrics: Record<string, number>; evidenceId: string; responseHash: string };
     evidence: Array<{ id: string; type: string; sourceId: string; label: string; payload: Record<string, unknown>; capturedAt: string }>;
   };
 }
@@ -95,6 +96,34 @@ interface AccountMetricsRunResult {
   report?: AccountResearchResult["report"];
   updatedCount?: number;
   missingAwemeIds?: string[];
+}
+
+interface AccountWorkAnalysisQuoteView {
+  schemaVersion: 1;
+  id: string;
+  workspaceId: string;
+  reportId: string;
+  secUserId: string;
+  day: number;
+  endpoint: string;
+  costUsd: number;
+  rateLimit?: string;
+  quotedAt: string;
+  expiresAt: string;
+}
+
+interface AccountWorkAnalysisQuoteResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  quote?: AccountWorkAnalysisQuoteView;
+}
+
+interface AccountWorkAnalysisRunResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  report?: AccountResearchResult["report"];
 }
 
 interface DownloadResearchMediaResult {
@@ -357,6 +386,8 @@ interface Window {
     researchAccount: (input: { sourceInput: string; count?: number }) => Promise<AccountResearchResult>;
     quoteAccountMetrics: (input: { reportId: string; awemeIds: string[] }) => Promise<AccountMetricsQuoteResult>;
     runAccountMetrics: (quoteId: string) => Promise<AccountMetricsRunResult>;
+    quoteAccountAnalysis: (input: { reportId: string; day?: number }) => Promise<AccountWorkAnalysisQuoteResult>;
+    runAccountAnalysis: (quoteId: string) => Promise<AccountWorkAnalysisRunResult>;
     downloadResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<DownloadResearchMediaResult>;
     analyzeResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<AnalyzeResearchMediaResult>;
     quoteTopicRadar: (input: TopicRadarQueryView) => Promise<TopicRadarQuoteResult>;

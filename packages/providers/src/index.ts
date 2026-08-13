@@ -122,6 +122,14 @@ export type TikHubVideoStatistics = {
   responseHash: string;
 };
 
+export type TikHubAccountWorkAnalysis = {
+  secUserId: string;
+  day: number;
+  metrics: Record<string, number>;
+  requestId?: string;
+  responseHash: string;
+};
+
 export type TikHubEndpointInfo = {
   endpoint: string;
   costUsd: number;
@@ -178,6 +186,7 @@ export interface ResearchConnector {
   fetchUserPosts(input: { secUserId: string; maxCursor?: number; count?: number; sortType?: 0 | 1 }): Promise<TikHubPage<TikHubVideoMetadata>>;
   fetchHighestQualityPlayUrl(input: { awemeId: string; shareUrl?: string; region?: string }): Promise<TikHubVideoDownload>;
   fetchVideoStatistics?(awemeIds: string[]): Promise<TikHubVideoStatistics[]>;
+  fetchAccountWorkAnalysis?(input: { secUserId: string; day?: number }): Promise<TikHubAccountWorkAnalysis>;
 }
 
 function hashResponse(value: unknown) {
@@ -541,5 +550,19 @@ export class TikHubDouyinConnector implements ResearchConnector {
       if (Object.keys(statistics).length > 0) output.push({ awemeId: candidate.awemeId, statistics, requestId: responseRequestId(result.body, result.response), responseHash: hashResponse(result.body) });
     }
     return output;
+  }
+
+  async fetchAccountWorkAnalysis(input: { secUserId: string; day?: number }) {
+    const secUid = id.parse(input.secUserId);
+    const day = z.number().int().positive().max(30).default(7).parse(input.day);
+    const result = await this.get("/api/v1/douyin/billboard/fetch_hot_account_item_analysis_list", { sec_uid: secUid, day });
+    const outer = dataPayload(result.body);
+    const data = dataPayload(outer);
+    const metrics: Record<string, number> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (!/^(avg|percentile)_/.test(key) || typeof value !== "number" || !Number.isFinite(value)) continue;
+      metrics[key] = value;
+    }
+    return { secUserId: secUid, day, metrics, requestId: responseRequestId(result.body, result.response), responseHash: hashResponse(result.body) } satisfies TikHubAccountWorkAnalysis;
   }
 }
