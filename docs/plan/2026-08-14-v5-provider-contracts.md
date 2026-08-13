@@ -1,7 +1,7 @@
 # V5 Provider 合同与小额联调边界
 
 日期：2026-08-14  
-状态：合同、mock、一次真实 structured proposal smoke、proposal UI 调度持久化、freeze CommandReceipt 和 `submission_unknown` 重启发现/人工收口 UI 已完成；Mastra durable resume 待继续
+状态：合同、mock、一次真实 structured proposal smoke、proposal UI 调度持久化、freeze CommandReceipt、`submission_unknown` 重启发现/人工收口 UI，以及最小 Mastra structured-proposal 适配器已完成；Mastra durable resume、Memory、MCP 待后置
 
 ## 1. 目标
 
@@ -21,6 +21,7 @@
 - `ResearchConnector`：TikHub profile/posts metadata 的中性端口；
 - `TikHubDouyinConnector`：官方 `get_sec_user_id`、App V3 账号资料和用户作品分页，分页数量强制 1–20。
 - `packages/agent-runtime`：`LocalEditAgentRuntime` 和 `ProviderEditAgentRuntime`；模型只能输出受限 draft，随后由本地 materializer 校验素材白名单、时间码和分镜映射。
+- `MastraEditAgentRuntime`：Mastra 1.58 仅作为 Agent 编排适配器，复用同一份 `EditProposalDraftSchema` 和 materializer；默认不启用。
 
 ## 3. 数据与密钥边界
 

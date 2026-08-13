@@ -1,7 +1,7 @@
 # V0-00 Scaffold → Desktop Workspace 基线迁移记录
 
 日期：2026-08-14  
-状态：Electron main、preload、utility worker 和 sidecar 事实源已迁入 `apps/desktop`；旧 `electron/` 只保留兼容入口；root renderer、Express scaffold、pnpm lock、Windows 和 clean checkout 仍未完成
+状态：Electron main、preload、utility worker、sidecar 和 renderer 事实源已迁入 `apps/desktop`；旧 `electron/` 只保留兼容入口；Express scaffold、最终 pnpm lock、Windows 和 clean checkout 仍未完成
 
 ## 1. 当前事实
 

@@ -75,9 +75,13 @@ function getEditAgent(runtime) {
   if (providerKey === "apimart" && process.env.APIMART_API_KEY) {
     const modelKey = process.env.AI_EDIT_MODEL ?? "gpt-5-nano";
     const adapter = process.env.AI_EDIT_ADAPTER ?? "ai-sdk";
-    if (adapter === "ai-sdk") {
+    if (adapter === "ai-sdk" || adapter === "mastra") {
       const configuredBaseUrl = process.env.APIMART_BASE_URL ?? "https://api.apimart.ai";
       const baseUrl = configuredBaseUrl.replace(/\/+$/, "").endsWith("/v1") ? configuredBaseUrl : `${configuredBaseUrl.replace(/\/+$/, "")}/v1`;
+      if (adapter === "mastra") {
+        const model = runtime.providers.createAiSdkCompatibleLanguageModel({ apiKey: process.env.APIMART_API_KEY, baseUrl, providerKey: "apimart", modelKey });
+        return runtime.agentRuntime.createMastraEditAgentRuntime({ model, providerKey: "apimart", modelKey });
+      }
       const generator = new runtime.providers.AiSdkStructuredGenerator({ apiKey: process.env.APIMART_API_KEY, baseUrl });
       return new runtime.agentRuntime.AiSdkEditAgentRuntime(generator, modelKey);
     }

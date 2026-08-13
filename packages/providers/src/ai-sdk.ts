@@ -27,6 +27,32 @@ export type AiSdkStructuredGenerationResult<T> = {
   };
 };
 
+/**
+ * Build a Vercel AI SDK language model for Agent runtimes that want to own
+ * their orchestration (for example Mastra). The provider configuration stays
+ * here so APIMart's non-streaming and structured-output quirks are identical
+ * for the direct AI SDK and Mastra paths.
+ */
+export function createAiSdkCompatibleLanguageModel(options: {
+  apiKey: string;
+  baseUrl?: string;
+  providerKey?: string;
+  modelKey: string;
+  fetcher?: typeof fetch;
+}) {
+  const providerKey = options.providerKey ?? "apimart";
+  const provider = createOpenAICompatible({
+    name: providerKey,
+    apiKey: options.apiKey,
+    baseURL: options.baseUrl ?? "https://api.apimart.ai/v1",
+    fetch: options.fetcher,
+    supportsStructuredOutputs: true,
+    includeUsage: true,
+    transformRequestBody: (body) => ({ ...body, stream: false }),
+  });
+  return provider(options.modelKey);
+}
+
 function hashResponse(value: unknown) {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }

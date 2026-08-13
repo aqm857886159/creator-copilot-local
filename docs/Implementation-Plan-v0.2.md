@@ -32,7 +32,7 @@
 
 ## 1. 当前代码基线：先迁移，不能假设目标架构已经存在
 
-当前目录仍是早期 Vite/React/Express scaffold：
+当前目录仍是早期 Vite/React/Express scaffold，Electron 事实源已迁入 `apps/desktop`，但 workspace 最终化尚未完成：
 
 ```text
 root package.json       npm scripts、Vite 7、React 19、TypeScript 5.8、Vitest
@@ -50,7 +50,7 @@ server/index.ts         当前 Express scaffold
 apps/desktop
   ├─ main
   ├─ preload
-  ├─ renderer
+  ├─ renderer（已迁入）
   └─ utility workers
 packages/*
   ├─ contracts/domain

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { Agent, type MastraLanguageModel } from "@mastra/core/agent";
 import { z } from "zod";
 import {
   DEFAULT_VERTICAL_PROFILE,
@@ -228,6 +230,85 @@ export class AiSdkEditAgentRuntime implements AgentRuntimePort {
       responseHash: result.responseHash,
     });
   }
+}
+
+type MastraAgentGenerateResult = {
+  object?: unknown;
+  text?: string;
+  response?: { id?: string; modelId?: string };
+  usage?: Record<string, unknown>;
+};
+
+/**
+ * The narrow surface used from Mastra. Keeping this interface structural makes
+ * the domain tests independent of Mastra storage, model routing and network
+ * calls while still exercising the real `Agent.generate` contract.
+ */
+export type MastraEditAgentLike = {
+  generate(
+    messages: string,
+    options: {
+      structuredOutput: { schema: unknown };
+      maxSteps?: number;
+      modelSettings?: { temperature?: number; maxTokens?: number };
+    },
+  ): Promise<MastraAgentGenerateResult>;
+};
+
+function hashMastraResult(value: unknown) {
+  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+/**
+ * Mastra is an orchestration adapter only. It receives one typed draft and
+ * must pass through the same materializer as the local and direct AI SDK
+ * runtimes; it cannot choose assets, write catalog rows or render media.
+ */
+export class MastraEditAgentRuntime implements AgentRuntimePort {
+  constructor(
+    private readonly agent: MastraEditAgentLike,
+    private readonly meta: { providerKey: string; modelKey: string },
+  ) {}
+
+  async proposeEdit(input: EditProposalAgentInput) {
+    const prompt = promptForEditProposal(input);
+    let result: MastraAgentGenerateResult;
+    try {
+      result = await this.agent.generate(`${prompt.system}\n\n${prompt.user}`, {
+        structuredOutput: { schema: EditProposalDraftSchema },
+        maxSteps: 1,
+        modelSettings: { temperature: 0.2, maxTokens: 2_500 },
+      });
+    } catch (error) {
+      if (error instanceof AgentProposalError) throw error;
+      throw new AgentProposalError("provider_output", error instanceof Error ? error.message.slice(0, 500) : "Mastra 提案请求失败");
+    }
+    const draft = result.object ?? parseJsonOutput(result.text ?? "");
+    return materializeEditProposalDraft(input, draft, {
+      providerKey: this.meta.providerKey,
+      modelKey: result.response?.modelId ?? this.meta.modelKey,
+      responseHash: hashMastraResult({ responseId: result.response?.id, modelKey: result.response?.modelId ?? this.meta.modelKey, draft }),
+    });
+  }
+}
+
+/**
+ * Construct the real Mastra Agent without enabling Memory, MCP or durable
+ * storage. Those concerns belong to a later workflow adapter; this first
+ * slice proves Mastra can be swapped behind AgentRuntimePort.
+ */
+export function createMastraEditAgentRuntime(input: {
+  model: MastraLanguageModel;
+  providerKey: string;
+  modelKey: string;
+}) {
+  const agent = new Agent({
+    id: "creator-copilot-edit-agent",
+    name: "Creator Copilot Edit Agent",
+    instructions: "你只负责生成结构化的 AI 粗剪提案草稿。不要调用工具，不要写文件，不要改变用户确认的素材范围。",
+    model: input.model,
+  });
+  return new MastraEditAgentRuntime(agent, { providerKey: input.providerKey, modelKey: input.modelKey });
 }
 
 export function buildEditProposalPrompt(input: EditProposalAgentInput) {

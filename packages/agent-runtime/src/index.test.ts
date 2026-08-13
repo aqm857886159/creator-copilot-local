@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AiSdkStructuredGenerator } from "../../providers/src/index";
-import { AiSdkEditAgentRuntime, materializeEditProposalDraft } from "./index";
+import { AiSdkEditAgentRuntime, MastraEditAgentRuntime, materializeEditProposalDraft } from "./index";
 
 const now = "2026-08-14T00:00:00.000Z";
 const script = { schemaVersion: 1 as const, id: "script-1", projectId: "project-1", revision: 1, status: "approved" as const, blocks: [{ schemaVersion: 1 as const, id: "block-1", order: 0, kind: "claim" as const, text: "观点文本", emphasis: [], evidenceIds: [], visualNeed: "support" as const }], estimatedDurationMs: 2_000, createdAt: now, updatedAt: now };
@@ -47,5 +47,32 @@ describe("agent edit proposal runtime", () => {
       provider: { providerKey: "apimart", modelKey: "model-structured" },
       proposal: { operations: [{ sourceAssetId: "asset-1", timeline: { startMs: 0, endMs: 1_800 } }] },
     });
+  });
+
+  it("keeps Mastra as a typed proposal adapter and reuses the materializer", async () => {
+    let received: { messages: string; options: { structuredOutput: { schema: unknown }; maxSteps?: number } } | undefined;
+    const agent = {
+      generate: async (messages: string, options: { structuredOutput: { schema: unknown }; maxSteps?: number }) => {
+        received = { messages, options };
+        return {
+          object: {
+            schemaVersion: 1,
+            operations: [{ shotId: "shot-1", sourceAssetId: "asset-1", sourceSegment: { startMs: 0, endMs: 1_800 }, role: "a_roll", reason: "保留真人表达", evidenceIds: ["shot-1"], confidence: 0.88 }],
+            subtitles: [{ shotId: "shot-1", text: "观点文本" }],
+            missingMaterial: [],
+          },
+          response: { id: "mastra-response", modelId: "mastra-model" },
+        };
+      },
+    };
+    const runtime = new MastraEditAgentRuntime(agent, { providerKey: "apimart-mastra", modelKey: "mastra-model" });
+    await expect(runtime.proposeEdit(input)).resolves.toMatchObject({
+      status: "ready",
+      provider: { providerKey: "apimart-mastra", modelKey: "mastra-model" },
+      proposal: { operations: [{ sourceAssetId: "asset-1", timeline: { startMs: 0, endMs: 1_800 } }] },
+    });
+    expect(received?.messages).toContain("CONFIRMED_MATERIALS");
+    expect(received?.options.maxSteps).toBe(1);
+    expect(received?.options.structuredOutput.schema).toBeDefined();
   });
 });
