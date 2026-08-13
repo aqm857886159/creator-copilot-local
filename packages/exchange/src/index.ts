@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, dirname, extname, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { stableStringify } from "../../contracts/src/index.js";
@@ -148,6 +149,23 @@ export const RenderManifestSchema = z.object({
   createdAt: z.string().datetime({ offset: true }),
 }).strict();
 export type RenderManifest = z.infer<typeof RenderManifestSchema>;
+
+export const ExchangeLossSchema = z.object({
+  kind: z.enum(["subtitle", "transform", "audio", "track", "unsupported"]),
+  sourceId: id,
+  severity: z.enum(["warning", "error"]),
+  message: z.string().min(1),
+}).strict();
+export type ExchangeLoss = z.infer<typeof ExchangeLossSchema>;
+
+export const ExchangeCapabilityReportSchema = z.object({
+  schemaVersion: z.literal(1),
+  adapter: z.enum(["fcpxml", "otio"]),
+  formatVersion: id,
+  supported: z.array(id),
+  losses: z.array(ExchangeLossSchema),
+}).strict();
+export type ExchangeCapabilityReport = z.infer<typeof ExchangeCapabilityReportSchema>;
 
 export const DEFAULT_VERTICAL_PROFILE: OutputProfile = {
   container: "mp4",
@@ -353,6 +371,80 @@ export function compileFrozenEditSpec(input: { spec: FrozenEditSpec; assets: Rec
     deterministic: true,
   });
   return ir;
+}
+
+function xmlEscape(value: string) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+}
+
+function frameDurationForFps(fps: number) {
+  if (Math.abs(fps - 30000 / 1001) < 0.001) return "1001/30000s";
+  if (Math.abs(fps - 60000 / 1001) < 0.001) return "1001/60000s";
+  return `1/${Math.max(1, Math.round(fps))}s`;
+}
+
+function exchangeAssets(ir: RenderIR) {
+  const clips = ir.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips as RenderClip[]);
+  const byId = new Map<string, RenderClip>();
+  for (const clip of clips) if (!byId.has(clip.sourceAssetId)) byId.set(clip.sourceAssetId, clip);
+  return [...byId.values()].sort((left, right) => left.sourceAssetId.localeCompare(right.sourceAssetId));
+}
+
+export function exportFcpXml(input: { ir: RenderIR; workspaceRoot: string; formatVersion?: string }) {
+  const ir = RenderIRSchema.parse(input.ir);
+  const root = resolve(input.workspaceRoot);
+  const assets = exchangeAssets(ir);
+  const losses: ExchangeLoss[] = [];
+  const subtitleClips = ir.tracks.filter((track) => track.kind === "subtitle").flatMap((track) => track.clips as SubtitleClip[]);
+  if (subtitleClips.length > 0) losses.push({ kind: "subtitle", sourceId: ir.frozenEditSpecId, severity: "warning", message: "基线 FCPXML 适配器保留媒体时间线，但不生成带样式的字幕 Title；请同时使用 SRT。" });
+  for (const clip of ir.tracks.flatMap((track) => track.clips as Array<RenderClip | SubtitleClip>)) {
+    if ("sourceAssetId" in clip && (clip.opacity !== undefined || clip.volume !== undefined)) losses.push({ kind: clip.volume !== undefined ? "audio" : "transform", sourceId: clip.id, severity: "warning", message: "基线 FCPXML 适配器暂不映射 opacity/volume 参数。" });
+  }
+  const formatVersion = input.formatVersion ?? "1.11";
+  const formatId = "format-1";
+  const resources = [
+    `<format id="${formatId}" name="Creator Copilot" frameDuration="${frameDurationForFps(ir.outputProfile.fps)}" width="${ir.outputProfile.width}" height="${ir.outputProfile.height}"/>`,
+    ...assets.map((clip, index) => {
+      const path = resolve(root, clip.sourceRelativePath);
+      ensureWithin(root, path);
+      return `<asset id="asset-${index + 1}" name="${xmlEscape(clip.sourceAssetId)}" src="${xmlEscape(pathToFileURL(path).href)}" start="0s" duration="${seconds(clip.sourceSegment.endMs)}s" hasVideo="1" hasAudio="1" format="${formatId}"/>`;
+    }),
+  ].join("\n    ");
+  const assetIds = new Map(assets.map((clip, index) => [clip.sourceAssetId, `asset-${index + 1}`]));
+  const spine = (ir.tracks.find((track) => track.kind === "video")?.clips as RenderClip[] ?? []).map((clip) => `<asset-clip name="${xmlEscape(clip.id)}" ref="${assetIds.get(clip.sourceAssetId) ?? ""}" offset="${seconds(clip.timeline.startMs)}s" start="${seconds(clip.sourceSegment.startMs)}s" duration="${seconds(clip.sourceSegment.endMs - clip.sourceSegment.startMs)}s"/>`).join("\n        ");
+  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE fcpxml>\n<fcpxml version="${xmlEscape(formatVersion)}">\n  <resources>\n    ${resources}\n  </resources>\n  <library>\n    <event name="Creator Copilot">\n      <project name="${xmlEscape(ir.projectId)}">\n        <sequence format="${formatId}" duration="${seconds(ir.durationMs)}s">\n          <spine>\n        ${spine}\n          </spine>\n        </sequence>\n      </project>\n    </event>\n  </library>\n</fcpxml>\n`;
+  const report = ExchangeCapabilityReportSchema.parse({ schemaVersion: 1, adapter: "fcpxml", formatVersion, supported: ["video", "audio", "asset references"], losses });
+  return { body, report };
+}
+
+function otioTime(valueMs: number, fps: number) {
+  return { OTIO_SCHEMA: "RationalTime.1", value: Number(((valueMs / 1000) * fps).toFixed(6)), rate: fps };
+}
+
+export function exportOtio(input: { ir: RenderIR; workspaceRoot: string }) {
+  const ir = RenderIRSchema.parse(input.ir);
+  const root = resolve(input.workspaceRoot);
+  const losses: ExchangeLoss[] = [];
+  const subtitleClips = ir.tracks.filter((track) => track.kind === "subtitle").flatMap((track) => track.clips as SubtitleClip[]);
+  if (subtitleClips.length > 0) losses.push({ kind: "subtitle", sourceId: ir.frozenEditSpecId, severity: "warning", message: "OTIO 基线适配器保留视频时间线；字幕请使用同目录 SRT。" });
+  const tracks = ir.tracks.filter((track) => track.kind === "video" || track.kind === "audio").map((track) => ({
+    OTIO_SCHEMA: "Track.1",
+    name: track.id,
+    kind: track.kind === "audio" ? "Audio" : "Video",
+    children: (track.clips as RenderClip[]).map((clip) => {
+      const absolutePath = resolve(root, clip.sourceRelativePath);
+      ensureWithin(root, absolutePath);
+      return {
+        OTIO_SCHEMA: "Clip.2",
+        name: clip.id,
+        source_range: { OTIO_SCHEMA: "TimeRange.1", start_time: otioTime(clip.sourceSegment.startMs, ir.outputProfile.fps), duration: otioTime(clip.sourceSegment.endMs - clip.sourceSegment.startMs, ir.outputProfile.fps) },
+        media_reference: { OTIO_SCHEMA: "ExternalReference.1", target_url: pathToFileURL(absolutePath).href, available_range: { OTIO_SCHEMA: "TimeRange.1", start_time: otioTime(0, ir.outputProfile.fps), duration: otioTime(clip.sourceSegment.endMs, ir.outputProfile.fps) }, metadata: { creatorCopilot: { assetId: clip.sourceAssetId, contentHash: clip.sourceContentHash } } },
+      };
+    }),
+  }));
+  const timeline = { OTIO_SCHEMA: "Timeline.1", name: ir.projectId, global_start_time: otioTime(0, ir.outputProfile.fps), duration: otioTime(ir.durationMs, ir.outputProfile.fps), tracks: { OTIO_SCHEMA: "Stack.1", children: tracks } };
+  const report = ExchangeCapabilityReportSchema.parse({ schemaVersion: 1, adapter: "otio", formatVersion: "OTIO 1.x JSON", supported: ["video", "audio", "external media references", "content hashes"], losses });
+  return { body: `${JSON.stringify(timeline, null, 2)}\n`, report };
 }
 
 function srtTimestamp(milliseconds: number) {

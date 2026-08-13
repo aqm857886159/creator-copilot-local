@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("desktop", {
   selectTake: (input) => ipcRenderer.invoke("desktop:select-take", input),
   proposeEdit: (projectId) => ipcRenderer.invoke("desktop:propose-edit", projectId),
   renderEdit: (input) => ipcRenderer.invoke("desktop:render-edit", input),
+  exportExchange: (input) => ipcRenderer.invoke("desktop:export-exchange", input),
   openWorkspaceFile: (relativePath) => ipcRenderer.invoke("desktop:open-workspace-file", relativePath),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
 });

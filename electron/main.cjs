@@ -1,7 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, shell, utilityProcess } = require("electron");
 const { createHash, randomUUID } = require("node:crypto");
 const { existsSync, mkdirSync, realpathSync } = require("node:fs");
-const { rm: removeFile } = require("node:fs/promises");
+const { mkdir: makeDirectory, rm: removeFile, writeFile } = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -459,7 +459,7 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
     workspace.catalog.saveRenderRun({ schemaVersion: 1, id: renderRunId, projectId: raw.projectId, frozenEditSpecId: frozen.id, state: "running", createdAt: renderNow, updatedAt: renderNow });
     const result = await runtime.exchange.exportRenderPackage({ workspaceRoot: workspace.workspacePath, renderId, frozenEditSpec: frozen, assets });
     workspace.catalog.saveRenderRun({ schemaVersion: 1, id: renderRunId, projectId: raw.projectId, frozenEditSpecId: frozen.id, state: "succeeded", manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/"), manifestHash: result.manifestHash, createdAt: renderNow, updatedAt: new Date().toISOString() });
-    return { ok: true, renderId, manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
+    return { ok: true, renderId, renderRunId, manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
   } catch (error) {
     if (renderRunId && renderWorkspace && renderRuntime) {
       const message = error instanceof Error ? error.message : "AI 剪辑导出失败";
@@ -471,6 +471,58 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
       }
     }
     return { ok: false, errorCode: "edit_render_failed", message: error instanceof Error ? error.message : "AI 剪辑导出失败" };
+  }
+});
+
+ipcMain.handle("desktop:export-exchange", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.renderRunId !== "string" || !Array.isArray(raw.formats)) throw new Error("交换格式导出参数无效");
+    const formats = [...new Set(raw.formats.filter((format) => format === "fcpxml" || format === "otio"))];
+    if (formats.length === 0 || formats.length > 2) throw new Error("请选择 FCPXML 或 OTIO");
+    const run = workspace.catalog.getRenderRun(raw.renderRunId);
+    if (!run || run.state !== "succeeded") throw new Error("只有成功的渲染结果才能导出交换格式");
+    const spec = workspace.catalog.getFrozenEditSpec(run.frozenEditSpecId);
+    if (!spec || spec.projectId !== run.projectId) throw new Error("冻结剪辑规格不存在");
+    const runtime = await getDesktopRuntime();
+    const assets = {};
+    for (const lock of spec.assetLocks) {
+      const artifact = workspace.catalog.getArtifact(lock.assetId);
+      if (!artifact) throw new Error(`交换导出缺少素材：${lock.assetId}`);
+      const absolutePath = path.resolve(workspace.workspacePath, artifact.relativePath);
+      const root = realpathSync(workspace.workspacePath);
+      if (!existsSync(absolutePath)) throw new Error(`交换导出素材文件不存在：${lock.assetId}`);
+      const canonicalPath = realpathSync(absolutePath);
+      if (canonicalPath !== root && !canonicalPath.startsWith(`${root}${path.sep}`)) throw new Error(`交换导出素材越过工作区：${lock.assetId}`);
+      const probe = await new runtime.media.FfmpegToolchain().probe(canonicalPath);
+      if (!probe.durationMs || probe.durationMs <= 0) throw new Error(`交换导出素材没有有效时长：${lock.assetId}`);
+      assets[lock.assetId] = { assetId: lock.assetId, relativePath: artifact.relativePath, absolutePath: canonicalPath, contentHash: artifact.contentHash, durationMs: probe.durationMs, hasAudio: probe.streams.some((stream) => stream.kind === "audio") };
+    }
+    const ir = runtime.exchange.compileFrozenEditSpec({ spec, assets });
+    const outputs = {};
+    for (const format of formats) {
+      const exchange = format === "fcpxml" ? runtime.exchange.exportFcpXml({ ir, workspaceRoot: workspace.workspacePath }) : runtime.exchange.exportOtio({ ir, workspaceRoot: workspace.workspacePath });
+      const relativePath = `exports/${raw.renderRunId}.${format === "fcpxml" ? "fcpxml" : "otio.json"}`;
+      const lossRelativePath = `${relativePath}.loss.json`;
+      const outputPath = path.resolve(workspace.workspacePath, relativePath);
+      const lossPath = path.resolve(workspace.workspacePath, lossRelativePath);
+      const root = realpathSync(workspace.workspacePath);
+      for (const target of [outputPath, lossPath]) if (target !== root && !target.startsWith(`${root}${path.sep}`)) throw new Error("交换导出路径越过工作区");
+      await makeDirectory(path.dirname(outputPath), { recursive: true });
+      await writeFile(outputPath, exchange.body, "utf8");
+      await writeFile(lossPath, `${JSON.stringify(exchange.report, null, 2)}\n`, "utf8");
+      const outputHash = await runtime.media.sha256File(outputPath);
+      const lossHash = await runtime.media.sha256File(lossPath);
+      const parentArtifactIds = spec.assetLocks.map((lock) => lock.assetId);
+      workspace.catalog.insertArtifacts([
+        { schemaVersion: 1, artifactId: `exchange-${raw.renderRunId}-${format}`, workspaceId: workspace.workspaceId, kind: `exchange-${format}`, relativePath, mimeType: format === "fcpxml" ? "application/xml" : "application/json", contentHash: outputHash, byteSize: Buffer.byteLength(exchange.body), parentArtifactIds, validationStatus: "valid" },
+        { schemaVersion: 1, artifactId: `exchange-${raw.renderRunId}-${format}-loss`, workspaceId: workspace.workspaceId, kind: "exchange-loss-report", relativePath: lossRelativePath, mimeType: "application/json", contentHash: lossHash, byteSize: Buffer.byteLength(JSON.stringify(exchange.report)), parentArtifactIds: [`exchange-${raw.renderRunId}-${format}`], validationStatus: "valid" },
+      ]);
+      outputs[format] = { relativePath, lossReportPath: lossRelativePath, report: exchange.report };
+    }
+    return { ok: true, renderRunId: raw.renderRunId, outputs };
+  } catch (error) {
+    return { ok: false, errorCode: "exchange_export_failed", message: error instanceof Error ? error.message : "交换格式导出失败" };
   }
 });
 

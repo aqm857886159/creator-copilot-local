@@ -140,6 +140,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .render-success h3 { margin: 7px 0 0; color: #42533d; font-family: Georgia, "Songti SC", serif; font-size: 22px; font-weight: 500; }
 .render-success p { margin: 5px 0 0; color: #75826e; font-size: 11px; }
 .render-links { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.exchange-links { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 7px; padding-top: 13px; border-top: 1px solid #d4dfcf; }
+.exchange-links > span { margin-right: 3px; color: #71836b; font-size: 10px; }
+.exchange-links .secondary-button { padding: 8px 10px; font-size: 10px; }
 .asset-library { display: flex; flex-direction: column; gap: 22px; }
 .asset-search-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #dcd4c8; border-radius: 9px; background: #faf7f0; color: #9b9488; }
 .asset-search-bar input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #4e4941; font-size: 12px; }

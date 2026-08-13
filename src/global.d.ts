@@ -153,7 +153,16 @@ interface EditRenderResult {
   errorCode?: string;
   message?: string;
   renderId?: string;
+  renderRunId?: string;
   files?: { video: string; subtitle: string | null; manifest: string };
+}
+
+interface ExchangeExportResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  renderRunId?: string;
+  outputs?: Record<string, { relativePath: string; lossReportPath: string; report: { adapter: string; formatVersion: string; supported: string[]; losses: Array<{ kind: string; sourceId: string; severity: string; message: string }> } }>;
 }
 
 interface Window {
@@ -170,6 +179,7 @@ interface Window {
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;
     proposeEdit: (projectId: string) => Promise<EditProposalResult>;
     renderEdit: (input: { projectId: string; proposal: EditProposal }) => Promise<EditRenderResult>;
+    exportExchange: (input: { renderRunId: string; formats: Array<"fcpxml" | "otio"> }) => Promise<ExchangeExportResult>;
     openWorkspaceFile: (relativePath: string) => Promise<{ ok: boolean; message?: string }>;
     openExternal: (url: string) => Promise<{ ok: boolean; message?: string }>;
   };

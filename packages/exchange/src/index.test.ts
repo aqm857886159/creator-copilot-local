@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_VERTICAL_PROFILE, EditProposalSchema, compileFrozenEditSpec, freezeEditProposal, proposeEditFromCapture, renderSrt } from "./index";
+import { DEFAULT_VERTICAL_PROFILE, EditProposalSchema, compileFrozenEditSpec, exportFcpXml, exportOtio, freezeEditProposal, proposeEditFromCapture, renderSrt } from "./index";
 
 const now = "2026-08-14T00:00:00.000Z";
 const proposal = EditProposalSchema.parse({
@@ -80,5 +80,20 @@ describe("AI edit proposal and deterministic render contracts", () => {
     expect(() => freezeEditProposal({ proposal: overlapping, assetLocks: [{ assetId: "asset-a", contentHash: "sha256:a" }, { assetId: "asset-b", contentHash: "sha256:b" }] })).toThrow("重叠");
     const gapped = EditProposalSchema.parse({ ...proposal, operations: [{ ...proposal.operations[0], timeline: { startMs: 0, endMs: 1800 } }, { ...proposal.operations[1], timeline: { startMs: 2000, endMs: 3500 } }] });
     expect(() => freezeEditProposal({ proposal: gapped, assetLocks: [{ assetId: "asset-a", contentHash: "sha256:a" }, { assetId: "asset-b", contentHash: "sha256:b" }] })).toThrow("时间缺口");
+  });
+
+  it("exports the same RenderIR to standard exchange formats with loss reports", () => {
+    const frozen = freezeEditProposal({ proposal, assetLocks: [{ assetId: "asset-a", contentHash: "sha256:a" }, { assetId: "asset-b", contentHash: "sha256:b" }], now });
+    const ir = compileFrozenEditSpec({ spec: frozen, assets: {
+      "asset-a": { assetId: "asset-a", relativePath: "originals/a.mp4", absolutePath: "/workspace/originals/a.mp4", contentHash: "sha256:a", durationMs: 2000, hasAudio: true },
+      "asset-b": { assetId: "asset-b", relativePath: "originals/b.mp4", absolutePath: "/workspace/originals/b.mp4", contentHash: "sha256:b", durationMs: 1500, hasAudio: true },
+    } });
+    const fcpxml = exportFcpXml({ ir, workspaceRoot: "/workspace" });
+    expect(fcpxml.body).toContain("<fcpxml version=\"1.11\">");
+    expect(fcpxml.body).toContain("asset-a");
+    expect(fcpxml.report).toMatchObject({ adapter: "fcpxml", supported: expect.arrayContaining(["video"]), losses: [{ kind: "subtitle", severity: "warning" }] });
+    const otio = exportOtio({ ir, workspaceRoot: "/workspace" });
+    expect(JSON.parse(otio.body)).toMatchObject({ OTIO_SCHEMA: "Timeline.1", tracks: { children: expect.arrayContaining([expect.objectContaining({ kind: "Video" })]) } });
+    expect(otio.report.adapter).toBe("otio");
   });
 });
