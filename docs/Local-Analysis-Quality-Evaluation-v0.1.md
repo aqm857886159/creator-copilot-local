@@ -59,7 +59,23 @@ sidecar 只输出 JSON transcript，不写 SQLite、不写任意路径、不执�
 
 项目现在有一个不依赖模型的质量合同 smoke：`packages/analysis/fixtures/quality-smoke.json` 保存人工真值/假设输出，评测器计算文本 CER、时间码平均误差、分段召回、OCR precision/recall 和 bbox IoU。用 `npm run test:analysis:quality` 可验证评测器和 schema；这个 fixture 只证明评测逻辑，不代表任何模型准确率。
 
-## 4. 下一道质量门
+## 4. 已补的本地真实 fixture 观察入口
+
+项目现在提供一个不携带媒体和标注的本地观察脚本：它读取用户显式指定的 e-cut/自有视频、`aligned.json` 和本地 Faster-Whisper 模型，按同一套合同计算 CER、分段召回和时间码误差；macOS 上可选同时跑 Apple Vision OCR。默认只报告，不把宽松默认阈值冒充产品质量门：
+
+```bash
+ANALYSIS_QUALITY_LIVE=1 \
+ANALYSIS_QUALITY_INPUT=/path/to/source.mp4 \
+ANALYSIS_QUALITY_REFERENCE=/path/to/aligned.json \
+FASTER_WHISPER_PYTHON=/path/to/python \
+FASTER_WHISPER_MODEL=/path/to/local/model \
+ANALYSIS_QUALITY_RUN_OCR=1 \
+HF_HUB_OFFLINE=1 npm run test:analysis:quality:local
+```
+
+脚本为 `scripts/analysis-quality-local-smoke.mjs`，不会打印媒体内容、账号、原始识别文本或模型绝对路径，也不会联网下载。2026-08-14 的两次观察结果为：e-cut 运动口播 fixture 的 Faster-Whisper 返回 8 段、参考 10 段，CER `7.14%`、分段召回 `50%`、时间码 MAE `440ms`（最大漂移 `1460ms`）；e-cut 花字 fixture 的 Apple Vision 原始 50 条经合并为 10 条，与 10 条参考花字 precision/recall 均为 `1.0`。前者说明本地 ASR 可用但仍有漏段/专名风险，后者证明“持续花字合并”是必要的事实层能力；`aligned/storyboard.json` 是内部分析对齐标注而非盲法人工 Gold，所以这些结果只作为选型和失败样本记录，不能写成中文准确率承诺。真正的质量门仍需 5–10 条自有/获授权且人工复核的口播 Gold。
+
+## 5. 下一道质量门
 
 1. 建立 5–10 条自有/获授权的 9:16 中文口播 fixture，保存人工校对字幕、分镜切点和屏幕文字真值；
 2. ASR 记录 CER/WER、首字延迟、实时倍率、内存峰值和时间码漂移；

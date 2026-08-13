@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { writeFile } from "node:fs/promises";
-import { AppleVisionOcr, evaluateOcrQuality, evaluateTranscriptQuality, FasterWhisperSidecarTranscriber, FfmpegSceneDetector, ocrFacts, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
+import { AppleVisionOcr, evaluateOcrQuality, evaluateTranscriptQuality, FasterWhisperSidecarTranscriber, FfmpegSceneDetector, mergeOcrCues, ocrFacts, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
 
 describe("local analysis facts", () => {
   it("normalizes whisper.cpp timestamp variants into bounded transcript segments", () => {
@@ -64,5 +64,16 @@ describe("local analysis facts", () => {
     const cues = await ocr.recognize("/tmp/video.mp4", 2500);
     expect(cues).toMatchObject([{ startMs: 0, endMs: 1000, text: "画面文字", confidence: 0.91 }]);
     expect(ocrFacts({ workspaceId: "workspace-1", artifactId: "artifact-1", cues, providerKey: "apple-vision", modelKey: "VNRecognizeTextRequest", contentHash: "sha256:video", createdAt: "2026-08-14T00:00:00.000Z" })[0]).toMatchObject({ kind: "ocr", text: "画面文字" });
+  });
+
+  it("merges persistent OCR overlays without merging separated repeats", () => {
+    const cues = [
+      { schemaVersion: 1 as const, id: "ocr-1", startMs: 0, endMs: 1000, text: "SHOT 1", confidence: 0.6 },
+      { schemaVersion: 1 as const, id: "ocr-2", startMs: 0, endMs: 1000, text: "标题", confidence: 0.7 },
+      { schemaVersion: 1 as const, id: "ocr-3", startMs: 1000, endMs: 2000, text: "SHOT 1", confidence: 0.9 },
+      { schemaVersion: 1 as const, id: "ocr-4", startMs: 1000, endMs: 2000, text: "标题", confidence: 0.8 },
+      { schemaVersion: 1 as const, id: "ocr-5", startMs: 5000, endMs: 6000, text: "SHOT 1", confidence: 0.8 },
+    ];
+    expect(mergeOcrCues(cues)).toMatchObject([{ id: "ocr-1", startMs: 0, endMs: 2000, confidence: 0.9 }, { id: "ocr-2", startMs: 0, endMs: 2000, confidence: 0.8 }, { id: "ocr-5", startMs: 5000, endMs: 6000 }]);
   });
 });

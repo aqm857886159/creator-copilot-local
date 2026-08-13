@@ -25,6 +25,7 @@
     "test:render:recovery": "npm run build && node scripts/render-recovery-smoke.mjs",
     "test:analysis:sidecar": "node scripts/analysis-sidecar-smoke.mjs",
     "test:analysis:quality": "npm run build && node scripts/analysis-quality-smoke.mjs",
+    "test:analysis:quality:local": "npm run build && node scripts/analysis-quality-local-smoke.mjs",
     "test:providers:live": "node --env-file=.env scripts/provider-smoke.mjs",
     "test:account-research:live": "npm run build && node --env-file=.env scripts/account-research-smoke.mjs",
     "test:topic-radar:live": "npm run build && node --env-file=.env scripts/topic-radar-smoke.mjs",

@@ -1,7 +1,7 @@
 # V6 本地分析事实与素材检索
 
 日期：2026-08-14  
-状态：分析合同、whisper.cpp adapter、可选 faster-whisper Python sidecar、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作、本地分析 Job、打包 utility worker 回写和质量评测合同 smoke 已完成；真实中文 ASR/OCR 质量仍待获授权媒体 fixture 验收
+状态：分析合同、whisper.cpp adapter、可选 faster-whisper Python sidecar、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作、本地分析 Job、打包 utility worker 回写和质量评测合同 smoke 已完成；已补用户显式路径的真实 fixture 观察入口，产品质量门仍待人工 Gold
 
 ## 1. 选型决策
 
@@ -71,6 +71,8 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 - `/opt/homebrew/bin/ffmpeg` 抽取 1 秒视频帧；
 - `swift electron/sidecars/apple-vision-ocr.swift` 返回测试画面文字、置信度和 bbox；
 - 这只证明 macOS runtime/脚本边界可运行，不代表中文口播字幕的识别率、花字去重或跨平台可用性已验收。
+- `scripts/analysis-quality-local-smoke.mjs` 已把 e-cut 内部获授权的 `source.mp4 + aligned.json` 接入本项目质量合同；默认 observational，不把内部对齐标注冒充盲法 Gold，也不把本次结果写成产品准确率。
+- OCR 事实在写入素材库前会按标准化文本和相邻时间窗合并持续花字；否则每秒抽帧会制造重复标签，破坏搜索和账号拆解统计。
 
 ## 4. 仍未声称完成的能力
 

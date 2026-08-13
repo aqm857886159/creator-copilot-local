@@ -53,8 +53,9 @@ parentPort.on("message", async (event) => {
     if (process.platform === "darwin" && typeof payload.visionScriptPath === "string" && payload.visionScriptPath) {
       try {
         const cues = await new runtime.analysis.AppleVisionOcr({ scriptPath: payload.visionScriptPath, binaryPath: payload.visionBinaryPath, sampleIntervalMs: payload.visionSampleIntervalMs }).recognize(payload.sourcePath, payload.durationMs);
-        facts.push(...runtime.analysis.ocrFacts({ workspaceId: payload.workspaceId, artifactId: payload.artifactId, cues, providerKey: "apple-vision", modelKey: "VNRecognizeTextRequest", contentHash: payload.contentHash, createdAt }));
-        ocrStatus = `OCR 已完成（${cues.length} 条）`;
+        const mergedCues = runtime.analysis.mergeOcrCues(cues, Math.max(1_500, Number(payload.visionSampleIntervalMs ?? 1_000) + 500));
+        facts.push(...runtime.analysis.ocrFacts({ workspaceId: payload.workspaceId, artifactId: payload.artifactId, cues: mergedCues, providerKey: "apple-vision", modelKey: "VNRecognizeTextRequest", contentHash: payload.contentHash, createdAt }));
+        ocrStatus = `OCR 已完成（${mergedCues.length} 条，已合并重复花字）`;
         ocrReady = true;
       } catch (error) {
         ocrStatus = `OCR 失败：${error instanceof Error ? error.message : "未知错误"}`;

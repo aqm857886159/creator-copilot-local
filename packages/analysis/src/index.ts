@@ -233,6 +233,34 @@ export class AppleVisionOcr {
   }
 }
 
+function normalizeOcrText(text: string) {
+  return text.normalize("NFKC").toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+}
+
+/** Collapse the same persistent overlay across adjacent sampled frames. */
+export function mergeOcrCues(cues: OcrCue[], maxGapMs = 1_500) {
+  if (!Number.isInteger(maxGapMs) || maxGapMs < 0) throw new Error("OCR 合并间隔必须是非负整数");
+  const groups: OcrCue[] = [];
+  const latestByText = new Map<string, number>();
+  for (const cue of [...cues].sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs)) {
+    const key = normalizeOcrText(cue.text);
+    const previousIndex = latestByText.get(key);
+    const previous = previousIndex === undefined ? undefined : groups[previousIndex];
+    if (previousIndex !== undefined && previous && cue.startMs <= previous.endMs + maxGapMs) {
+      groups[previousIndex] = OcrCueSchema.parse({
+        ...previous,
+        endMs: Math.max(previous.endMs, cue.endMs),
+        confidence: Math.max(previous.confidence ?? 0, cue.confidence ?? 0) || undefined,
+      });
+      latestByText.set(key, previousIndex);
+    } else {
+      latestByText.set(key, groups.length);
+      groups.push(cue);
+    }
+  }
+  return groups.sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
+}
+
 export function transcriptFacts(input: { workspaceId: string; artifactId: string; segments: TranscriptSegment[]; providerKey: string; modelKey?: string; contentHash: string; createdAt: string }) {
   return input.segments.map((segment) => AnalysisFactSchema.parse({ schemaVersion: 1, id: `${input.artifactId}-${segment.id}`, workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "transcript", startMs: segment.startMs, endMs: segment.endMs, text: segment.text, labels: [], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, createdAt: input.createdAt }));
 }
