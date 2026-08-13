@@ -37,12 +37,13 @@ await run("ffmpeg", [
   "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", fixturePath,
 ]);
 
-const [creation, media, exchange, storage, agentRuntime] = await Promise.all([
+const [creation, media, exchange, storage, agentRuntime, publishing] = await Promise.all([
   import("../dist-electron/packages/creation/src/index.js"),
   import("../dist-electron/packages/media/src/index.js"),
   import("../dist-electron/packages/exchange/src/index.js"),
   import("../dist-electron/packages/storage/src/catalog.js"),
   import("../dist-electron/packages/agent-runtime/src/index.js"),
+  import("../dist-electron/packages/publishing/src/index.js"),
 ]);
 
 const workspaceId = "workspace-v4-creation-edit";
@@ -118,18 +119,47 @@ catalog.insertArtifacts(outputArtifacts);
 if (!catalog.transitionJob(renderJobId, "running", "succeeded", leaseToken, { artifactIds: outputArtifacts.map((artifact) => artifact.artifactId), checkpoint: { manifestHash: result.manifestHash } })) throw new Error("渲染 Job 完成状态没有持久化");
 catalog.saveRenderRun({ schemaVersion: 1, id: renderId, projectId, frozenEditSpecId: frozen.id, state: "succeeded", manifestRelativePath: `exports/${renderId}.manifest.json`, manifestHash: result.manifestHash, createdAt: now, updatedAt: new Date().toISOString() });
 
+const packageId = "publish-v4-creation-edit";
+const publishPackage = await publishing.exportPublishPackage({
+  workspaceRoot: root,
+  packageId,
+  projectId,
+  renderRunId: renderId,
+  platform: "抖音",
+  title: "把观点讲清楚",
+  description: "一条本地发布包回归",
+  hashtags: ["#深度口播", "深度口播"],
+  rightsNote: "本回归使用自有 fixture。",
+  sourceArtifactIds: [imported.source.artifactId],
+  sourceFiles: { video: result.outputPath, subtitle: result.subtitlePath, manifest: result.manifestPath },
+  createdAt: now,
+});
+const publication = publishing.PublicationSchema.parse({ schemaVersion: 1, id: "publication-v4-creation-edit", projectId, packageId, platform: "抖音", status: "draft", createdAt: now, updatedAt: now });
+catalog.savePublication(publication);
+const snapshot = publishing.MetricSnapshotSchema.parse({ schemaVersion: 1, id: "metric-v4-creation-edit", publicationId: publication.id, capturedAt: now, window: "24h", source: "manual", metrics: { views: 1200, likes: 88, comments: 15, shares: 9, saves: 12, completionRate: 0.48, averageWatchSeconds: 18, newFollowers: 6 }, notes: "回归用手动指标" });
+catalog.saveMetricSnapshot(snapshot);
+const review = publishing.proposeReviewMemory({ workspaceId, sourcePublicationIds: [publication.id], snapshots: [snapshot], statement: "先讲具体观点，再让画面补证据，值得继续验证。", appliesTo: { formats: ["真人深度口播"], platforms: ["抖音"] }, now });
+catalog.saveReviewMemoryProposal(review);
+if (!catalog.confirmReviewMemoryProposal(review.id, now)) throw new Error("复盘记忆确认没有持久化");
+
 const probe = JSON.parse(await run("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", result.outputPath]));
 const outputStats = await stat(result.outputPath);
 const persistedJob = catalog.getJob(renderJobId);
 const persistedArtifacts = catalog.listArtifacts(workspaceId);
+const persistedPublication = catalog.getPublication(publication.id);
+const persistedSnapshot = catalog.getMetricSnapshot(snapshot.id);
+const persistedReview = catalog.getReviewMemoryProposal(review.id);
 catalog.close();
+if (persistedPublication?.status !== "draft" || persistedSnapshot?.metrics.views !== 1200) throw new Error("发布记录或指标没有持久化");
+if (persistedReview?.status !== "confirmed") throw new Error("用户确认后的复盘记忆没有持久化");
 console.log(JSON.stringify({
   ok: true,
-  workflow: ["script", "storyboard", "capture-package", "import-take", "select-take", "ai-edit-proposal", "freeze", "render"],
+  workflow: ["script", "storyboard", "capture-package", "import-take", "select-take", "ai-edit-proposal", "freeze", "render", "publish-package", "metrics", "review-memory-confirm"],
   capturePackage: exportedCapturePackage.relativePath,
   imported: { sourceArtifactId: imported.source.artifactId, proxyArtifactId: imported.proxy.artifactId, thumbnailArtifactId: imported.thumbnail.artifactId, durationMs: imported.probe.durationMs },
   proposal: { id: proposal.id, provider: proposalResult.provider.providerKey, operationCount: proposal.operations.length, status: proposal.status },
   frozen: { id: frozen.id, authoredSpecHash: frozen.authoredSpecHash, durationMs: frozen.durationMs },
   render: { id: renderId, video: `exports/${renderId}.mp4`, subtitle: Boolean(result.subtitlePath), manifest: `exports/${renderId}.manifest.json`, byteSize: outputStats.size, durationMs: Math.round(Number(probe.format.duration) * 1000), width: probe.streams.find((stream) => stream.codec_type === "video")?.width, height: probe.streams.find((stream) => stream.codec_type === "video")?.height },
+  publishing: { packageId, manifest: `publish/${packageId}/publish-package.manifest.json`, fileKinds: publishPackage.manifest.files.map((file) => file.kind), publicationId: publication.id, metricSnapshotId: snapshot.id, reviewMemoryStatus: persistedReview?.status },
   persistence: { schemaVersion: 8, jobState: persistedJob?.state, attempt: persistedJob?.attempt, artifactCount: persistedArtifacts.length, renderArtifactCount: outputArtifacts.length },
 }));
