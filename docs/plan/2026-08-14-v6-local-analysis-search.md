@@ -1,15 +1,15 @@
 # V6 本地分析事实与素材检索
 
 日期：2026-08-14  
-状态：分析合同、whisper.cpp adapter、SQLite FTS5 和素材库页面已完成；真实中文模型权重与 OCR/镜头后端待单独安装验收
+状态：分析合同、whisper.cpp adapter、FFmpeg scene baseline、SQLite FTS5 和素材库页面已完成；真实中文模型权重与 OCR 后端待单独安装验收
 
 ## 1. 选型决策
 
 当前机器已存在 `/opt/homebrew/bin/whisper-cli`，说明 whisper.cpp 是可用的本地执行入口；但没有发现已安装的模型权重，也没有把未经验证的权重下载到仓库。因此本阶段把“事实合同”和“可替换执行器”先落地：
 
 - ASR baseline：`WhisperCppTranscriber`，模型路径显式配置，默认语言 `zh`；
-- OCR：暂不伪造已安装状态，下一步接 RapidOCR/PaddleOCR adapter；
-- 镜头检测：暂不把 PySceneDetect/TransNetV2 当成已完成，下一步接 worker；
+- 镜头 baseline：`FfmpegSceneDetector`，读取 `showinfo` 时间点并生成有界的 `ShotFact/AnalysisFact`；它是粗切事实，不等于 TransNetV2 语义镜头理解；
+- OCR：暂不伪造已安装状态，下一步接 Apple Vision 或 RapidOCR/PaddleOCR adapter；
 - 检索：SQLite FTS5 + 结构化 workspace/artifact 过滤，向量索引后置。
 
 这样素材导入、事实回流和搜索合同可以先被产品验证，不会因为 1.7B/7B 模型包、Python 环境或跨平台原生库矩阵阻塞主链路。
@@ -53,6 +53,7 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 
 - whisper.cpp timestamp 字符串、秒和毫秒变体；
 - transcript → AnalysisFact；
+- ffmpeg `showinfo` 时间点 → bounded `ShotFact` → searchable `AnalysisFact`；
 - runner 可替换、临时目录清理；
 - schema v5 迁移；
 - FTS5 写入、查询、kind 过滤、重启后查询；
@@ -62,14 +63,14 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 
 - 没有模型权重时，不声称本机已完成中文 ASR；
 - 没有 OCR worker 时，不声称 OCR 已完成；
-- 没有镜头检测 worker 时，不声称镜头拆解已完成；
+- FFmpeg scene baseline 只代表粗切时间事实，不声称已经完成语义镜头拆解或视觉理解；
 - FTS5 不是语义向量检索，素材量超过约 300 个镜头后再评估向量 adapter；
 - FTS 查询命中失败时的 LIKE 降级只为可用性保底，不替代中文分词质量评测。
 
 ## 5. 下一步执行
 
 1. 选定并记录一个中文 whisper.cpp 模型权重（大小、许可证、hash、内存峰值、CER/时间码 fixture）；
-2. 接 RapidOCR/PaddleOCR 的本地 subprocess adapter，输出同一 `OcrCue/AnalysisFact`；
-3. 接 PySceneDetect 粗切 + TransNetV2 精修，输出 `ShotFact`；
+2. 接 Apple Vision 或 RapidOCR/PaddleOCR 的本地 adapter，输出同一 `OcrCue/AnalysisFact`；
+3. 在粗切事实之上再评估 PySceneDetect/TransNetV2 精修，输出同一 `ShotFact`；
 4. 导入 Job 统一调度 ASR/OCR/shot，单条失败进入 `needs_attention`，不阻塞其他素材；
 5. 用真实时间码事实增强 AI 剪辑提案和素材匹配证据。

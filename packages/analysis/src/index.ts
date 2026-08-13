@@ -41,7 +41,9 @@ export const ShotFactSchema = z.object({
   detector: id,
   transition: z.enum(["cut", "dissolve", "fade", "unknown"]),
   confidence: z.number().min(0).max(1).optional(),
-}).strict();
+}).strict().superRefine((shot, context) => {
+  if (shot.endMs <= shot.startMs) context.addIssue({ code: z.ZodIssueCode.custom, path: ["endMs"], message: "镜头结束时间必须大于开始时间" });
+});
 export type ShotFact = z.infer<typeof ShotFactSchema>;
 
 export const AnalysisFactSchema = z.object({
@@ -134,8 +136,36 @@ export class WhisperCppTranscriber {
   }
 }
 
+export function parseSceneTimestamps(output: string, durationMs: number) {
+  if (!Number.isInteger(durationMs) || durationMs <= 0) throw new Error("镜头检测需要有效的视频时长");
+  const timestamps = [...output.matchAll(/pts_time[:=]([0-9]+(?:\.[0-9]+)?)/g)].map((match) => Math.round(Number(match[1]) * 1000)).filter((value) => Number.isFinite(value) && value > 0 && value < durationMs);
+  return [...new Set(timestamps)].sort((left, right) => left - right).filter((value, index, values) => index === 0 || value - values[index - 1] >= 50);
+}
+
+export class FfmpegSceneDetector {
+  constructor(private readonly options: { binaryPath?: string; threshold?: number; runner?: AnalysisCommandRunner } = {}) {}
+
+  async detect(inputPath: string, durationMs: number, signal?: AbortSignal) {
+    const threshold = this.options.threshold ?? 0.3;
+    if (!Number.isFinite(threshold) || threshold <= 0 || threshold >= 1) throw new Error("镜头检测 threshold 必须在 0–1 之间");
+    const runner = this.options.runner ?? defaultRunner;
+    const result = await runner(this.options.binaryPath ?? "ffmpeg", ["-hide_banner", "-i", inputPath, "-an", "-sn", "-dn", "-vf", `select=gt(scene\\,${threshold}),showinfo`, "-f", "null", "-"], signal);
+    const cuts = parseSceneTimestamps(`${result.stdout}\n${result.stderr}`, durationMs);
+    const boundaries = [0, ...cuts, durationMs];
+    return boundaries.slice(0, -1).flatMap((startMs, index) => {
+      const endMs = boundaries[index + 1];
+      if (endMs <= startMs) return [];
+      return [ShotFactSchema.parse({ schemaVersion: 1, id: `shot-${index + 1}`, startMs, endMs, detector: "ffmpeg-scene", transition: index === 0 ? "unknown" : "cut" })];
+    });
+  }
+}
+
 export function transcriptFacts(input: { workspaceId: string; artifactId: string; segments: TranscriptSegment[]; providerKey: string; modelKey?: string; contentHash: string; createdAt: string }) {
   return input.segments.map((segment) => AnalysisFactSchema.parse({ schemaVersion: 1, id: `${input.artifactId}-${segment.id}`, workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "transcript", startMs: segment.startMs, endMs: segment.endMs, text: segment.text, labels: [], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, createdAt: input.createdAt }));
+}
+
+export function shotFacts(input: { workspaceId: string; artifactId: string; shots: ShotFact[]; providerKey: string; modelKey?: string; contentHash: string; createdAt: string }) {
+  return input.shots.map((shot) => AnalysisFactSchema.parse({ schemaVersion: 1, id: `${input.artifactId}-${shot.id}`, workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "shot", startMs: shot.startMs, endMs: shot.endMs, text: `镜头 ${shot.transition}`, labels: [shot.transition, shot.detector], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, createdAt: input.createdAt }));
 }
 
 export function searchQueryForFts(query: string) {
