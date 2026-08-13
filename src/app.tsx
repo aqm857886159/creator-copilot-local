@@ -19,6 +19,7 @@ import {
 import { demoWorkspace } from "./lib/demo-workspace";
 import type { ViewId } from "./types";
 import { CreationWorkbench } from "./components/creation-workbench";
+import { AiEditWorkbench } from "./components/ai-edit-workbench";
 
 const navItems: Array<{ id: ViewId; label: string; icon: typeof LayoutDashboard }> = [
   { id: "today", label: "今天", icon: LayoutDashboard },
@@ -48,6 +49,7 @@ export function App() {
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [mediaImport, setMediaImport] = useState<ImportMediaResult | null>(null);
   const [mediaImporting, setMediaImporting] = useState(false);
+  const [captureWorkflow, setCaptureWorkflow] = useState<CaptureWorkflowResult | null>(null);
   const visibleProjects = useMemo(
     () =>
       demoWorkspace.projects.filter((project) =>
@@ -145,7 +147,9 @@ export function App() {
               <div className="lower-grid"><section className="panel"><div className="panel-heading"><div><div className="eyebrow">NEXT UP</div><h2>下一步动作</h2></div><FileText size={19} /></div><div className="task-row"><span className="task-index">01</span><div><strong>完成脚本第二版</strong><p>越努力越没记忆点？</p></div><span className="task-time">25 min</span></div><div className="task-row"><span className="task-index">02</span><div><strong>补拍一个“反例”镜头</strong><p>为分镜 04 准备 B-roll</p></div><span className="task-time">15 min</span></div></section><section className="panel insight-panel"><div className="panel-heading"><div><div className="eyebrow">CREATOR MEMORY</div><h2>最近沉淀</h2></div><Lightbulb size={19} /></div><blockquote>“不要从结论开始，先把那个让你改变想法的瞬间讲出来。”</blockquote><span className="memory-source">来自 3 次复盘 · 表达结构</span></section></div>
             </>
           ) : activeView === "projects" ? (
-            <CreationWorkbench workspaceReady={Boolean(workspacePath)} chooseWorkspace={chooseWorkspace} />
+            <CreationWorkbench workspaceReady={Boolean(workspacePath)} chooseWorkspace={chooseWorkspace} onWorkflowReady={setCaptureWorkflow} openEdit={() => setActiveView("edit")} />
+          ) : activeView === "edit" ? (
+            <AiEditWorkbench workflow={captureWorkflow} openProjects={() => setActiveView("projects")} />
           ) : (
             <section className="empty-view"><div className="empty-icon"><Sparkles size={24} /></div><div className="eyebrow">{activeView.toUpperCase()}</div><h1>{navItems.find((item) => item.id === activeView)?.label ?? "设置"}</h1><p>这个工作区正在从可运行的本地壳开始建设。下一阶段会接入真实项目、素材、命令和任务状态。</p><button className="primary-button" onClick={() => setActiveView("today")}>回到今天</button></section>
           )}

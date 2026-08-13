@@ -1,6 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const { createHash, randomUUID } = require("node:crypto");
-const { mkdirSync, realpathSync } = require("node:fs");
+const { existsSync, mkdirSync, realpathSync } = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
@@ -224,8 +224,12 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
       const take = takeByAssetId.get(operation.sourceAssetId);
       if (!artifact || !take || !take.durationMs) throw new Error(`素材事实不完整：${operation.sourceAssetId}`);
       const absolutePath = path.resolve(workspace.workspacePath, artifact.relativePath);
-      const probe = await new runtime.media.FfmpegToolchain().probe(absolutePath).catch(() => null);
-      assets[operation.sourceAssetId] = { assetId: operation.sourceAssetId, relativePath: artifact.relativePath, absolutePath, contentHash: artifact.contentHash, durationMs: take.durationMs, hasVideo: true, hasAudio: probe ? probe.streams.some((stream) => stream.kind === "audio") : true };
+      const workspaceRoot = realpathSync(workspace.workspacePath);
+      if (!existsSync(absolutePath)) throw new Error(`素材文件不存在：${operation.sourceAssetId}`);
+      const canonicalAssetPath = realpathSync(absolutePath);
+      if (canonicalAssetPath !== workspaceRoot && !canonicalAssetPath.startsWith(`${workspaceRoot}${path.sep}`)) throw new Error(`素材路径越过工作区：${operation.sourceAssetId}`);
+      const probe = await new runtime.media.FfmpegToolchain().probe(canonicalAssetPath).catch(() => null);
+      assets[operation.sourceAssetId] = { assetId: operation.sourceAssetId, relativePath: artifact.relativePath, absolutePath: canonicalAssetPath, contentHash: artifact.contentHash, durationMs: take.durationMs, hasVideo: true, hasAudio: probe ? probe.streams.some((stream) => stream.kind === "audio") : true };
     }
     const renderId = `render-${raw.projectId}-${randomUUID().slice(0, 8)}`;
     const assetLocks = Object.values(assets).map((asset) => ({ assetId: asset.assetId, contentHash: asset.contentHash }));
