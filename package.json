@@ -5,7 +5,7 @@
   "description": "Local-first content creation copilot desktop app",
   "author": "Creator Copilot Contributors",
   "type": "module",
-  "main": "electron/main.cjs",
+  "main": "apps/desktop/main.cjs",
   "scripts": {
     "dev": "concurrently -k -n api,web -c yellow,cyan \"npm:dev:server\" \"npm:dev:web\"",
     "dev:web": "vite --host 127.0.0.1 --port 4316",
@@ -64,7 +64,7 @@
     "directories": { "output": "release" },
     "asar": true,
     "asarUnpack": ["node_modules/better-sqlite3/**/*", "electron/**/*"],
-    "files": ["dist/**/*", "dist-electron/**/*", "electron/**/*", "package.json"],
+    "files": ["dist/**/*", "dist-electron/**/*", "electron/**/*", "apps/desktop/**/*", "package.json"],
     "mac": { "target": [{ "target": "dir", "arch": ["arm64"] }], "category": "public.app-category.video" },
     "win": { "target": [{ "target": "dir", "arch": ["x64"] }] },
     "linux": { "target": [{ "target": "dir", "arch": ["x64"] }] }

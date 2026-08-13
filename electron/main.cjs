@@ -289,7 +289,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: path.join(__dirname, "preload.cjs"),
+      preload: path.join(__dirname, "..", "apps", "desktop", "preload.cjs"),
     },
   });
 

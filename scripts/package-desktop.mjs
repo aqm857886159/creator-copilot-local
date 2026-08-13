@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 
 const root = process.cwd();
 const staging = await mkdtemp(join(tmpdir(), "creator-copilot-package-"));
-const copyTargets = ["dist", "dist-electron", "electron", "package.json", "package-lock.json"];
+const copyTargets = ["dist", "dist-electron", "electron", "apps/desktop", "package.json", "package-lock.json"];
 
 async function run(command, args, cwd) {
   const exitCode = await new Promise((resolve) => {
