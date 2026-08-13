@@ -177,7 +177,7 @@ export function AiEditWorkbench({ workflow, openProjects }: { workflow: CaptureW
   }
 
   if (!workflow?.projectId) {
-    return <section className="edit-workbench empty-edit-workbench"><div className="empty-icon"><Film size={24} /></div><div className="eyebrow">AI EDIT</div><h1>先准备一组真实素材</h1><p>从创作项目生成拍摄包，导入并选定 Take 后，AI 才会基于真实素材给出镜头提案。</p><button className="primary-button" onClick={openProjects}><ChevronRight size={16} /> 去创作项目</button></section>;
+    return <section className="edit-workbench empty-edit-workbench"><div className="empty-icon"><Film size={24} /></div><div className="eyebrow">AI EDIT</div><h1>先准备一组真实素材</h1><p>从创作项目生成拍摄包，导入并选定 Take 后，AI 会先给出可审阅的粗剪提案，再由你确认成片。</p><button className="primary-button" onClick={openProjects}><ChevronRight size={16} /> 去创作项目</button></section>;
   }
 
   const evidenceById = new Map(analysisFacts.map((fact) => [fact.id, fact]));
@@ -185,7 +185,7 @@ export function AiEditWorkbench({ workflow, openProjects }: { workflow: CaptureW
   return <section className="edit-workbench">
     <div className="creation-heading"><div><div className="eyebrow">AI EDIT · HUMAN REVIEW</div><h1>让画面替观点工作。</h1><p>AI 只提出镜头、时间码和理由；你确认后才会生成正式文件。当前先用本地可审计提案器，Provider 接入后沿用同一份合同。</p></div><div className="workspace-state ready"><span />{workflow.projectId}</div></div>
     <div className="edit-notice"><Sparkles size={17} /><div><strong>先看理由，再决定采用。</strong><p>不满意可以拒绝单个镜头；不完整的素材会显示为缺口，不会被假素材悄悄替代。</p></div><span className="edit-notice-tag">{provider?.providerKey === "apimart" ? `APIMart · ${provider.modelKey ?? "model"}` : "本地提案器"}</span></div>
-    <div className="edit-toolbar"><div><div className="eyebrow">PROPOSAL</div><h2>{proposal ? "一份待审阅的 AI 剪辑提案" : "还没有生成提案"}</h2></div><div className="edit-toolbar-actions"><button className="secondary-button" onClick={requestProposal} disabled={busy}><RotateCcw size={15} /> {busy ? "分析中…" : proposal ? "重新分析" : "生成 AI 提案"}</button>{proposal && <button className="primary-button" onClick={renderProposal} disabled={busy}><Film size={15} /> {busy ? "导出中…" : "确认并导出"}</button>}</div></div>
+    <div className="edit-toolbar"><div><div className="eyebrow">PROPOSAL</div><h2>{proposal ? "一份待审阅的 AI 剪辑提案" : "还没有生成提案"}</h2></div><div className="edit-toolbar-actions"><button className="secondary-button" onClick={requestProposal} disabled={busy}><RotateCcw size={15} /> {busy ? "分析中…" : proposal ? "重新分析" : "生成 AI 剪辑提案"}</button>{proposal && <button className="primary-button" onClick={renderProposal} disabled={busy}><Film size={15} /> {busy ? "导出中…" : "确认并导出"}</button>}</div></div>
     {message && <div className="creation-message error" role="alert"><CircleAlert size={16} />{message}</div>}
     {pendingRecovery && <div className="edit-recovery"><div><strong>Provider 提交状态未知</strong><p>先在 Provider 控制台核对是否产生费用；确认没有提交成功后，才能结束旧请求并重新发起。</p></div><button className="secondary-button" onClick={() => void reconcileUnknownProposal()} disabled={busy}>我已核对，结束并允许重试</button></div>}
     {renderRecovery && <div className="edit-recovery"><div><strong>上一次导出没有完成</strong><p>状态：{renderRecovery.job.state} · 第 {renderRecovery.job.attempt} 次尝试。重试只使用已经确认的 FrozenEditSpec，不会重新调用 AI 或自动换素材。</p>{renderRecovery.job.lastError && <small>{renderRecovery.job.lastError.code}：{renderRecovery.job.lastError.message}</small>}</div><button className="secondary-button" onClick={() => void retryFailedRender()} disabled={busy}>基于已冻结方案重试</button></div>}

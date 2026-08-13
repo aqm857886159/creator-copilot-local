@@ -31,7 +31,7 @@ const navItems: Array<{ id: ViewId; label: string; icon: typeof LayoutDashboard 
   { id: "ideas", label: "选题库", icon: Lightbulb },
   { id: "projects", label: "创作项目", icon: ListChecks },
   { id: "assets", label: "素材库", icon: Library },
-  { id: "edit", label: "AI 粗剪", icon: Clapperboard },
+  { id: "edit", label: "AI 剪辑", icon: Clapperboard },
   { id: "review", label: "发布复盘", icon: BarChart3 },
 ];
 
