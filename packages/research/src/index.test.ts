@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachResearchAnalysis, attachResearchMedia, buildAccountResearchReport, createTopicRadarQuote, createTopicRadarReport, normalizeTopicRadarQuery } from "./index";
+import { attachResearchAnalysis, attachResearchMedia, attachResearchMediaPatterns, buildAccountResearchReport, createTopicRadarQuote, createTopicRadarReport, normalizeTopicRadarQuery } from "./index";
 
 describe("benchmark account research", () => {
   it("builds a metadata-first evidence report with explicit coverage", async () => {
@@ -20,6 +20,12 @@ describe("benchmark account research", () => {
     expect(analyzed.videos[0]).toMatchObject({ mediaAnalysisStatus: "partial", analysisFactIds: ["fact-shot-1"] });
     expect(analyzed.coverage.mediaPartiallyAnalyzed).toBe(1);
     expect(analyzed.evidence.some((evidence) => evidence.type === "media_fact")).toBe(true);
+    const patterned = attachResearchMediaPatterns(analyzed, [{ awemeId: "aweme-1", artifactIds: ["source-1"], analyzedAt: "2026-08-14T00:02:00.000Z", facts: [
+      { id: "fact-shot-1", artifactId: "source-1", kind: "shot", startMs: 0, endMs: 2_000, text: "镜头 cut", labels: ["cut"], contentHash: "sha256:source-1" },
+      { id: "fact-transcript-1", artifactId: "source-1", kind: "transcript", startMs: 0, endMs: 1_500, text: "先讲具体经验", labels: [], contentHash: "sha256:source-1" },
+    ] }]);
+    expect(patterned.findings[0]).toMatchObject({ kind: "media_pattern", title: "已拆解 1 条作品的镜头与文字事实" });
+    expect(patterned.evidence.at(-1)?.payload).toMatchObject({ totalShotCount: 1, transcriptSegmentCount: 1 });
   });
 
   it("rejects an unbounded first request", async () => {

@@ -42,7 +42,7 @@ export const AccountResearchReportSchema = z.object({
   profile: z.object({ nickname: z.string().optional(), signature: z.string().optional(), followerCount: z.number().nonnegative().optional(), followingCount: z.number().nonnegative().optional(), awemeCount: z.number().nonnegative().optional() }).strict(),
   videos: z.array(BenchmarkVideoSchema),
   coverage: z.object({ requested: z.number().int().positive(), received: z.number().int().nonnegative(), metadataAnalyzed: z.number().int().nonnegative(), mediaAnalyzed: z.number().int().nonnegative(), mediaPartiallyAnalyzed: z.number().int().nonnegative().default(0), missingMedia: z.number().int().nonnegative(), hasMore: z.boolean(), note: z.string().min(1) }).strict(),
-  findings: z.array(z.object({ id, kind: z.enum(["metadata_pattern", "topic_opportunity", "needs_media_analysis"]), title: id, detail: z.string().min(1), evidenceIds: z.array(id) }).strict()),
+  findings: z.array(z.object({ id, kind: z.enum(["metadata_pattern", "topic_opportunity", "needs_media_analysis", "media_pattern"]), title: id, detail: z.string().min(1), evidenceIds: z.array(id) }).strict()),
   evidence: z.array(ResearchEvidenceSchema),
   createdAt: z.string().datetime({ offset: true }),
 }).strict();
@@ -59,6 +59,13 @@ export type ResearchAnalysisUpdate = {
   status: "partial" | "completed";
   factIds: string[];
   summary: string;
+  analyzedAt: string;
+};
+
+export type ResearchMediaFactSummary = {
+  awemeId: string;
+  artifactIds: string[];
+  facts: Array<{ id: string; artifactId: string; kind: "transcript" | "ocr" | "shot" | "caption" | "label"; startMs: number; endMs: number; text: string; labels: string[]; contentHash: string }>;
   analyzedAt: string;
 };
 
@@ -128,6 +135,45 @@ export function attachResearchAnalysis(report: AccountResearchReport, updates: R
   const mediaAnalyzed = videos.filter((video) => video.mediaAnalysisStatus === "completed").length;
   const mediaPartiallyAnalyzed = videos.filter((video) => video.mediaAnalysisStatus === "partial").length;
   return AccountResearchReportSchema.parse({ ...report, videos, evidence, coverage: { ...report.coverage, mediaAnalyzed, mediaPartiallyAnalyzed, note: `已完成 ${mediaAnalyzed} 条，部分完成 ${mediaPartiallyAnalyzed} 条；ASR/OCR 未配置时会保留已完成的镜头事实。` }, findings: [{ id: `finding-analysis-${report.secUserId}`, kind: "needs_media_analysis", title: mediaPartiallyAnalyzed > 0 ? "镜头事实已就绪，仍有分析缺口" : "媒体拆解已完成", detail: mediaPartiallyAnalyzed > 0 ? "镜头切点已写入素材库；请配置中文 ASR/OCR 后补齐文案和画面文字。" : "本地媒体事实已写入素材库，可用于 AI 剪辑提案和账号模式分析。", evidenceIds: videos.flatMap((video) => video.evidenceIds) }] });
+}
+
+/**
+ * Turn local, time-coded facts into a conservative account-level pattern.
+ * This is descriptive evidence, not a causal performance claim: it reports
+ * what was actually observed in the selected local copies and leaves topic
+ * recommendations to a later, evidence-linked agent step.
+ */
+export function attachResearchMediaPatterns(report: AccountResearchReport, summaries: ResearchMediaFactSummary[]) {
+  if (summaries.length === 0) return report;
+  const validSummaries = summaries.filter((summary) => report.videos.some((video) => video.awemeId === summary.awemeId));
+  if (validSummaries.length === 0) return report;
+  const allFacts = validSummaries.flatMap((summary) => summary.facts);
+  const shotFacts = allFacts.filter((fact) => fact.kind === "shot");
+  const transcriptFacts = allFacts.filter((fact) => fact.kind === "transcript");
+  const ocrFacts = allFacts.filter((fact) => fact.kind === "ocr");
+  const shotDurations = shotFacts.map((fact) => fact.endMs - fact.startMs).filter((duration) => duration > 0);
+  const averageShotDurationMs = shotDurations.length > 0 ? Math.round(shotDurations.reduce((sum, duration) => sum + duration, 0) / shotDurations.length) : undefined;
+  const evidenceId = `evidence-media-pattern-${report.secUserId}-${Math.max(...validSummaries.map((summary) => Date.parse(summary.analyzedAt)))}`;
+  const capturedAt = validSummaries.map((summary) => summary.analyzedAt).sort().at(-1) ?? new Date().toISOString();
+  const evidence = ResearchEvidenceSchema.parse({ schemaVersion: 1, id: evidenceId, type: "media_fact", sourceId: report.secUserId, label: "选中作品的本地镜头与文字模式", payload: {
+    analyzedVideoCount: validSummaries.length,
+    totalShotCount: shotFacts.length,
+    averageShotDurationMs,
+    transcriptSegmentCount: transcriptFacts.length,
+    ocrCueCount: ocrFacts.length,
+    openingTranscriptSamples: transcriptFacts.filter((fact) => fact.startMs < 3_000).sort((left, right) => left.startMs - right.startMs).slice(0, 5).map((fact) => ({ artifactId: fact.artifactId, startMs: fact.startMs, text: fact.text })),
+    artifactIds: [...new Set(validSummaries.flatMap((summary) => summary.artifactIds))],
+  }, capturedAt });
+  const shotDescription = averageShotDurationMs === undefined ? "镜头时长尚未形成稳定统计" : `平均镜头约 ${(averageShotDurationMs / 1000).toFixed(1)} 秒`;
+  const patternFinding = {
+    id: `finding-media-pattern-${report.secUserId}`,
+    kind: "media_pattern" as const,
+    title: `已拆解 ${validSummaries.length} 条作品的镜头与文字事实`,
+    detail: `${shotDescription}；共检测 ${shotFacts.length} 个粗切镜头、${transcriptFacts.length} 段 ASR、${ocrFacts.length} 条 OCR。它描述的是已选作品样本，不代表账号整体因果规律。`,
+    evidenceIds: [evidenceId],
+  };
+  const findings = [patternFinding, ...report.findings.filter((finding) => finding.kind !== "media_pattern")];
+  return AccountResearchReportSchema.parse({ ...report, evidence: [...report.evidence, evidence], findings });
 }
 
 export function markResearchMediaFailures(report: AccountResearchReport, awemeIds: string[]) {

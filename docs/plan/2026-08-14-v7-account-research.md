@@ -1,7 +1,7 @@
 # V7：对标账号证据雷达（metadata-first）
 
 日期：2026-08-14  
-状态：metadata-first、选中作品本地化和本地镜头分析 Job 已实现；中文 ASR/OCR 仍按能力配置后置
+状态：metadata-first、选中作品本地化、本地镜头分析 Job 和样本级镜头/ASR/OCR 模式摘要已实现；中文 ASR/OCR 仍按能力配置后置
 
 ## 产品名称与用户结果
 
@@ -31,6 +31,7 @@
 - `electron/main.cjs`：`desktop:research-account`，凭证只在 main 进程读取，报告写入当前工作区 catalog。
 - `electron/main.cjs`：`desktop:download-research-media`，一次最多 5 条，逐条下载、导入、代理化、缩略图化；局部失败不回滚已成功素材。
 - `electron/main.cjs`：`desktop:analyze-research-media`，为每条作品创建或恢复 `media.analysis` Job，取得 lease 后由 `electron/analysis-worker.cjs` 执行 FFmpeg/ASR/OCR，main 只回写事实和 Job receipt；没有中文模型时保留 partial 状态，不伪造 ASR/OCR。
+- `packages/research/src/index.ts`：将选中作品的本地事实聚合成描述性账号模式（镜头数量/平均时长、ASR 段数、OCR 条数和开头样本），每条结论关联 `media_fact` evidence；它只描述样本，不把相关性说成因果。
 - `src/components/account-radar-workbench.tsx`：账号输入、10/20 条范围、覆盖状态、作品选择、显式本地化动作和证据缺口展示。
 - `packages/providers/src/index.ts`：TikHub `ResearchConnector`，将 provider 响应归一化为 profile/posts 页面。
 
@@ -65,5 +66,5 @@
 
 1. 接 Apple Vision 或 RapidOCR/PaddleOCR 的本地 adapter，补齐 OCR `AnalysisFact`。
 2. 配置一个中文 whisper.cpp 模型，记录模型许可证、hash、内存和 CER；把 transcript facts 与镜头事实一起回挂 `awemeId + artifactId + time range`。
-3. 在已完成的事实之上生成账号级结构模式和选题机会。
+3. 在已完成的事实之上生成更细的账号级结构模式和选题机会（当前已有保守的样本统计，VLM/语义模式后置）。
 4. 另建热点/榜单连接器，使用缓存和预算门，不把 TikHub 的所有接口直接暴露给 Agent。

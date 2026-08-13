@@ -472,6 +472,7 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
     if (selected.length !== awemeIds.length) throw new Error("选择的作品不在当前研究报告中");
     const runtime = await getDesktopRuntime();
     const updates = [];
+    const factSummaries = [];
     const failed = [];
     const jobs = [];
     for (const video of selected) {
@@ -490,7 +491,9 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         workspace.catalog.insertJob({ schemaVersion: 1, id: jobId, kind: "media.analysis", inputHash, state: "queued", attempt: 0, idempotencyKey: `analysis-${artifact.artifactId}-${artifact.contentHash}`, idempotencyScope: workspace.workspaceId, providerKey: "local", artifactIds: [artifact.artifactId], correlationId: randomUUID(), createdAt: timestamp, updatedAt: timestamp });
         job = workspace.catalog.getJob(jobId);
       } else if (job.state === "succeeded") {
-        updates.push({ awemeId: video.awemeId, status: video.mediaAnalysisStatus === "completed" ? "completed" : "partial", factIds: video.analysisFactIds, summary: "已复用已完成的本地分析任务。", analyzedAt: now.toISOString() });
+        const reusedFacts = workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, limit: 100 });
+        updates.push({ awemeId: video.awemeId, status: video.mediaAnalysisStatus === "completed" ? "completed" : "partial", factIds: reusedFacts.map((fact) => fact.id), summary: "已复用已完成的本地分析任务。", analyzedAt: now.toISOString() });
+        factSummaries.push({ awemeId: video.awemeId, artifactIds: video.artifactIds, facts: reusedFacts, analyzedAt: now.toISOString() });
         jobs.push({ id: job.id, state: job.state, reused: true });
         continue;
       } else if (["failed", "needs_attention", "timed_out"].includes(job.state)) {
@@ -524,6 +527,7 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         workspace.catalog.saveAnalysisFacts(workerResult.facts);
         workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: workerResult.shotCount, factIds: workerResult.facts.map((fact) => fact.id), asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus } });
         updates.push({ awemeId: video.awemeId, status: workerResult.asrReady && workerResult.ocrReady ? "completed" : "partial", factIds: workerResult.facts.map((fact) => fact.id), summary: workerResult.summary, analyzedAt: createdAt });
+        factSummaries.push({ awemeId: video.awemeId, artifactIds: video.artifactIds, facts: workerResult.facts, analyzedAt: createdAt });
         jobs.push({ id: job.id, state: "succeeded", factCount: workerResult.facts.length });
       } catch (error) {
         const message = error instanceof Error ? error.message : "本地媒体分析失败";
@@ -532,7 +536,8 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         jobs.push({ id: job.id, state: "failed" });
       }
     }
-    const updated = runtime.research.attachResearchAnalysis(workspace.catalog.getResearchReport(report.id) ?? report, updates);
+    let updated = runtime.research.attachResearchAnalysis(workspace.catalog.getResearchReport(report.id) ?? report, updates);
+    updated = runtime.research.attachResearchMediaPatterns(updated, factSummaries);
     workspace.catalog.saveResearchReport(updated);
     if (updates.length === 0) return { ok: false, errorCode: "research_media_analysis_failed", message: failed[0]?.message ?? "没有作品完成分析", report: updated, failed, jobs };
     return { ok: true, report: updated, failed, jobs };
