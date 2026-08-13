@@ -192,6 +192,8 @@ interface EditProposalResult {
   message?: string;
   status?: "ready" | "needs_material" | "pending" | "failed";
   receipt?: { schemaVersion: 1; commandId: string; correlationId: string; status: "accepted" | "rejected" | "pending" | "duplicate" | "conflict"; target: { type: string; id: string; expectedRevision?: number }; jobIds: string[]; eventIds: string[]; artifactIds: string[]; approvalRequired: boolean; errorCode?: string; errorDetails?: Record<string, unknown> };
+  idempotencyScope?: string;
+  idempotencyKey?: string;
   jobId?: string;
   project?: { id: string; title: string };
   missing?: Array<{ shotId: string; taskId?: string; reason: string; instruction: string }>;
@@ -212,6 +214,14 @@ interface EditRenderResult {
   jobId?: string;
   artifactIds?: string[];
   files?: { video: string; subtitle: string | null; manifest: string };
+}
+
+interface ReconcileEditProposalResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  retryNonce?: string;
+  receipt?: EditProposalResult["receipt"];
 }
 
 interface ExchangeExportResult {
@@ -297,7 +307,8 @@ interface Window {
     createCaptureWorkflow: (input: CaptureWorkflowInput) => Promise<CaptureWorkflowResult>;
     importTake: (shootTaskId: string) => Promise<ImportTakeResult>;
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;
-    proposeEdit: (projectId: string) => Promise<EditProposalResult>;
+    proposeEdit: (input: { projectId: string; retryNonce?: string } | string) => Promise<EditProposalResult>;
+    reconcileEditProposal: (input: { idempotencyScope: string; idempotencyKey: string; action: "user_confirmed_not_submitted" }) => Promise<ReconcileEditProposalResult>;
     renderEdit: (input: { projectId: string; proposal: EditProposal }) => Promise<EditRenderResult>;
     exportExchange: (input: { renderRunId: string; formats: Array<"fcpxml" | "otio"> }) => Promise<ExchangeExportResult>;
     createPublishPackage: (input: { renderRunId: string; platform?: string; title: string; description?: string; hashtags?: string[]; rightsNote?: string }) => Promise<PublishPackageResult>;

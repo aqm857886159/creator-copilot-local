@@ -261,7 +261,7 @@ interface AgentRuntimePort {
 
 **依赖：V2、V3。**
 
-**当前状态（2026-08-14）：** reference RenderIR、MP4/SRT/manifest、AI 粗剪人工审阅、render Job/lease、输出 ArtifactManifest、启动时过期租约恢复，以及 AI proposal/freeze 的 CommandReceipt 已落地；freeze 失败回执和 FrozenEditSpec 已进入同一事务；跨进程人工恢复、渲染重试编排和 Rust 对账仍未完成。
+**当前状态（2026-08-14）：** reference RenderIR、MP4/SRT/manifest、AI 粗剪人工审阅、render Job/lease、输出 ArtifactManifest、启动时过期租约恢复，以及 AI proposal/freeze 的 CommandReceipt 已落地；freeze 失败回执和 FrozenEditSpec 已进入同一事务；Provider `submission_unknown` 已支持用户核对用量后的人工收口与新幂等键重试；跨进程恢复、渲染重试编排和 Rust 对账仍未完成。
 
 产品对外名称是“AI 粗剪 / AI 剪辑”。这一阶段不是取消 AI，而是把 AI 放在正确的位置：模型根据脚本、分镜、ASR/OCR/视觉事实和素材库生成 `EditProposal`，用户可以预览、替换、拒绝、撤销并确认；确认后的 `FrozenEditSpec` 再由无模型的媒体执行器稳定编译和导出。这样每次重渲染都不会偷偷换镜头或改变用户已经确认的创作意图。
 

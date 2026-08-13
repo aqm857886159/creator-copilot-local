@@ -597,9 +597,11 @@ ipcMain.handle("desktop:create-capture-workflow", async (_event, raw) => {
   }
 });
 
-ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
+ipcMain.handle("desktop:propose-edit", async (_event, request) => {
   try {
     const workspace = requireWorkspace();
+    const projectId = typeof request === "string" ? request : request && typeof request.projectId === "string" ? request.projectId : undefined;
+    const retryNonce = request && typeof request === "object" && typeof request.retryNonce === "string" && request.retryNonce.length > 0 ? request.retryNonce : undefined;
     if (typeof projectId !== "string" || !projectId) throw new Error("项目 ID 无效");
     const project = workspace.catalog.getProject(projectId);
     if (!project || project.workspaceId !== workspace.workspaceId) throw new Error("项目不存在或不属于当前工作区");
@@ -626,7 +628,7 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
     const providerKey = configuredEditProvider();
     const modelKey = configuredEditModel();
     const selectedTakeFacts = Object.entries(takesByTask).flatMap(([taskId, takes]) => takes.filter((take) => take.status === "selected").map((take) => ({ taskId, takeId: take.id, assetId: take.assetId, contentHash: assetFacts[take.assetId]?.contentHash, durationMs: assetFacts[take.assetId]?.durationMs, analysisFacts: (analysisFactsByAsset[take.assetId] ?? []).map((fact) => ({ id: fact.id, startMs: fact.startMs, endMs: fact.endMs, contentHash: fact.contentHash })) }))).sort((left, right) => `${left.taskId}:${left.takeId}`.localeCompare(`${right.taskId}:${right.takeId}`));
-    const inputFingerprint = createHash("sha256").update(JSON.stringify({ projectId, scriptRevision: script.revision, storyboardRevision: storyboard.revision, providerKey, modelKey, selectedTakeFacts })).digest("hex").slice(0, 24);
+    const inputFingerprint = createHash("sha256").update(JSON.stringify({ projectId, scriptRevision: script.revision, storyboardRevision: storyboard.revision, providerKey, modelKey, retryNonce, selectedTakeFacts })).digest("hex").slice(0, 24);
     const command = {
       schemaVersion: 1,
       commandId: `command-edit-proposal-${randomUUID()}`,
@@ -636,7 +638,7 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
       idempotencyKey: `edit-proposal:${projectId}:${script.revision}:${storyboard.revision}:${inputFingerprint}`,
       idempotencyScope: workspace.workspaceId,
       correlationId: `run-edit-proposal-${randomUUID()}`,
-      input: { projectId, scriptRevision: script.revision, storyboardRevision: storyboard.revision, providerKey, modelKey, selectedTakeFacts },
+      input: { projectId, scriptRevision: script.revision, storyboardRevision: storyboard.revision, providerKey, modelKey, retryNonce, selectedTakeFacts },
     };
     const jobId = `job-${command.correlationId}`;
     const pending = workspace.catalog.executeCommand(command, () => ({
@@ -648,7 +650,7 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
       const proposalId = proposalIdFromReceipt(storedPending);
       const cachedProposal = proposalId ? workspace.catalog.getEditProposal(proposalId) : undefined;
       const cachedMissing = storedPending.errorDetails && typeof storedPending.errorDetails === "object" && Array.isArray(storedPending.errorDetails.missing) ? storedPending.errorDetails.missing : [];
-      return { ok: Boolean(cachedProposal), status: cachedProposal ? "ready" : storedPending.status === "pending" ? "pending" : "needs_material", receipt: storedPending, proposal: cachedProposal, missing: cachedMissing, analysisFacts: Object.values(analysisFactsByAsset).flat(), provider: storedPending.errorDetails?.provider };
+      return { ok: Boolean(cachedProposal), status: cachedProposal ? "ready" : storedPending.status === "pending" ? "pending" : "needs_material", receipt: storedPending, idempotencyScope: workspace.workspaceId, idempotencyKey: command.idempotencyKey, proposal: cachedProposal, missing: cachedMissing, analysisFacts: Object.values(analysisFactsByAsset).flat(), provider: storedPending.errorDetails?.provider };
     }
     const finishFailure = (failure, from, leaseToken, cancelled = false) => {
       const targetStatus = failure.submissionUnknown ? "pending" : "rejected";
@@ -660,7 +662,7 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
           events: [{ id: `event-${command.correlationId}-failed`, aggregateType: "project", aggregateId: projectId, aggregateRevision: project.revision, type: failure.submissionUnknown ? "edit.proposal.submission_unknown" : "edit.proposal.failed", payload: { jobId, state: nextJobState, providerKey, message: failure.message }, actorType: "system", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: new Date().toISOString() }],
         };
       });
-      return { ok: false, status: targetStatus === "pending" ? "pending" : "failed", receipt, jobId, provider: { providerKey, modelKey }, errorCode: failure.submissionUnknown ? "SUBMISSION_UNKNOWN" : failure.code, message: failure.submissionUnknown ? "Provider 请求提交状态未知；已停止自动重试，请先核对用量后再决定是否重新发起。" : failure.message };
+      return { ok: false, status: targetStatus === "pending" ? "pending" : "failed", receipt, idempotencyScope: workspace.workspaceId, idempotencyKey: command.idempotencyKey, jobId, provider: { providerKey, modelKey }, errorCode: failure.submissionUnknown ? "SUBMISSION_UNKNOWN" : failure.code, message: failure.submissionUnknown ? "Provider 请求提交状态未知；已停止自动重试，请先核对用量后再决定是否重新发起。" : failure.message };
     };
     const leaseToken = workspace.catalog.claimJob(jobId, "agent-main", new Date(), 120_000);
     if (!leaseToken || !workspace.catalog.heartbeatJob(jobId, "agent-main", leaseToken, new Date(), 120_000)) return finishFailure({ code: "LEASE_UNAVAILABLE", message: "AI 提案任务无法取得本地租约", submissionUnknown: false, retryable: true }, "queued", undefined, true);
@@ -679,9 +681,33 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
         events: [{ id: `event-${command.correlationId}-completed`, aggregateType: "project", aggregateId: projectId, aggregateRevision: project.revision, type: "edit.proposal.completed", payload: { jobId, proposalId: result.proposal?.id, status: result.status, provider: result.provider }, actorType: "system", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: new Date().toISOString() }],
       };
     });
-    return { ok: true, ...result, analysisFacts: Object.values(analysisFactsByAsset).flat(), receipt: completed, jobId, project: { id: project.id, title: project.title } };
+    return { ok: true, ...result, analysisFacts: Object.values(analysisFactsByAsset).flat(), receipt: completed, idempotencyScope: workspace.workspaceId, idempotencyKey: command.idempotencyKey, jobId, project: { id: project.id, title: project.title } };
   } catch (error) {
     return { ok: false, errorCode: "edit_proposal_failed", message: error instanceof Error ? error.message : "AI 剪辑提案生成失败" };
+  }
+});
+
+ipcMain.handle("desktop:reconcile-edit-proposal", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.idempotencyKey !== "string" || typeof raw.idempotencyScope !== "string" || raw.idempotencyScope !== workspace.workspaceId || raw.action !== "user_confirmed_not_submitted") throw new Error("人工恢复参数无效");
+    const stored = workspace.catalog.getReceipt(raw.idempotencyScope, raw.idempotencyKey);
+    if (!stored || stored.receipt.status !== "pending" || stored.receipt.errorCode !== "SUBMISSION_UNKNOWN") throw new Error("当前回执不是可人工处理的提交未知状态");
+    const jobId = stored.receipt.jobIds[0];
+    const retryNonce = randomUUID();
+    const receipt = workspace.catalog.reconcilePendingCommand(raw.idempotencyScope, raw.idempotencyKey, (previous) => {
+      const job = jobId ? workspace.catalog.getJob(jobId) : undefined;
+      if (!job || job.state !== "submission_unknown") throw new Error("AI 提案任务不在 submission_unknown 状态");
+      if (!workspace.catalog.transitionJob(job.id, "submission_unknown", "needs_attention", undefined, { lastError: { code: "SUBMISSION_UNKNOWN_RECONCILED", message: "用户已核对 Provider 用量，确认不再自动重试。", retryable: false } })) throw new Error("AI 提案任务无法进入人工处理状态");
+      if (!workspace.catalog.transitionJob(job.id, "needs_attention", "failed", undefined, { lastError: { code: "SUBMISSION_UNKNOWN_RECONCILED", message: "用户已核对 Provider 用量，确认不再自动重试。", retryable: false } })) throw new Error("AI 提案任务无法收口");
+      return {
+        receipt: { ...previous, status: "rejected", errorCode: "SUBMISSION_UNKNOWN_RECONCILED", errorDetails: { ...(previous.errorDetails ?? {}), action: raw.action, retryNonce, reconciledAt: new Date().toISOString() }, eventIds: [...previous.eventIds, `event-${previous.correlationId}-reconciled`] },
+        events: [{ id: `event-${previous.correlationId}-reconciled`, aggregateType: "project", aggregateId: previous.target.id, aggregateRevision: previous.target.expectedRevision ?? 0, type: "edit.proposal.submission_unknown.reconciled", payload: { jobId, action: raw.action, retryNonce }, actorType: "user", idempotencyKey: raw.idempotencyKey, correlationId: previous.correlationId, occurredAt: new Date().toISOString() }],
+      };
+    });
+    return { ok: true, receipt, retryNonce, message: "已结束这次未知提交；下一次请求会使用新的幂等键。" };
+  } catch (error) {
+    return { ok: false, errorCode: "edit_proposal_reconcile_failed", message: error instanceof Error ? error.message : "人工恢复失败" };
   }
 });
 

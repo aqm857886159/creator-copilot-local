@@ -974,6 +974,12 @@ export class SqliteCatalog {
     return { idempotencyScope: row.idempotencyScope, idempotencyKey: row.idempotencyKey, inputHash: row.inputHash, receipt: CommandReceiptSchema.parse(parseJson(row.receiptJson, "command receipt")) };
   }
 
+  getReceiptByCorrelation(scope: string, correlationId: string): StoredReceipt | undefined {
+    const row = this.db.prepare(`SELECT idempotency_scope AS idempotencyScope, idempotency_key AS idempotencyKey, input_hash AS inputHash, receipt_json AS receiptJson FROM command_receipts WHERE idempotency_scope = ? AND json_extract(receipt_json, '$.correlationId') = ?`).get(scope, correlationId) as (Omit<StoredReceipt, "receipt"> & { receiptJson: string }) | undefined;
+    if (!row) return undefined;
+    return { idempotencyScope: row.idempotencyScope, idempotencyKey: row.idempotencyKey, inputHash: row.inputHash, receipt: CommandReceiptSchema.parse(parseJson(row.receiptJson, "command receipt")) };
+  }
+
   executeCommand(raw: unknown, handler: (command: CommandEnvelope) => CommandExecution): CommandReceipt {
     const command = CommandEnvelopeSchema.parse(raw);
     const inputHash = stableStringify({ actor: command.actor, name: command.name, target: command.target, input: command.input });
@@ -1021,6 +1027,29 @@ export class SqliteCatalog {
       const result = this.db.prepare("UPDATE command_receipts SET receipt_json = ? WHERE idempotency_scope = ? AND idempotency_key = ? AND input_hash = ?")
         .run(JSON.stringify(receipt), command.idempotencyScope, command.idempotencyKey, inputHash);
       if (result.changes !== 1) throw new Error("命令回执完成状态未能持久化");
+      return receipt;
+    }).immediate;
+    return transaction();
+  }
+
+  /**
+   * Reconciles a pending command when its original external submission cannot
+   * be queried automatically. The caller must provide an explicit, local
+   * decision; the original command identity and input hash remain immutable.
+   */
+  reconcilePendingCommand(idempotencyScope: string, idempotencyKey: string, handler: (previous: CommandReceipt) => CommandExecution): CommandReceipt {
+    const transaction = this.db.transaction(() => {
+      const existing = this.getReceipt(idempotencyScope, idempotencyKey);
+      if (!existing) throw new Error("待处理的命令回执不存在");
+      if (existing.receipt.status !== "pending") return { ...existing.receipt, status: "duplicate" as const };
+      const execution = handler(existing.receipt);
+      const receipt = CommandReceiptSchema.parse(execution.receipt);
+      if (receipt.commandId !== existing.receipt.commandId || receipt.correlationId !== existing.receipt.correlationId || stableStringify(receipt.target) !== stableStringify(existing.receipt.target)) throw new Error("人工恢复回执不能改变原命令身份");
+      for (const event of execution.events ?? []) this.appendEvent(event);
+      for (const outbox of execution.outbox ?? []) this.enqueueOutbox(outbox);
+      const result = this.db.prepare("UPDATE command_receipts SET receipt_json = ? WHERE idempotency_scope = ? AND idempotency_key = ? AND input_hash = ? AND receipt_json = ?")
+        .run(JSON.stringify(receipt), idempotencyScope, idempotencyKey, existing.inputHash, JSON.stringify(existing.receipt));
+      if (result.changes !== 1) throw new Error("人工恢复回执未能持久化");
       return receipt;
     }).immediate;
     return transaction();

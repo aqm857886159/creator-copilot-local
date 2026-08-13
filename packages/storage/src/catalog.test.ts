@@ -238,6 +238,23 @@ describe("SqliteCatalog", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("reconciles a pending command without changing its original identity", () => {
+    const root = mkdtempSync(join(tmpdir(), "creator-copilot-reconcile-command-"));
+    const catalog = new SqliteCatalog(join(root, "catalog.sqlite"));
+    const now = new Date().toISOString();
+    const command = { schemaVersion: 1 as const, commandId: "cmd-reconcile", name: "edit.propose", target: { type: "project", id: "project-reconcile" }, actor: { type: "user" as const, id: "desktop" }, idempotencyKey: "reconcile-key", idempotencyScope: "workspace-reconcile", correlationId: "corr-reconcile", input: { projectId: "project-reconcile" } };
+    catalog.executeCommand(command, () => ({ receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "pending", target: command.target, eventIds: [], jobIds: [], artifactIds: [], approvalRequired: false } }));
+    expect(catalog.getReceiptByCorrelation("workspace-reconcile", "corr-reconcile")?.receipt.status).toBe("pending");
+    const reconciled = catalog.reconcilePendingCommand("workspace-reconcile", command.idempotencyKey, (previous) => ({
+      receipt: { ...previous, status: "rejected", errorCode: "SUBMISSION_UNKNOWN_RECONCILED", errorDetails: { action: "user_confirmed_not_submitted" }, eventIds: ["event-reconciled"] },
+      events: [{ id: "event-reconciled", aggregateType: "project", aggregateId: "project-reconcile", aggregateRevision: 0, type: "edit.proposal.reconciled", payload: { action: "user_confirmed_not_submitted" }, actorType: "user", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: now }],
+    }));
+    expect(reconciled).toMatchObject({ status: "rejected", commandId: command.commandId, correlationId: command.correlationId });
+    expect(catalog.reconcilePendingCommand("workspace-reconcile", command.idempotencyKey, () => { throw new Error("不应重复人工处理"); }).status).toBe("duplicate");
+    catalog.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("rejects symlink escape and upgrades a legacy v1 lease schema", () => {
     const root = mkdtempSync(join(tmpdir(), "creator-copilot-legacy-"));
     const outside = mkdtempSync(join(tmpdir(), "creator-copilot-outside-"));
