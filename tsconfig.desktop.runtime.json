@@ -18,6 +18,7 @@
     "packages/providers/src/index.ts",
     "packages/agent-runtime/src/index.ts",
     "packages/analysis/src/index.ts",
+    "packages/analysis/src/quality.ts",
     "packages/research/src/index.ts",
     "packages/publishing/src/index.ts"
   ]

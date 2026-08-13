@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "name": "contract-smoke-zh-speaking",
+  "transcript": {
+    "reference": [
+      { "startMs": 0, "endMs": 1000, "text": "先把观点讲清楚。" },
+      { "startMs": 1000, "endMs": 2000, "text": "再让画面提供证据。" }
+    ],
+    "hypothesis": [
+      { "startMs": 0, "endMs": 1000, "text": "先把观点讲清楚" },
+      { "startMs": 1000, "endMs": 2050, "text": "再让画面提供证据" }
+    ],
+    "gates": { "cerMax": 0, "segmentRecallMin": 1, "timestampMaeMaxMs": 25 }
+  },
+  "ocr": {
+    "reference": [
+      { "startMs": 0, "endMs": 1000, "text": "重点：先讲结论", "bbox": { "x": 0.1, "y": 0.2, "width": 0.4, "height": 0.1 } },
+      { "startMs": 1000, "endMs": 2000, "text": "证据：真实画面", "bbox": { "x": 0.2, "y": 0.4, "width": 0.5, "height": 0.1 } }
+    ],
+    "hypothesis": [
+      { "startMs": 0, "endMs": 1000, "text": "重点 先讲结论", "bbox": { "x": 0.1, "y": 0.2, "width": 0.4, "height": 0.1 } },
+      { "startMs": 1000, "endMs": 2000, "text": "证据 真实画面", "bbox": { "x": 0.2, "y": 0.4, "width": 0.5, "height": 0.1 } }
+    ],
+    "gates": { "precisionMin": 1, "recallMin": 1, "bboxIoUMin": 1 }
+  }
+}

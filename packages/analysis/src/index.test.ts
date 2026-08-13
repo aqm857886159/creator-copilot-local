@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { writeFile } from "node:fs/promises";
-import { AppleVisionOcr, FasterWhisperSidecarTranscriber, FfmpegSceneDetector, ocrFacts, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
+import { AppleVisionOcr, evaluateOcrQuality, evaluateTranscriptQuality, FasterWhisperSidecarTranscriber, FfmpegSceneDetector, ocrFacts, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
 
 describe("local analysis facts", () => {
   it("normalizes whisper.cpp timestamp variants into bounded transcript segments", () => {
@@ -11,6 +11,19 @@ describe("local analysis facts", () => {
 
   it("keeps FTS query construction deterministic", () => {
     expect(searchQueryForFts("  观点  画面 ")).toBe('"观点"* AND "画面"*');
+  });
+
+  it("measures transcript text and timestamp quality against a reference", () => {
+    const reference = [{ startMs: 0, endMs: 1000, text: "先把观点讲清楚。" }, { startMs: 1000, endMs: 2000, text: "再让画面提供证据。" }];
+    const hypothesis = [{ startMs: 0, endMs: 1000, text: "先把观点讲清楚" }, { startMs: 1000, endMs: 2050, text: "再让画面提供证据" }];
+    expect(evaluateTranscriptQuality(reference, hypothesis)).toMatchObject({ cer: 0, segmentRecall: 1, timestampMaeMs: 12.5 });
+    expect(evaluateTranscriptQuality(reference, [{ ...hypothesis[0], text: "先把观点讲明白" }, hypothesis[1]]).cer).toBeGreaterThan(0);
+  });
+
+  it("matches OCR text only once and reports bbox overlap", () => {
+    const cue = { startMs: 0, endMs: 1000, text: "重点：先讲结论", bbox: { x: 0.1, y: 0.2, width: 0.4, height: 0.1 } };
+    expect(evaluateOcrQuality([cue], [{ ...cue, text: "重点 先讲结论" }])).toMatchObject({ precision: 1, recall: 1, bboxIoUMean: 1 });
+    expect(evaluateOcrQuality([cue], [{ ...cue, text: "另一个词" }])).toMatchObject({ precision: 0, recall: 0 });
   });
 
   it("invokes whisper.cpp through a replaceable runner and cleans temporary output", async () => {
