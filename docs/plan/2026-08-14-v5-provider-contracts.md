@@ -1,7 +1,7 @@
 # V5 Provider 合同与小额联调边界
 
 日期：2026-08-14  
-状态：合同、mock 和一次真实 structured proposal smoke 已完成；正式 UI 调度持久化待继续
+状态：合同、mock、一次真实 structured proposal smoke 和 proposal UI 调度持久化已完成；freeze 命令、Mastra durable resume 和人工恢复 UI 待继续
 
 ## 1. 目标
 

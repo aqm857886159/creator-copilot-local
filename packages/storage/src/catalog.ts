@@ -996,6 +996,36 @@ export class SqliteCatalog {
     return transaction();
   }
 
+  /**
+   * Completes a previously persisted pending command without allowing the
+   * caller to silently replace a different idempotency input. Domain writes,
+   * job transitions, events/outbox and the final receipt share one SQLite
+   * transaction, so a crash cannot leave an accepted receipt without its
+   * proposal (or vice versa).
+   */
+  finalizeCommand(raw: unknown, handler: (command: CommandEnvelope, previous: CommandReceipt) => CommandExecution): CommandReceipt {
+    const command = CommandEnvelopeSchema.parse(raw);
+    const inputHash = stableStringify({ actor: command.actor, name: command.name, target: command.target, input: command.input });
+    const transaction = this.db.transaction(() => {
+      const existing = this.getReceipt(command.idempotencyScope, command.idempotencyKey);
+      if (!existing) throw new Error("待完成的命令回执不存在");
+      if (existing.inputHash !== inputHash) throw new Error("IDEMPOTENCY_KEY_REUSE");
+      if (existing.receipt.status !== "pending") return { ...existing.receipt, status: "duplicate" as const };
+      const execution = handler(command, existing.receipt);
+      const receipt = CommandReceiptSchema.parse(execution.receipt);
+      if (receipt.commandId !== command.commandId || receipt.correlationId !== command.correlationId || stableStringify(receipt.target) !== stableStringify(command.target)) {
+        throw new Error("命令回执与请求的 commandId/correlationId 不一致");
+      }
+      for (const event of execution.events ?? []) this.appendEvent(event);
+      for (const outbox of execution.outbox ?? []) this.enqueueOutbox(outbox);
+      const result = this.db.prepare("UPDATE command_receipts SET receipt_json = ? WHERE idempotency_scope = ? AND idempotency_key = ? AND input_hash = ?")
+        .run(JSON.stringify(receipt), command.idempotencyScope, command.idempotencyKey, inputHash);
+      if (result.changes !== 1) throw new Error("命令回执完成状态未能持久化");
+      return receipt;
+    }).immediate;
+    return transaction();
+  }
+
   appendEvent(event: DomainEventRecord) {
     this.db.prepare(`INSERT INTO domain_events(id, aggregate_type, aggregate_id, aggregate_revision, type, payload_json, actor_type, idempotency_key, correlation_id, causation_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(event.id, event.aggregateType, event.aggregateId, event.aggregateRevision, event.type, JSON.stringify(event.payload), event.actorType, event.idempotencyKey ?? null, event.correlationId, event.causationId ?? null, event.occurredAt);

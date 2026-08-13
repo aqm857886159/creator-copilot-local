@@ -29,7 +29,7 @@ export function AiEditWorkbench({ workflow, openProjects }: { workflow: CaptureW
     try {
       const result = await window.desktop.proposeEdit(workflow.projectId);
       if (!result.ok) {
-        setMessage(result.message ?? "AI 剪辑提案生成失败");
+        setMessage(result.status === "pending" ? "上一次 AI 提案请求的提交状态仍未知，已停止自动重试；请先核对 Provider 用量。" : result.message ?? "AI 剪辑提案生成失败");
         return;
       }
       setProposal(result.proposal ?? null);

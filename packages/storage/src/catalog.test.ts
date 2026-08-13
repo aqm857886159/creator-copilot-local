@@ -156,6 +156,48 @@ describe("SqliteCatalog", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("finalizes a pending command with its domain write and job transition atomically", () => {
+    const root = mkdtempSync(join(tmpdir(), "creator-copilot-command-finalize-"));
+    const catalog = new SqliteCatalog(join(root, "catalog.sqlite"));
+    const now = new Date().toISOString();
+    catalog.createWorkspace({ id: "workspace-1", name: "测试工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
+    catalog.createProject({ id: "project-1", workspaceId: "workspace-1", title: "待提案项目", stage: "script", revision: 1, payload: {}, createdAt: now, updatedAt: now });
+    const command = { schemaVersion: 1 as const, commandId: "cmd-pending", name: "edit.propose", target: { type: "project", id: "project-1", expectedRevision: 1 }, actor: { type: "user" as const, id: "desktop" }, idempotencyKey: "edit-propose-idem", idempotencyScope: "workspace-1", correlationId: "corr-pending", input: { projectId: "project-1", scriptRevision: 1, storyboardRevision: 1 } };
+    const job = fixtureJob({ id: "job-pending", kind: "edit.proposal", idempotencyKey: "job-pending-key", idempotencyScope: "workspace-1", correlationId: command.correlationId });
+    const pending = catalog.executeCommand(command, () => {
+      catalog.insertJob(job);
+      return { receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "pending", target: command.target, eventIds: [], jobIds: [job.id], artifactIds: [], approvalRequired: false } };
+    });
+    expect(pending.status).toBe("pending");
+    const leaseToken = catalog.claimJob(job.id, "agent-test", new Date(now), 60_000);
+    expect(leaseToken).toEqual(expect.any(String));
+    expect(catalog.heartbeatJob(job.id, "agent-test", leaseToken!, new Date(now), 60_000)).toBe(true);
+    let finalizeCalls = 0;
+    const accepted = catalog.finalizeCommand(command, () => {
+      finalizeCalls += 1;
+      expect(catalog.updateProject("project-1", 1, { stage: "edit" })).toBe(true);
+      expect(catalog.transitionJob(job.id, "running", "succeeded", leaseToken!, { checkpoint: { status: "ready" } })).toBe(true);
+      return { receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "accepted", target: command.target, newRevision: 2, eventIds: [], jobIds: [job.id], artifactIds: [], approvalRequired: false } };
+    });
+    expect(accepted.status).toBe("accepted");
+    expect(catalog.getProject("project-1")?.stage).toBe("edit");
+    expect(catalog.getJob(job.id)?.state).toBe("succeeded");
+    expect(catalog.finalizeCommand(command, () => { finalizeCalls += 1; throw new Error("不应重复完成"); }).status).toBe("duplicate");
+    expect(finalizeCalls).toBe(1);
+    const rollbackCommand = { ...command, commandId: "cmd-pending-rollback", idempotencyKey: "edit-propose-rollback", correlationId: "corr-pending-rollback", target: { type: "project", id: "project-1", expectedRevision: 2 } };
+    const rollbackJob = fixtureJob({ id: "job-pending-rollback", kind: "edit.proposal", idempotencyKey: "job-pending-rollback-key", idempotencyScope: "workspace-1", correlationId: rollbackCommand.correlationId });
+    catalog.executeCommand(rollbackCommand, () => { catalog.insertJob(rollbackJob); return { receipt: { schemaVersion: 1, commandId: rollbackCommand.commandId, correlationId: rollbackCommand.correlationId, status: "pending", target: rollbackCommand.target, eventIds: [], jobIds: [rollbackJob.id], artifactIds: [], approvalRequired: false } }; });
+    const rollbackLease = catalog.claimJob(rollbackJob.id, "agent-test", new Date(now), 60_000);
+    expect(rollbackLease).toEqual(expect.any(String));
+    expect(catalog.heartbeatJob(rollbackJob.id, "agent-test", rollbackLease!, new Date(now), 60_000)).toBe(true);
+    expect(() => catalog.finalizeCommand(rollbackCommand, () => { expect(catalog.updateProject("project-1", 2, { stage: "should-rollback" })).toBe(true); throw new Error("模拟完成阶段崩溃"); })).toThrow("模拟完成阶段崩溃");
+    expect(catalog.getProject("project-1")?.stage).toBe("edit");
+    expect(catalog.getReceipt("workspace-1", rollbackCommand.idempotencyKey)?.receipt.status).toBe("pending");
+    expect(catalog.getJob(rollbackJob.id)?.state).toBe("running");
+    catalog.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("rejects symlink escape and upgrades a legacy v1 lease schema", () => {
     const root = mkdtempSync(join(tmpdir(), "creator-copilot-legacy-"));
     const outside = mkdtempSync(join(tmpdir(), "creator-copilot-outside-"));

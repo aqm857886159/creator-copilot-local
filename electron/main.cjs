@@ -106,6 +106,26 @@ function topicRadarJobError(error) {
   return { code, message: message.slice(0, 500), retryable, submissionUnknown: category === "network" || category === "timeout" };
 }
 
+function configuredEditProvider() {
+  return process.env.AI_EDIT_PROVIDER === "apimart" && process.env.APIMART_API_KEY ? "apimart" : "local-fallback";
+}
+
+function configuredEditModel() {
+  return configuredEditProvider() === "apimart" ? process.env.AI_EDIT_MODEL ?? "gpt-5-nano" : undefined;
+}
+
+function proposalFailure(error, providerKey) {
+  const message = error instanceof Error ? error.message.slice(0, 500) : "AI 剪辑提案请求失败";
+  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "PROPOSAL_FAILED";
+  const submissionUnknown = providerKey !== "local-fallback" && /timeout|timed out|aborted|network|fetch|socket|econn|5\d\d/i.test(message);
+  return { code, message, submissionUnknown, retryable: submissionUnknown || providerKey !== "local-fallback" };
+}
+
+function proposalIdFromReceipt(receipt) {
+  const value = receipt?.errorDetails && typeof receipt.errorDetails === "object" ? receipt.errorDetails.proposalId : undefined;
+  return typeof value === "string" ? value : undefined;
+}
+
 function analysisWorkerScriptPath() {
   const unpacked = path.join(process.resourcesPath, "app.asar.unpacked", "electron", "analysis-worker.cjs");
   return app.isPackaged && existsSync(unpacked) ? unpacked : path.join(__dirname, "analysis-worker.cjs");
@@ -532,10 +552,63 @@ ipcMain.handle("desktop:propose-edit", async (_event, projectId) => {
         if (artifact) assetFacts[take.assetId] = { contentHash: artifact.contentHash, durationMs: take.durationMs };
       }
     }
-    const runtime = await getDesktopRuntime();
-    const result = await getEditAgent(runtime).proposeEdit({ projectId, script, storyboard, tasks, takesByTask, assetFacts, now: new Date().toISOString() });
-    if (result.status === "ready" && result.proposal) workspace.catalog.saveEditProposal(result.proposal);
-    return { ok: true, ...result, project: { id: project.id, title: project.title } };
+    const providerKey = configuredEditProvider();
+    const modelKey = configuredEditModel();
+    const selectedTakeFacts = Object.entries(takesByTask).flatMap(([taskId, takes]) => takes.filter((take) => take.status === "selected").map((take) => ({ taskId, takeId: take.id, assetId: take.assetId, contentHash: assetFacts[take.assetId]?.contentHash, durationMs: assetFacts[take.assetId]?.durationMs }))).sort((left, right) => `${left.taskId}:${left.takeId}`.localeCompare(`${right.taskId}:${right.takeId}`));
+    const inputFingerprint = createHash("sha256").update(JSON.stringify({ projectId, scriptRevision: script.revision, storyboardRevision: storyboard.revision, providerKey, modelKey, selectedTakeFacts })).digest("hex").slice(0, 24);
+    const command = {
+      schemaVersion: 1,
+      commandId: `command-edit-proposal-${randomUUID()}`,
+      name: "edit.propose",
+      target: { type: "project", id: projectId, expectedRevision: project.revision },
+      actor: { type: "user", id: "desktop-user", sessionId: "desktop" },
+      idempotencyKey: `edit-proposal:${projectId}:${script.revision}:${storyboard.revision}:${inputFingerprint}`,
+      idempotencyScope: workspace.workspaceId,
+      correlationId: `run-edit-proposal-${randomUUID()}`,
+      input: { projectId, scriptRevision: script.revision, storyboardRevision: storyboard.revision, providerKey, modelKey, selectedTakeFacts },
+    };
+    const jobId = `job-${command.correlationId}`;
+    const pending = workspace.catalog.executeCommand(command, () => ({
+      receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "pending", target: command.target, jobIds: [jobId], eventIds: [`event-${command.correlationId}-requested`], artifactIds: [], approvalRequired: false },
+      events: [{ id: `event-${command.correlationId}-requested`, aggregateType: "project", aggregateId: projectId, aggregateRevision: project.revision, type: "edit.proposal.requested", payload: { jobId, providerKey, modelKey }, actorType: "user", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: new Date().toISOString() }],
+    }));
+    const storedPending = workspace.catalog.getReceipt(workspace.workspaceId, command.idempotencyKey)?.receipt ?? pending;
+    if (pending.status === "duplicate") {
+      const proposalId = proposalIdFromReceipt(storedPending);
+      const cachedProposal = proposalId ? workspace.catalog.getEditProposal(proposalId) : undefined;
+      const cachedMissing = storedPending.errorDetails && typeof storedPending.errorDetails === "object" && Array.isArray(storedPending.errorDetails.missing) ? storedPending.errorDetails.missing : [];
+      return { ok: Boolean(cachedProposal), status: cachedProposal ? "ready" : storedPending.status === "pending" ? "pending" : "needs_material", receipt: storedPending, proposal: cachedProposal, missing: cachedMissing, provider: storedPending.errorDetails?.provider };
+    }
+    const finishFailure = (failure, from, leaseToken, cancelled = false) => {
+      const targetStatus = failure.submissionUnknown ? "pending" : "rejected";
+      const nextJobState = failure.submissionUnknown ? "submission_unknown" : cancelled ? "cancelled" : "failed";
+      const receipt = workspace.catalog.finalizeCommand(command, () => {
+        if (!workspace.catalog.transitionJob(jobId, from, nextJobState, leaseToken, { lastError: { code: failure.code, message: failure.message, retryable: failure.retryable } })) throw new Error("AI 提案任务失败状态未能持久化");
+        return {
+          receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: targetStatus, target: command.target, jobIds: [jobId], eventIds: [`event-${command.correlationId}-failed`], artifactIds: [], approvalRequired: false, errorCode: failure.submissionUnknown ? "SUBMISSION_UNKNOWN" : failure.code, errorDetails: { state: nextJobState, provider: { providerKey, modelKey }, message: failure.message } },
+          events: [{ id: `event-${command.correlationId}-failed`, aggregateType: "project", aggregateId: projectId, aggregateRevision: project.revision, type: failure.submissionUnknown ? "edit.proposal.submission_unknown" : "edit.proposal.failed", payload: { jobId, state: nextJobState, providerKey, message: failure.message }, actorType: "system", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: new Date().toISOString() }],
+        };
+      });
+      return { ok: false, status: targetStatus === "pending" ? "pending" : "failed", receipt, jobId, provider: { providerKey, modelKey }, errorCode: failure.submissionUnknown ? "SUBMISSION_UNKNOWN" : failure.code, message: failure.submissionUnknown ? "Provider 请求提交状态未知；已停止自动重试，请先核对用量后再决定是否重新发起。" : failure.message };
+    };
+    const leaseToken = workspace.catalog.claimJob(jobId, "agent-main", new Date(), 120_000);
+    if (!leaseToken || !workspace.catalog.heartbeatJob(jobId, "agent-main", leaseToken, new Date(), 120_000)) return finishFailure({ code: "LEASE_UNAVAILABLE", message: "AI 提案任务无法取得本地租约", submissionUnknown: false, retryable: true }, "queued", undefined, true);
+    let result;
+    try {
+      const runtime = await getDesktopRuntime();
+      result = await getEditAgent(runtime).proposeEdit({ projectId, script, storyboard, tasks, takesByTask, assetFacts, now: new Date().toISOString() });
+    } catch (error) {
+      return finishFailure(proposalFailure(error, providerKey), "running", leaseToken);
+    }
+    const completed = workspace.catalog.finalizeCommand(command, () => {
+      if (result.status === "ready" && result.proposal && !workspace.catalog.saveEditProposal(result.proposal)) throw new Error("剪辑提案版本保存失败");
+      if (!workspace.catalog.transitionJob(jobId, "running", "succeeded", leaseToken, { checkpoint: { providerKey: result.provider.providerKey, modelKey: result.provider.modelKey, responseHash: result.provider.responseHash, status: result.status } })) throw new Error("AI 提案任务完成状态未能持久化");
+      return {
+        receipt: { schemaVersion: 1, commandId: command.commandId, correlationId: command.correlationId, status: "accepted", target: command.target, jobIds: [jobId], eventIds: [`event-${command.correlationId}-completed`], artifactIds: [], approvalRequired: false, errorDetails: { proposalId: result.proposal?.id, missing: result.missing, provider: result.provider } },
+        events: [{ id: `event-${command.correlationId}-completed`, aggregateType: "project", aggregateId: projectId, aggregateRevision: project.revision, type: "edit.proposal.completed", payload: { jobId, proposalId: result.proposal?.id, status: result.status, provider: result.provider }, actorType: "system", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: new Date().toISOString() }],
+      };
+    });
+    return { ok: true, ...result, receipt: completed, jobId, project: { id: project.id, title: project.title } };
   } catch (error) {
     return { ok: false, errorCode: "edit_proposal_failed", message: error instanceof Error ? error.message : "AI 剪辑提案生成失败" };
   }

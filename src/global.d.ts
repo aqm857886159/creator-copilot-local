@@ -177,7 +177,9 @@ interface EditProposalResult {
   ok: boolean;
   errorCode?: string;
   message?: string;
-  status?: "ready" | "needs_material";
+  status?: "ready" | "needs_material" | "pending" | "failed";
+  receipt?: { schemaVersion: 1; commandId: string; correlationId: string; status: "accepted" | "rejected" | "pending" | "duplicate" | "conflict"; target: { type: string; id: string; expectedRevision?: number }; jobIds: string[]; eventIds: string[]; artifactIds: string[]; approvalRequired: boolean; errorCode?: string; errorDetails?: Record<string, unknown> };
+  jobId?: string;
   project?: { id: string; title: string };
   missing?: Array<{ shotId: string; taskId?: string; reason: string; instruction: string }>;
   proposal?: EditProposal;
