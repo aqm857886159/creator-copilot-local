@@ -1,7 +1,7 @@
 # V0-00 Scaffold → Desktop Workspace 基线迁移记录
 
 日期：2026-08-14  
-状态：入口迁移第一步已完成；旧根入口保留，尚未删除；`apps/desktop` 仍是兼容壳，不宣称整个代码树已经迁移
+状态：入口迁移第一步和最小 pnpm workspace 入口已完成；旧根入口保留，尚未删除；`apps/desktop` 仍是兼容壳，不宣称整个代码树已经迁移
 
 ## 1. 当前事实
 
@@ -45,6 +45,7 @@
 - [x] 新 preload 路径在真实 macOS arm64 packaged UI smoke 中完成 IPC、SQLite 和 AI 剪辑导出闭环。
 - [x] utility worker 入口切换到 `apps/desktop/analysis-worker.cjs`，旧实现仍可回滚，打包时显式 unpack。
 - [x] utility worker 兼容 Electron `parentPort` 的 MessageEvent 数据封装，并保留旧 direct-payload 测试兼容。
+- [x] `pnpm-workspace.yaml` 与 `@creator-copilot/desktop` wrapper 已提供；pnpm 命令复用已验证的 root npm 脚本，避免双重构建逻辑。
 - [ ] main/preload/utility 逻辑全部迁出旧 `electron/`。
 - [ ] root Vite/Express scaffold 完成 workspace package 化。
 - [ ] Windows x64 与 clean checkout 验证。

@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Local-first content creation copilot desktop app",
   "author": "Creator Copilot Contributors",
+  "packageManager": "pnpm@10.33.0",
   "type": "module",
   "main": "apps/desktop/main.cjs",
   "scripts": {

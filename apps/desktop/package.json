@@ -1,0 +1,15 @@
+{
+  "name": "@creator-copilot/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Desktop entry boundary for Creator Copilot Local",
+  "scripts": {
+    "dev": "npm --prefix ../.. run dev:desktop",
+    "typecheck": "npm --prefix ../.. run typecheck",
+    "test": "npm --prefix ../.. test",
+    "build": "npm --prefix ../.. run build",
+    "package": "npm --prefix ../.. run package:desktop",
+    "test:package": "npm --prefix ../.. run test:desktop:package",
+    "test:ui": "npm --prefix ../.. run test:desktop:ui"
+  }
+}

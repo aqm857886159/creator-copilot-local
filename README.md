@@ -11,6 +11,13 @@ npm install
 npm run dev:web
 ```
 
+迁移中的 workspace 入口也可使用 pnpm；当前包级命令只是兼容 wrapper，真实逻辑仍由 root scripts 负责：
+
+```bash
+pnpm --filter @creator-copilot/desktop typecheck
+pnpm --filter @creator-copilot/desktop build
+```
+
 打开 `http://127.0.0.1:4316` 可以预览 UI。Electron 壳需要先完成 Electron 二进制安装后运行：
 
 ```bash
