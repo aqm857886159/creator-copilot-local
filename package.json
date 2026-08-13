@@ -10,7 +10,7 @@
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc -b && vite build",
     "build:desktop": "npm run build",
-    "start:desktop": "electron .",
+    "start:desktop": "electron . --load-dist",
     "dev:desktop": "concurrently -k -n web,electron -c cyan,yellow \"npm:dev:web\" \"wait-on http://127.0.0.1:4316 && electron .\"",
     "start": "tsx server/index.ts",
     "test": "vitest run",
