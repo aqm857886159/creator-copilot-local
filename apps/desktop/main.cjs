@@ -12,6 +12,7 @@ let desktopRuntimePromise = null;
 let catalog = null;
 let workspaceId = null;
 const pendingTopicRadarQuotes = new Map();
+const pendingAccountMetricsQuotes = new Map();
 const activeAnalysisWorkers = new Map();
 
 async function getDesktopRuntime() {
@@ -62,6 +63,7 @@ async function initializeWorkspace(workspacePath) {
   workspaceId = nextWorkspaceId;
   selectedWorkspacePath = canonicalWorkspacePath;
   pendingTopicRadarQuotes.clear();
+  pendingAccountMetricsQuotes.clear();
   return canonicalWorkspacePath;
 }
 
@@ -423,6 +425,56 @@ ipcMain.handle("desktop:research-account", async (_event, raw) => {
     return { ok: true, report };
   } catch (error) {
     return { ok: false, errorCode: "account_research_failed", message: error instanceof Error ? error.message : "对标账号分析失败" };
+  }
+});
+
+ipcMain.handle("desktop:quote-account-metrics", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.reportId !== "string" || !Array.isArray(raw.awemeIds)) throw new Error("作品统计报价参数无效");
+    const awemeIds = [...new Set(raw.awemeIds.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
+    if (awemeIds.length < 1 || awemeIds.length > 50) throw new Error("一次最多补齐 50 条作品统计");
+    const report = workspace.catalog.getResearchReport(raw.reportId);
+    if (!report || report.workspaceId !== workspace.workspaceId) throw new Error("研究报告不存在或不属于当前工作区");
+    if (awemeIds.some((awemeId) => !report.videos.some((video) => video.awemeId === awemeId))) throw new Error("选择的作品不在当前研究报告中");
+    const runtime = await getDesktopRuntime();
+    const connector = getTikHubConnector(runtime);
+    if (typeof connector.fetchVideoStatistics !== "function") throw new Error("当前研究 Provider 不支持作品统计补齐");
+    const price = await connector.getEndpointInfo(runtime.research.ACCOUNT_METRICS_ENDPOINT);
+    const quote = runtime.research.createAccountMetricsQuote({ workspaceId: workspace.workspaceId, reportId: report.id, awemeIds, price, now: new Date().toISOString() });
+    pendingAccountMetricsQuotes.set(quote.id, { workspaceId: workspace.workspaceId, quote, used: false });
+    return { ok: true, quote };
+  } catch (error) {
+    return { ok: false, errorCode: "account_metrics_quote_failed", message: error instanceof Error ? error.message : "无法取得作品统计报价" };
+  }
+});
+
+ipcMain.handle("desktop:run-account-metrics", async (_event, rawQuoteId) => {
+  try {
+    const workspace = requireWorkspace();
+    if (typeof rawQuoteId !== "string" || !rawQuoteId.trim()) throw new Error("作品统计报价无效");
+    const pending = pendingAccountMetricsQuotes.get(rawQuoteId);
+    if (!pending || pending.workspaceId !== workspace.workspaceId) throw new Error("报价不存在、已重启失效或不属于当前工作区，请重新报价");
+    const now = new Date();
+    if (pending.used) throw new Error("报价已经使用，请重新报价");
+    if (new Date(pending.quote.expiresAt).getTime() <= now.getTime()) throw new Error("报价已过期，请重新报价");
+    pending.used = true;
+    const report = workspace.catalog.getResearchReport(pending.quote.reportId);
+    if (!report || report.workspaceId !== workspace.workspaceId) throw new Error("研究报告不存在或不属于当前工作区");
+    const runtime = await getDesktopRuntime();
+    const connector = getTikHubConnector(runtime);
+    if (typeof connector.fetchVideoStatistics !== "function") throw new Error("当前研究 Provider 不支持作品统计补齐");
+    const selectedIds = new Set(pending.quote.awemeIds);
+    const rawUpdates = await connector.fetchVideoStatistics(pending.quote.awemeIds);
+    const updates = rawUpdates.filter((update) => selectedIds.has(update.awemeId)).map((update) => ({ awemeId: update.awemeId, statistics: update.statistics, capturedAt: now.toISOString(), responseHash: update.responseHash }));
+    if (updates.length === 0) return { ok: false, errorCode: "account_metrics_no_data", report, message: "TikHub 本次没有返回可用统计；报价已消耗，不会自动重试。" };
+    const updatedReport = runtime.research.attachResearchMetrics(report, updates);
+    workspace.catalog.saveResearchReport(updatedReport);
+    const updatedIds = new Set(updates.map((update) => update.awemeId));
+    const missingAwemeIds = pending.quote.awemeIds.filter((awemeId) => !updatedIds.has(awemeId));
+    return { ok: true, report: updatedReport, updatedCount: updates.length, missingAwemeIds, message: missingAwemeIds.length > 0 ? `已补齐 ${updates.length} 条，另有 ${missingAwemeIds.length} 条未返回；不会自动重试。` : `已补齐 ${updates.length} 条作品的播放统计。` };
+  } catch (error) {
+    return { ok: false, errorCode: "account_metrics_run_failed", message: error instanceof Error ? error.message : "作品统计补齐失败" };
   }
 });
 

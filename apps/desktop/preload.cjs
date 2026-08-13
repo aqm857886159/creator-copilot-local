@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("desktop", {
   cancelAnalysis: (input) => ipcRenderer.invoke("desktop:cancel-analysis", input),
   searchAssets: (query) => ipcRenderer.invoke("desktop:search-assets", query),
   researchAccount: (input) => ipcRenderer.invoke("desktop:research-account", input),
+  quoteAccountMetrics: (input) => ipcRenderer.invoke("desktop:quote-account-metrics", input),
+  runAccountMetrics: (quoteId) => ipcRenderer.invoke("desktop:run-account-metrics", quoteId),
   downloadResearchMedia: (input) => ipcRenderer.invoke("desktop:download-research-media", input),
   analyzeResearchMedia: (input) => ipcRenderer.invoke("desktop:analyze-research-media", input),
   quoteTopicRadar: (input) => ipcRenderer.invoke("desktop:quote-topic-radar", input),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachResearchAnalysis, attachResearchMedia, attachResearchMediaPatterns, buildAccountResearchReport, createTopicRadarQuote, createTopicRadarReport, normalizeTopicRadarQuery } from "./index";
+import { ACCOUNT_METRICS_ENDPOINT, attachResearchAnalysis, attachResearchMedia, attachResearchMediaPatterns, attachResearchMetrics, buildAccountResearchReport, createAccountMetricsQuote, createTopicRadarQuote, createTopicRadarReport, normalizeTopicRadarQuery } from "./index";
 
 describe("benchmark account research", () => {
   it("builds a metadata-first evidence report with explicit coverage", async () => {
@@ -35,6 +35,11 @@ describe("benchmark account research", () => {
     const repeated = attachResearchMediaPatterns(patterned, [{ awemeId: "aweme-1", artifactIds: ["source-1"], analyzedAt: "2026-08-14T00:02:00.000Z", facts: analyzedFacts }]);
     expect(repeated.evidence.filter((evidence) => evidence.id === "evidence-media-pattern-MS4wLjABAAAAfixture-1786665720000")).toHaveLength(1);
     expect(repeated.opportunities).toHaveLength(1);
+    const metricsQuote = createAccountMetricsQuote({ workspaceId: "workspace-1", reportId: patterned.id, awemeIds: ["aweme-1"], price: { endpoint: ACCOUNT_METRICS_ENDPOINT, costUsd: 0.025, allowFreeCredit: false, allowDiscount: false, rateLimit: "10/second" }, now: "2026-08-14T00:03:00.000Z" });
+    expect(metricsQuote).toMatchObject({ batchCount: 1, costUsd: 0.025, endpoint: ACCOUNT_METRICS_ENDPOINT });
+    const withMetrics = attachResearchMetrics(patterned, [{ awemeId: "aweme-1", statistics: { play_count: 12_345, share_count: 67 }, capturedAt: "2026-08-14T00:03:00.000Z", responseHash: "sha256:metrics" }]);
+    expect(withMetrics.videos[0].statistics).toMatchObject({ play_count: 12_345, share_count: 67 });
+    expect(withMetrics.evidence.some((evidence) => evidence.type === "metric")).toBe(true);
     expect(patterned.evidence.at(-1)?.payload).toMatchObject({ totalShotCount: 1, transcriptSegmentCount: 1 });
   });
 

@@ -115,6 +115,13 @@ export type TikHubVideoDownload = {
   responseHash: string;
 };
 
+export type TikHubVideoStatistics = {
+  awemeId: string;
+  statistics: Record<string, number>;
+  requestId?: string;
+  responseHash: string;
+};
+
 export type TikHubEndpointInfo = {
   endpoint: string;
   costUsd: number;
@@ -170,6 +177,7 @@ export interface ResearchConnector {
   fetchProfile(secUserId: string): Promise<TikHubProfile>;
   fetchUserPosts(input: { secUserId: string; maxCursor?: number; count?: number; sortType?: 0 | 1 }): Promise<TikHubPage<TikHubVideoMetadata>>;
   fetchHighestQualityPlayUrl(input: { awemeId: string; shareUrl?: string; region?: string }): Promise<TikHubVideoDownload>;
+  fetchVideoStatistics?(awemeIds: string[]): Promise<TikHubVideoStatistics[]>;
 }
 
 function hashResponse(value: unknown) {
@@ -507,5 +515,31 @@ export class TikHubDouyinConnector implements ResearchConnector {
     }
     if (parsed.protocol !== "https:") throw new ProviderRequestError(ProviderErrorSchema.parse({ schemaVersion: 1, providerKey: this.providerKey, category: "provider", code: "VIDEO_URL_UNSAFE", message: "TikHub 返回的视频地址不是 HTTPS", retryable: false, requestId: responseRequestId(result.body, result.response) }));
     return { awemeId, url: parsed.toString(), requestId: responseRequestId(result.body, result.response), responseHash: hashResponse(result.body) } satisfies TikHubVideoDownload;
+  }
+
+  async fetchVideoStatistics(awemeIds: string[]) {
+    const ids = z.array(id).min(1).max(50).parse(awemeIds);
+    const result = await this.get("/api/v1/douyin/app/v3/fetch_multi_video_statistics", { aweme_ids: ids.join(",") });
+    const data = dataPayload(result.body);
+    const candidates: Array<{ awemeId?: string; statistics?: Record<string, unknown> }> = [];
+    const addCandidate = (awemeId: unknown, value: unknown) => {
+      if (typeof value !== "object" || !value) return;
+      const raw = value as Record<string, unknown>;
+      const statistics = typeof raw.statistics === "object" && raw.statistics ? raw.statistics as Record<string, unknown> : raw;
+      const normalizedId = typeof awemeId === "string" ? awemeId : firstString(raw, ["aweme_id", "awemeId", "item_id", "id"]);
+      if (normalizedId) candidates.push({ awemeId: normalizedId, statistics });
+    };
+    const list = Array.isArray(data) ? data : Array.isArray(data.items) ? data.items : Array.isArray(data.statistics) ? data.statistics : undefined;
+    if (list) for (const item of list) addCandidate(undefined, item);
+    else if (typeof data === "object" && data) for (const [key, value] of Object.entries(data)) addCandidate(key, value);
+    const allowedKeys = new Set(["digg_count", "download_count", "play_count", "share_count"]);
+    const output: TikHubVideoStatistics[] = [];
+    for (const candidate of candidates) {
+      if (!candidate.awemeId || !ids.includes(candidate.awemeId) || !candidate.statistics) continue;
+      const statistics: Record<string, number> = {};
+      for (const [key, value] of Object.entries(candidate.statistics)) if (allowedKeys.has(key) && typeof value === "number" && Number.isFinite(value) && value >= 0) statistics[key] = value;
+      if (Object.keys(statistics).length > 0) output.push({ awemeId: candidate.awemeId, statistics, requestId: responseRequestId(result.body, result.response), responseHash: hashResponse(result.body) });
+    }
+    return output;
   }
 }

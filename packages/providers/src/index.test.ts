@@ -119,4 +119,23 @@ describe("provider adapters", () => {
     const unsafe = new TikHubDouyinConnector({ apiKey: "secret-test-key", baseUrl: "https://api.example.test", fetcher: async () => jsonResponse({ data: { original_video_url: "http://cdn.example/video.mp4" } }) });
     await expect(unsafe.fetchHighestQualityPlayUrl({ awemeId: "aweme-1" })).rejects.toSatisfy((error: unknown) => error instanceof ProviderRequestError && error.normalized.code === "VIDEO_URL_UNSAFE");
   });
+
+  it("normalizes the bounded batch video statistics endpoint", async () => {
+    const urls: string[] = [];
+    const connector = new TikHubDouyinConnector({ apiKey: "secret-test-key", baseUrl: "https://api.example.test", fetcher: async (input) => {
+      urls.push(String(input));
+      return jsonResponse({ data: { items: [
+        { aweme_id: "aweme-1", statistics: { digg_count: 12, play_count: 345, download_count: 4, share_count: 5, ignored: "x" } },
+        { aweme_id: "aweme-2", digg_count: 6, play_count: 78 },
+      ] } });
+    } });
+    await expect(connector.fetchVideoStatistics?.(["aweme-1", "aweme-2"])).resolves.toMatchObject([
+      { awemeId: "aweme-1", statistics: { digg_count: 12, play_count: 345, download_count: 4, share_count: 5 } },
+      { awemeId: "aweme-2", statistics: { digg_count: 6, play_count: 78 } },
+    ]);
+    expect(urls[0]).toContain("fetch_multi_video_statistics");
+    expect(urls[0]).toContain("aweme_ids=aweme-1%2Caweme-2");
+    await expect(connector.fetchVideoStatistics?.([])).rejects.toThrow();
+    await expect(connector.fetchVideoStatistics?.(Array.from({ length: 51 }, (_, index) => `aweme-${index}`))).rejects.toThrow();
+  });
 });

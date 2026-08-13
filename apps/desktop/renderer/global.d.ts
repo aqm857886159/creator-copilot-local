@@ -67,6 +67,36 @@ interface AccountResearchResult {
   };
 }
 
+interface AccountMetricsQuoteView {
+  schemaVersion: 1;
+  id: string;
+  workspaceId: string;
+  reportId: string;
+  awemeIds: string[];
+  endpoint: string;
+  batchCount: number;
+  costUsd: number;
+  rateLimit?: string;
+  quotedAt: string;
+  expiresAt: string;
+}
+
+interface AccountMetricsQuoteResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  quote?: AccountMetricsQuoteView;
+}
+
+interface AccountMetricsRunResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  report?: AccountResearchResult["report"];
+  updatedCount?: number;
+  missingAwemeIds?: string[];
+}
+
 interface DownloadResearchMediaResult {
   ok: boolean;
   errorCode?: string;
@@ -325,6 +355,8 @@ interface Window {
     cancelAnalysis: (input: { artifactId: string }) => Promise<CancelAnalysisResult>;
     searchAssets: (query: string) => Promise<AssetSearchResult>;
     researchAccount: (input: { sourceInput: string; count?: number }) => Promise<AccountResearchResult>;
+    quoteAccountMetrics: (input: { reportId: string; awemeIds: string[] }) => Promise<AccountMetricsQuoteResult>;
+    runAccountMetrics: (quoteId: string) => Promise<AccountMetricsRunResult>;
     downloadResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<DownloadResearchMediaResult>;
     analyzeResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<AnalyzeResearchMediaResult>;
     quoteTopicRadar: (input: TopicRadarQueryView) => Promise<TopicRadarQuoteResult>;

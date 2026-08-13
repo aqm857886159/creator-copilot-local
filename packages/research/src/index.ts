@@ -1,9 +1,10 @@
 import { z } from "zod";
-import type { ResearchConnector, TikHubProfile, TikHubVideoMetadata } from "../../providers/src/index.js";
+import type { ResearchConnector, TikHubEndpointInfo, TikHubProfile, TikHubVideoMetadata } from "../../providers/src/index.js";
 
 export * from "./topic-radar.js";
 
 const id = z.string().min(1);
+export const ACCOUNT_METRICS_ENDPOINT = "/api/v1/douyin/app/v3/fetch_multi_video_statistics";
 
 export const BenchmarkVideoSchema = z.object({
   schemaVersion: z.literal(1),
@@ -52,6 +53,21 @@ export const AccountResearchOpportunitySchema = z.object({
   status: z.literal("candidate"),
 }).strict();
 export type AccountResearchOpportunity = z.infer<typeof AccountResearchOpportunitySchema>;
+
+export const AccountMetricsQuoteSchema = z.object({
+  schemaVersion: z.literal(1),
+  id,
+  workspaceId: id,
+  reportId: id,
+  awemeIds: z.array(id).min(1).max(50),
+  endpoint: z.literal(ACCOUNT_METRICS_ENDPOINT),
+  batchCount: z.number().int().positive(),
+  costUsd: z.number().nonnegative(),
+  rateLimit: z.string().optional(),
+  quotedAt: z.string().datetime({ offset: true }),
+  expiresAt: z.string().datetime({ offset: true }),
+}).strict();
+export type AccountMetricsQuote = z.infer<typeof AccountMetricsQuoteSchema>;
 
 export const ResearchEvidenceSchema = z.object({
   schemaVersion: z.literal(1),
@@ -102,6 +118,21 @@ export type ResearchMediaFactSummary = {
   facts: Array<{ id: string; artifactId: string; kind: "transcript" | "ocr" | "shot" | "caption" | "label"; startMs: number; endMs: number; text: string; labels: string[]; contentHash: string }>;
   analyzedAt: string;
 };
+
+export type ResearchMetricUpdate = {
+  awemeId: string;
+  statistics: Record<string, number>;
+  capturedAt: string;
+  responseHash: string;
+};
+
+export function createAccountMetricsQuote(input: { workspaceId: string; reportId: string; awemeIds: string[]; price: TikHubEndpointInfo; now?: string; ttlMs?: number }) {
+  const awemeIds = [...new Set(input.awemeIds.map((value) => id.parse(value)))];
+  if (awemeIds.length < 1 || awemeIds.length > 50) throw new Error("一次最多补齐 50 条作品统计");
+  const quotedAt = input.now ?? new Date().toISOString();
+  const batchCount = Math.ceil(awemeIds.length / 50);
+  return AccountMetricsQuoteSchema.parse({ schemaVersion: 1, id: `account-metrics-quote-${Date.parse(quotedAt)}-${awemeIds.length}`, workspaceId: input.workspaceId, reportId: input.reportId, awemeIds, endpoint: ACCOUNT_METRICS_ENDPOINT, batchCount, costUsd: Number((input.price.costUsd * batchCount).toFixed(6)), rateLimit: input.price.rateLimit, quotedAt, expiresAt: new Date(new Date(quotedAt).getTime() + (input.ttlMs ?? 10 * 60_000)).toISOString() });
+}
 
 type ResearchTimelineFact = ResearchMediaFactSummary["facts"][number];
 
@@ -220,6 +251,22 @@ export function attachResearchAnalysis(report: AccountResearchReport, updates: R
   const mediaAnalyzed = videos.filter((video) => video.mediaAnalysisStatus === "completed").length;
   const mediaPartiallyAnalyzed = videos.filter((video) => video.mediaAnalysisStatus === "partial").length;
   return AccountResearchReportSchema.parse({ ...report, videos, evidence: [...evidence.values()], coverage: { ...report.coverage, mediaAnalyzed, mediaPartiallyAnalyzed, note: `已完成 ${mediaAnalyzed} 条，部分完成 ${mediaPartiallyAnalyzed} 条；ASR/OCR 未配置时会保留已完成的镜头事实。` }, findings: [{ id: `finding-analysis-${report.secUserId}`, kind: "needs_media_analysis", title: mediaPartiallyAnalyzed > 0 ? "镜头事实已就绪，仍有分析缺口" : "媒体拆解已完成", detail: mediaPartiallyAnalyzed > 0 ? "镜头切点已写入素材库；请配置中文 ASR/OCR 后补齐文案和画面文字。" : "本地媒体事实已写入素材库，可用于 AI 剪辑提案和账号模式分析。", evidenceIds: videos.flatMap((video) => video.evidenceIds) }] });
+}
+
+export function attachResearchMetrics(report: AccountResearchReport, updates: ResearchMetricUpdate[]) {
+  const updateByAwemeId = new Map(updates.map((update) => [update.awemeId, update]));
+  const evidenceById = new Map(report.evidence.map((item) => [item.id, item]));
+  const videos = report.videos.map((video) => {
+    const update = updateByAwemeId.get(video.awemeId);
+    if (!update) return video;
+    const evidenceId = `evidence-metric-${video.awemeId}-${update.capturedAt.replace(/[^0-9]/g, "")}`;
+    evidenceById.set(evidenceId, ResearchEvidenceSchema.parse({ schemaVersion: 1, id: evidenceId, type: "metric", sourceId: video.awemeId, label: `作品 ${video.awemeId} 播放统计`, payload: { statistics: update.statistics, responseHash: update.responseHash, capturedAt: update.capturedAt }, capturedAt: update.capturedAt }));
+    return BenchmarkVideoSchema.parse({ ...video, statistics: { ...video.statistics, ...update.statistics }, evidenceIds: [...new Set([...video.evidenceIds, evidenceId])] });
+  });
+  const updatedCount = updates.filter((update) => report.videos.some((video) => video.awemeId === update.awemeId)).length;
+  const metricFinding = updatedCount > 0 ? { id: `finding-metrics-${report.secUserId}`, kind: "metadata_pattern" as const, title: `已补齐 ${updatedCount} 条作品的播放统计`, detail: "播放、点赞、下载和分享数据来自 TikHub 单独统计接口；每条数据均保留抓取时间和响应 hash，可与本地拆解事实对照。", evidenceIds: videos.flatMap((video) => video.evidenceIds.filter((evidenceId) => evidenceId.startsWith("evidence-metric-"))) } : undefined;
+  const findings = [ ...(metricFinding ? [metricFinding] : []), ...report.findings.filter((finding) => finding.id !== `finding-metrics-${report.secUserId}`) ];
+  return AccountResearchReportSchema.parse({ ...report, videos, findings, evidence: [...evidenceById.values()] });
 }
 
 /**
