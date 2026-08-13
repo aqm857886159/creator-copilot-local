@@ -7,6 +7,7 @@ import {
   assertJobTransition,
   canTransitionJob,
   isSafeWorkspaceRelativePath,
+  stableStringify,
 } from "./index";
 
 const baseCommand = {
@@ -50,7 +51,10 @@ describe("versioned command contracts", () => {
     await expect(registry.execute(baseCommand)).resolves.toMatchObject({ status: "accepted" });
     await expect(registry.execute(baseCommand)).resolves.toMatchObject({ status: "duplicate" });
     await expect(registry.execute({ ...baseCommand, input: { title: "另一个项目" } })).rejects.toThrow("幂等键");
-    expect(calls).toBe(1);
+    await expect(registry.execute({ ...baseCommand, actor: { type: "agent", id: "agent-1" } })).rejects.toThrow("幂等键");
+    await expect(registry.execute({ ...baseCommand, idempotencyKey: "idem-target-mismatch", target: { type: "project", id: "project-1" } })).rejects.toThrow("commandId/correlationId");
+    expect(calls).toBe(2);
+    expect(stableStringify({ b: 1, a: 2 })).toBe(stableStringify({ a: 2, b: 1 }));
   });
 });
 
@@ -64,6 +68,8 @@ describe("job and artifact boundaries", () => {
   it("rejects absolute and parent-traversing artifact paths", () => {
     expect(isSafeWorkspaceRelativePath("derived/proxy.mp4")).toBe(true);
     expect(isSafeWorkspaceRelativePath("../outside.mp4")).toBe(false);
+    expect(isSafeWorkspaceRelativePath("\\\\server\\share\\outside.mp4")).toBe(false);
+    expect(isSafeWorkspaceRelativePath("\\outside.mp4")).toBe(false);
     expect(ArtifactManifestSchema.safeParse({
       schemaVersion: 1,
       artifactId: "artifact-1",
@@ -76,5 +82,12 @@ describe("job and artifact boundaries", () => {
       parentArtifactIds: [],
       validationStatus: "valid",
     }).success).toBe(false);
+  });
+
+  it("rejects non-JSON-safe command input", () => {
+    expect(() => stableStringify({ value: undefined })).toThrow("undefined");
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(() => stableStringify(cyclic)).toThrow("循环引用");
   });
 });
