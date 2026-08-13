@@ -51,9 +51,10 @@ interface AccountResearchResult {
     sourceInput: string;
     secUserId: string;
     profile: { nickname?: string; signature?: string; followerCount?: number; followingCount?: number; awemeCount?: number };
-    videos: Array<{ awemeId: string; description?: string; createTime?: string; shareUrl?: string; durationMs?: number; statistics: Record<string, number>; mediaAnalysisStatus: string; evidenceIds: string[]; artifactIds: string[] }>;
+    videos: Array<{ awemeId: string; description?: string; createTime?: string; shareUrl?: string; durationMs?: number; statistics: Record<string, number>; mediaAnalysisStatus: string; evidenceIds: string[]; analysisFactIds: string[]; artifactIds: string[] }>;
     coverage: { requested: number; received: number; metadataAnalyzed: number; mediaAnalyzed: number; missingMedia: number; hasMore: boolean; note: string };
     findings: Array<{ id: string; kind: string; title: string; detail: string; evidenceIds: string[] }>;
+    evidence: Array<{ id: string; type: string; sourceId: string; label: string; payload: Record<string, unknown>; capturedAt: string }>;
   };
 }
 

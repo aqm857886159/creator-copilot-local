@@ -1,7 +1,7 @@
 # V7 选题雷达垂直切片计划
 
 日期：2026-08-14
-状态：本切片已完成；真实付费联调仍按小额、显式环境变量和本文件边界执行
+状态：本切片已完成；真实付费联调仍按小额、显式环境变量和本文件边界执行；账号研究页已补齐“结论—证据—本地事实数量”的可见回溯
 
 ## 用户结果
 
@@ -13,7 +13,7 @@
 - `packages/storage`：schema v8、报告持久化、计费 Job 恢复状态；
 - Electron main/preload：报价、确认执行、历史读取 IPC；
 - renderer：`TopicRadarWorkbench` 的配置、报价确认、结果、部分失败和历史状态；
-- mock/provider/domain/storage/UI 用户旅途验证。
+- mock/provider/domain/storage/UI 用户旅途验证；账号研究结果页按每条 finding 展示证据标签和可读摘要，每个已分析作品显示已回挂的时间码事实数量。
 
 ## 不在本次范围
 
@@ -46,7 +46,8 @@
 3. paid Job 在发请求前记录 submission marker，崩溃恢复不回到自动队列；
 4. 成功、部分失败、全失败和 submission_unknown 都能持久化报告；
 5. 新项目 → 选题库 → 配置 → 报价 → 确认 → 看到候选与证据的界面旅途可运行；
-6. typecheck/test/build、Electron CJS syntax、macOS packaged smoke 通过（当前仓库测试总数以命令输出为准，不能替代真实 Provider 计费状态验证）。
+6. typecheck/test/build、Electron CJS syntax、macOS packaged smoke 通过（当前仓库测试总数以命令输出为准，不能替代真实 Provider 计费状态验证）；
+7. 对标账号页的每条结论都能回溯到本地报告 evidence；媒体模式摘要明确作品数、镜头数、ASR/OCR 数量，并标注“样本描述而非因果结论”。
 
 ## 回滚
 

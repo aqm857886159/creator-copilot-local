@@ -1328,9 +1328,9 @@ app.whenReady().then(() => {
           if (takeButtons.length < 3) throw new Error("没有生成三条 Take");
           for (const button of takeButtons.slice(0, 3)) button.click();
           await wait(500);
-          clickText("进入 AI 粗剪");
+          clickText("进入 AI 剪辑");
           await wait(350);
-          clickText("生成 AI 提案");
+          clickText("生成 AI 剪辑提案");
           await wait(1_000);
           if (!document.querySelector(".proposal-list")) throw new Error("AI 提案没有出现在页面；body=" + (document.body?.innerText ?? "").slice(-1200));
           clickText("确认并导出");

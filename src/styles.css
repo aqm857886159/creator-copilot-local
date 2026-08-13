@@ -201,7 +201,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .radar-query label { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 9px; border: 1px solid #ded7ca; border-radius: 8px; background: #faf7f0; color: #8f877b; font-size: 10px; white-space: nowrap; }
 .radar-query select { border: 0; outline: 0; background: transparent; color: #5e574e; font-size: 11px; }
 .radar-safety { display: flex; align-items: center; gap: 7px; color: #6e8368; font-size: 10px; }
-.radar-profile, .radar-coverage, .radar-video-section, .radar-finding { padding: 19px; border: 1px solid #e0d9ce; border-radius: 11px; background: rgba(250, 248, 243, .72); }
+.radar-profile, .radar-coverage, .radar-video-section, .radar-findings, .radar-finding { padding: 19px; border: 1px solid #e0d9ce; border-radius: 11px; background: rgba(250, 248, 243, .72); }
 .radar-profile { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .radar-profile-main { min-width: 0; }
 .radar-profile h2 { margin: 8px 0 5px; color: #4b453c; font-family: Georgia, "Songti SC", serif; font-size: 27px; font-weight: 500; }
@@ -228,9 +228,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .radar-video-card h4 { display: -webkit-box; min-height: 43px; margin: 14px 0 7px; overflow: hidden; color: #514b42; font-size: 12px; font-weight: 550; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .radar-video-card > p { margin: 0; color: #8e867a; font-size: 10px; }
 .radar-video-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid #eee8df; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.radar-video-facts { margin-top: 5px !important; color: #66825e !important; }
+.radar-findings { display: flex; flex-direction: column; gap: 12px; }
+.radar-findings > .edit-section-heading { margin-bottom: 1px; }
 .radar-finding { background: #f0e9de; border-color: #e1d6c5; }
 .radar-finding h3 { color: #5d503f; }
 .radar-finding p { margin: 6px 0 0; color: #877965; font-size: 11px; line-height: 1.6; }
+.radar-evidence-list { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; }
+.radar-evidence { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding-top: 8px; border-top: 1px solid #e1d6c5; color: #877965; font-size: 10px; line-height: 1.45; }
+.radar-evidence strong { color: #6a5a48; font-weight: 650; }
+.radar-evidence span { text-align: right; }
 .topic-radar-workbench { display: flex; flex-direction: column; gap: 18px; }
 .topic-radar-empty { min-height: 620px; align-items: center; justify-content: center; text-align: center; }
 .topic-radar-empty h1 { margin: 12px 0 0; color: #4d473e; font-family: Georgia, "Songti SC", serif; font-size: 36px; font-weight: 500; letter-spacing: -.035em; }
