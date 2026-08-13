@@ -185,6 +185,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .asset-file-main strong { display: block; overflow: hidden; color: #4d483f; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .asset-file-main p, .asset-fact-row p { margin: 4px 0 0; color: #9b9387; font-size: 10px; }
 .asset-hash { color: #aaa095; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; white-space: nowrap; }
+.asset-analyze-button { flex: 0 0 auto; white-space: nowrap; }
 .asset-fact-row { align-items: flex-start; }
 .fact-time { flex: 0 0 47px; color: #698261; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; line-height: 1.45; }
 .asset-fact-row strong { color: #514c44; font-size: 12px; font-weight: 550; line-height: 1.5; }

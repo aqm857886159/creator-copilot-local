@@ -1,7 +1,7 @@
 # V6 本地分析事实与素材检索
 
 日期：2026-08-14  
-状态：分析合同、whisper.cpp adapter、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5 和素材库页面已完成；真实中文 whisper 权重与 OCR 质量仍待单独安装/评测验收
+状态：分析合同、whisper.cpp adapter、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作和本地分析 Job 已完成；真实中文 whisper 权重与 OCR 质量仍待单独安装/评测验收
 
 ## 1. 选型决策
 
@@ -38,6 +38,8 @@ SQLite schema v5 增加：
 选择工作区 → 导入视频 → 原素材/代理/缩略图进入 catalog → 文件名/类型/分析事实搜索
 ```
 
+原始视频行上的“分析素材”动作会在 main 中重新校验 workspace-relative 路径和内容 hash，创建或复用 `media.analysis` Job，执行镜头检测/ASR/OCR worker，并把 `AnalysisFact` 写入同一工作区的 FTS5 索引。已有 succeeded Job 只读复用事实；failed、timed_out 和 needs_attention 通过 lease-safe 状态迁移后才能重试。
+
 没有分析事实时显示明确空状态，不显示虚假标签。
 
 ## 3. 测试与证据
@@ -59,6 +61,7 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 - schema v5 迁移；
 - FTS5 写入、查询、kind 过滤、重启后查询；
 - 导入产物进入 catalog，素材库可读取。
+- 素材库按原始 artifact 创建/复用分析 Job，并支持按 artifactId 限定事实检索。
 
 本机真实 smoke（2026-08-14）：
 
@@ -79,5 +82,5 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 1. 选定并记录一个中文 whisper.cpp 模型权重（大小、许可证、hash、内存峰值、CER/时间码 fixture）；
 2. 为 Apple Vision 增加真实中文字幕/花字 fixture，评估识别率、时间覆盖和抽帧成本；Windows/Linux 再接 RapidOCR/PaddleOCR adapter，保持同一 `OcrCue/AnalysisFact` 合同；
 3. 在粗切事实之上再评估 PySceneDetect/TransNetV2 精修，输出同一 `ShotFact`；
-4. 导入 Job 统一调度 ASR/OCR/shot，单条失败进入 `needs_attention`，不阻塞其他素材；
+4. 将分析 Job 的失败、磁盘满、worker 崩溃和取消路径补成桌面 E2E；单条失败进入 `needs_attention`，不阻塞其他素材；
 5. 用真实时间码事实增强 AI 剪辑提案和素材匹配证据。

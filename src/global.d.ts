@@ -27,6 +27,19 @@ interface AssetSearchResult {
   facts?: Array<{ id: string; artifactId: string; kind: string; startMs: number; endMs: number; text: string; labels: string[]; providerKey: string }>;
 }
 
+interface AnalyzeAssetResult {
+  ok: boolean;
+  status?: "succeeded" | "running" | "failed" | "needs_attention" | "cancelled";
+  errorCode?: string;
+  message?: string;
+  reused?: boolean;
+  summary?: string;
+  asrStatus?: string;
+  ocrStatus?: string;
+  job?: { id: string; state: string; attempt: number; artifactIds: string[] };
+  facts?: Array<{ id: string; artifactId: string; kind: string; startMs: number; endMs: number; text: string; labels: string[]; providerKey: string }>;
+}
+
 interface AccountResearchResult {
   ok: boolean;
   errorCode?: string;
@@ -272,6 +285,7 @@ interface Window {
     getInfo: () => Promise<DesktopInfo>;
     chooseWorkspace: () => Promise<ChooseWorkspaceResult>;
     importMedia: () => Promise<ImportMediaResult>;
+    analyzeAsset: (input: { artifactId: string }) => Promise<AnalyzeAssetResult>;
     searchAssets: (query: string) => Promise<AssetSearchResult>;
     researchAccount: (input: { sourceInput: string; count?: number }) => Promise<AccountResearchResult>;
     downloadResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<DownloadResearchMediaResult>;

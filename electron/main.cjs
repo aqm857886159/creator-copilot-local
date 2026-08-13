@@ -166,6 +166,54 @@ function runAnalysisWorker(payload) {
   });
 }
 
+async function analyzeLocalArtifact({ workspace, runtime, artifact }) {
+  const inputHash = `sha256:${createHash("sha256").update(JSON.stringify({ artifactId: artifact.artifactId, contentHash: artifact.contentHash, pipeline: "analysis-v1" })).digest("hex")}`;
+  const jobId = `analysis-${artifact.artifactId}`;
+  const now = new Date();
+  workspace.catalog.recoverExpiredLeases(now);
+  let job = workspace.catalog.getJob(jobId);
+  if (!job) {
+    const timestamp = now.toISOString();
+    workspace.catalog.insertJob({ schemaVersion: 1, id: jobId, kind: "media.analysis", inputHash, state: "queued", attempt: 0, idempotencyKey: `analysis-${artifact.artifactId}-${artifact.contentHash}`, idempotencyScope: workspace.workspaceId, providerKey: "local", artifactIds: [artifact.artifactId], correlationId: `analysis-run-${randomUUID()}`, createdAt: timestamp, updatedAt: timestamp });
+    job = workspace.catalog.getJob(jobId);
+  } else if (job.state === "succeeded") {
+    return { ok: true, status: "succeeded", reused: true, job, facts: workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, limit: 100 }) };
+  } else if (["claimed", "running"].includes(job.state)) {
+    return { ok: false, status: "running", job, message: "这段素材正在分析，请等待当前任务完成。" };
+  } else if (["failed", "timed_out"].includes(job.state)) {
+    workspace.catalog.transitionJob(job.id, job.state, "retry_wait", undefined, { retryAfter: now.toISOString(), lastError: undefined });
+    job = workspace.catalog.getJob(jobId);
+  } else if (job.state === "needs_attention") {
+    workspace.catalog.transitionJob(job.id, job.state, "queued", undefined, { lastError: undefined });
+    job = workspace.catalog.getJob(jobId);
+  } else if (job.state === "cancelled") {
+    return { ok: false, status: "cancelled", job, message: "这段素材的分析任务已取消，请重新导入素材后再试。" };
+  }
+  if (!job) throw new Error(`分析任务创建失败：${artifact.artifactId}`);
+  const leaseToken = workspace.catalog.claimJob(job.id, "analysis-main", now, 120_000);
+  if (!leaseToken) return { ok: false, status: "running", job: workspace.catalog.getJob(job.id), message: "分析任务正在运行或暂时无法取得租约。" };
+  if (!workspace.catalog.heartbeatJob(job.id, "analysis-main", leaseToken, new Date(), 120_000)) return { ok: false, status: "needs_attention", job: workspace.catalog.getJob(job.id), message: "分析任务租约已失效，请稍后重试。" };
+  try {
+    const absolutePath = path.resolve(workspace.workspacePath, artifact.relativePath);
+    const root = realpathSync(workspace.workspacePath);
+    if (!existsSync(absolutePath)) throw new Error("本地素材文件不存在");
+    const canonicalPath = realpathSync(absolutePath);
+    if (canonicalPath !== root && !canonicalPath.startsWith(`${root}${path.sep}`)) throw new Error("分析素材路径越过工作区");
+    const probe = await new runtime.media.FfmpegToolchain().probe(canonicalPath);
+    const durationMs = probe.durationMs;
+    if (!durationMs || durationMs <= 0) throw new Error("素材没有可用时长");
+    const createdAt = new Date().toISOString();
+    const workerResult = await runAnalysisWorker({ sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, whisperModelPath: process.env.WHISPER_MODEL_PATH, whisperBinaryPath: process.env.WHISPER_BINARY_PATH, visionScriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(process.cwd(), "scripts", "apple-vision-ocr.swift"), visionBinaryPath: process.env.APPLE_VISION_OCR_BINARY, visionSampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) });
+    workspace.catalog.saveAnalysisFacts(workerResult.facts);
+    if (!workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: workerResult.shotCount, factIds: workerResult.facts.map((fact) => fact.id), asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus } })) throw new Error("分析任务完成状态未能持久化");
+    return { ok: true, status: "succeeded", reused: false, job: workspace.catalog.getJob(job.id), facts: workerResult.facts, summary: workerResult.summary, asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "本地媒体分析失败";
+    const transitioned = workspace.catalog.transitionJob(job.id, "running", "failed", leaseToken, { lastError: { code: "MEDIA_ANALYSIS_FAILED", message, retryable: true } });
+    return { ok: false, status: transitioned ? "failed" : "needs_attention", job: workspace.catalog.getJob(job.id), message };
+  }
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440,
@@ -236,6 +284,20 @@ ipcMain.handle("desktop:import-media", async () => {
     };
   } catch (error) {
     return { ok: false, errorCode: "media_import_failed", message: error instanceof Error ? error.message : "媒体导入失败" };
+  }
+});
+
+ipcMain.handle("desktop:analyze-asset", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.artifactId !== "string" || !raw.artifactId.trim()) throw new Error("分析素材参数无效");
+    const artifact = workspace.catalog.getArtifact(raw.artifactId.trim());
+    if (!artifact || artifact.workspaceId !== workspace.workspaceId) throw new Error("素材不存在或不属于当前工作区");
+    if (!artifact.mimeType.startsWith("video/")) throw new Error("当前本地分析只支持视频素材");
+    const runtime = await getDesktopRuntime();
+    return await analyzeLocalArtifact({ workspace, runtime, artifact });
+  } catch (error) {
+    return { ok: false, status: "failed", errorCode: "asset_analysis_failed", message: error instanceof Error ? error.message : "本地素材分析失败" };
   }
 });
 

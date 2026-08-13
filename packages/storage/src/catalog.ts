@@ -735,7 +735,7 @@ export class SqliteCatalog {
     return AnalysisFactSchema.parse({ schemaVersion: 1, id: row.id, workspaceId: row.workspaceId, artifactId: row.artifactId, kind: row.kind, startMs: row.startMs, endMs: row.endMs, text: row.text, labels: parseJson<string[]>(row.labelsJson, "analysis labels"), providerKey: row.providerKey, modelKey: row.modelKey ?? undefined, contentHash: row.contentHash, createdAt: row.createdAt });
   }
 
-  searchAnalysisFacts(input: { workspaceId: string; query?: string; kind?: AnalysisFact["kind"]; limit?: number }) {
+  searchAnalysisFacts(input: { workspaceId: string; artifactId?: string; query?: string; kind?: AnalysisFact["kind"]; limit?: number }) {
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
     const normalizedQuery = input.query?.trim() ?? "";
     const rows = normalizedQuery
@@ -744,7 +744,7 @@ export class SqliteCatalog {
     const results: AnalysisFact[] = [];
     for (const row of rows) {
       const fact = this.getAnalysisFact(row.factId);
-      if (!fact || fact.workspaceId !== input.workspaceId || (input.kind && fact.kind !== input.kind)) continue;
+      if (!fact || fact.workspaceId !== input.workspaceId || (input.artifactId && fact.artifactId !== input.artifactId) || (input.kind && fact.kind !== input.kind)) continue;
       if (!results.some((candidate) => candidate.id === fact.id)) results.push(fact);
       if (results.length >= limit) break;
     }
@@ -753,7 +753,7 @@ export class SqliteCatalog {
       const fallbackRows = this.db.prepare("SELECT id AS factId FROM media_analysis_facts WHERE workspace_id = ? AND text LIKE ? ESCAPE '\\' ORDER BY start_ms, id LIMIT ?").all(input.workspaceId, like, limit) as Array<{ factId: string }>;
       for (const row of fallbackRows) {
         const fact = this.getAnalysisFact(row.factId);
-        if (fact && (!input.kind || fact.kind === input.kind)) results.push(fact);
+        if (fact && (!input.artifactId || fact.artifactId === input.artifactId) && (!input.kind || fact.kind === input.kind)) results.push(fact);
       }
     }
     return results;

@@ -309,6 +309,7 @@ describe("SqliteCatalog", () => {
     catalog.saveAnalysisFacts(transcriptFacts({ workspaceId: "workspace-creation", artifactId: "artifact-take-2", segments: analysisSegments, providerKey: "whisper.cpp", modelKey: "ggml-small", contentHash: "sha256:take-2", createdAt: now }));
     expect(catalog.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "素材库" })[0]?.text).toContain("素材库");
     expect(catalog.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "观点", kind: "transcript" })).toHaveLength(1);
+    expect(catalog.searchAnalysisFacts({ workspaceId: "workspace-creation", artifactId: "artifact-take-2" })).toHaveLength(2);
     const report = AccountResearchReportSchema.parse({ schemaVersion: 1, id: "research-creation", workspaceId: "workspace-creation", providerKey: "tikhub", sourceInput: "https://www.douyin.com/user/fixture", secUserId: "MS4wLjABAAAAfixture", profile: { nickname: "参考账号", followerCount: 1000 }, videos: [], coverage: { requested: 20, received: 0, metadataAnalyzed: 0, mediaAnalyzed: 0, missingMedia: 0, hasMore: false, note: "metadata only" }, findings: [], evidence: [], createdAt: now });
     catalog.saveResearchReport(report);
     expect(catalog.getResearchReport(report.id)?.profile.nickname).toBe("参考账号");
