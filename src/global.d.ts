@@ -173,7 +173,56 @@ interface PublishPackageResult {
   packageRelativePath?: string;
   manifestRelativePath?: string;
   manifest?: { title: string; platform: string; files: Array<{ kind: string; relativePath: string }>; warnings: string[] };
+  publicationId?: string;
 }
+
+interface MetricSnapshotView {
+  schemaVersion: 1;
+  id: string;
+  publicationId: string;
+  capturedAt: string;
+  window: string;
+  source: "manual" | "connector";
+  metrics: { views: number | null; likes: number | null; comments: number | null; shares: number | null; saves: number | null; completionRate: number | null; averageWatchSeconds: number | null; newFollowers: number | null };
+  notes: string;
+}
+
+interface PublicationView {
+  schemaVersion: 1;
+  id: string;
+  projectId: string;
+  packageId: string;
+  platform: string;
+  status: "draft" | "published" | "failed" | "removed";
+  publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ReviewMemoryProposalView {
+  schemaVersion: 1;
+  id: string;
+  workspaceId: string;
+  sourcePublicationIds: string[];
+  evidenceSnapshotIds: string[];
+  statement: string;
+  confidence: number;
+  appliesTo: { pillars: string[]; formats: string[]; platforms: string[] };
+  status: "candidate" | "confirmed" | "rejected" | "expired";
+  createdAt: string;
+  confirmedAt?: string;
+}
+
+interface PublicationListResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  publications?: Array<{ publication: PublicationView; snapshots: MetricSnapshotView[] }>;
+  proposals?: ReviewMemoryProposalView[];
+}
+
+interface MetricRecordResult { ok: boolean; errorCode?: string; message?: string; snapshot?: MetricSnapshotView }
+interface ReviewMemoryResult { ok: boolean; errorCode?: string; message?: string; proposal?: ReviewMemoryProposalView }
 
 interface Window {
   desktop?: {
@@ -191,6 +240,10 @@ interface Window {
     renderEdit: (input: { projectId: string; proposal: EditProposal }) => Promise<EditRenderResult>;
     exportExchange: (input: { renderRunId: string; formats: Array<"fcpxml" | "otio"> }) => Promise<ExchangeExportResult>;
     createPublishPackage: (input: { renderRunId: string; platform?: string; title: string; description?: string; hashtags?: string[]; rightsNote?: string }) => Promise<PublishPackageResult>;
+    listPublications: () => Promise<PublicationListResult>;
+    recordMetrics: (input: { publicationId: string; window?: string; metrics: Partial<MetricSnapshotView["metrics"]>; notes?: string }) => Promise<MetricRecordResult>;
+    proposeReviewMemory: (input: { publicationId: string; statement: string }) => Promise<ReviewMemoryResult>;
+    confirmReviewMemory: (proposalId: string) => Promise<ReviewMemoryResult>;
     openWorkspaceFile: (relativePath: string) => Promise<{ ok: boolean; message?: string }>;
     openExternal: (url: string) => Promise<{ ok: boolean; message?: string }>;
   };

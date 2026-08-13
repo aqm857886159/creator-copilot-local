@@ -97,4 +97,11 @@ V8-02 先做本地、不依赖平台登录的发布包：
 
 这一步只证明“从剪辑结果到可手动上传的本地交付物”可运行，不代表抖音发布 API 已接通。
 
-下一步会将 `Publication`、`MetricSnapshot`、`ReviewMemoryProposal` 写入 catalog：指标只能由用户手动录入或明确授权的 connector 写入；记忆建议必须带指标证据并经过用户确认，不能自动覆盖创作者表达偏好。
+`Publication`、`MetricSnapshot`、`ReviewMemoryProposal` 的 v1 catalog 持久化也已加入：
+
+- `publications` 记录作品、平台、发布状态和外部 ID，但不执行平台操作；
+- `metric_snapshots` 记录窗口、来源和明确的播放/互动/完播字段；
+- `review_memory_proposals` 强制关联发布记录和指标证据；只有 `candidate` 才能由用户确认成 `confirmed`；
+- catalog schema 从 v6 迁移到 v7，并覆盖重开数据库后的恢复测试。
+
+指标只能由用户手动录入或明确授权的 connector 写入；记忆建议必须带指标证据并经过用户确认，不能自动覆盖创作者表达偏好。Review 页面已经接入“选择发布记录 → 录入 24 小时指标 → 生成建议 → 确认沉淀”用户旅途；平台自动发布和自动拉取指标仍后置。

@@ -38,8 +38,9 @@ import {
 } from "../../creation/src/index.js";
 import { AnalysisFactSchema, searchQueryForFts, type AnalysisFact } from "../../analysis/src/index.js";
 import { AccountResearchReportSchema, type AccountResearchReport } from "../../research/src/index.js";
+import { MetricSnapshotSchema, PublicationSchema, ReviewMemoryProposalSchema, type MetricSnapshot, type Publication, type ReviewMemoryProposal } from "../../publishing/src/index.js";
 
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 7;
 
 const RenderRunRecordSchema = z.object({
   schemaVersion: z.literal(1),
@@ -382,6 +383,44 @@ const migrations: Record<number, string> = {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS research_reports_workspace_idx ON research_reports(workspace_id, created_at);
+  `,
+  7: `
+    CREATE TABLE IF NOT EXISTS publications (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      package_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'failed', 'removed')),
+      published_at TEXT,
+      external_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS publications_project_idx ON publications(project_id, updated_at);
+    CREATE TABLE IF NOT EXISTS metric_snapshots (
+      id TEXT PRIMARY KEY NOT NULL,
+      publication_id TEXT NOT NULL REFERENCES publications(id) ON DELETE CASCADE,
+      captured_at TEXT NOT NULL,
+      window TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('manual', 'connector')),
+      metrics_json TEXT NOT NULL,
+      source_evidence_id TEXT,
+      notes TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS metric_snapshots_publication_idx ON metric_snapshots(publication_id, captured_at);
+    CREATE TABLE IF NOT EXISTS review_memory_proposals (
+      id TEXT PRIMARY KEY NOT NULL,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      source_publication_ids_json TEXT NOT NULL,
+      evidence_snapshot_ids_json TEXT NOT NULL,
+      statement TEXT NOT NULL,
+      confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+      applies_to_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('candidate', 'confirmed', 'rejected', 'expired')),
+      created_at TEXT NOT NULL,
+      confirmed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS review_memory_workspace_idx ON review_memory_proposals(workspace_id, created_at);
   `,
 };
 
@@ -729,6 +768,102 @@ export class SqliteCatalog {
       const report = this.getResearchReport(row.id);
       return report ? [report] : [];
     });
+  }
+
+  savePublication(raw: Publication) {
+    const publication = PublicationSchema.parse(raw);
+    if (!this.getProject(publication.projectId)) throw new Error("发布记录所属项目不存在");
+    this.db.prepare(`INSERT INTO publications(id, project_id, package_id, platform, status, published_at, external_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET package_id = excluded.package_id, platform = excluded.platform, status = excluded.status, published_at = excluded.published_at, external_id = excluded.external_id, updated_at = excluded.updated_at`)
+      .run(publication.id, publication.projectId, publication.packageId, publication.platform, publication.status, publication.publishedAt ?? null, publication.externalId ?? null, publication.createdAt, publication.updatedAt);
+    return publication;
+  }
+
+  getPublication(id: string): Publication | undefined {
+    const row = this.db.prepare(`SELECT id, project_id AS projectId, package_id AS packageId, platform, status, published_at AS publishedAt, external_id AS externalId, created_at AS createdAt, updated_at AS updatedAt FROM publications WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return PublicationSchema.parse({ schemaVersion: 1, ...row, publishedAt: row.publishedAt ?? undefined, externalId: row.externalId ?? undefined });
+  }
+
+  listPublications(projectId: string) {
+    const rows = this.db.prepare("SELECT id FROM publications WHERE project_id = ? ORDER BY updated_at DESC, id").all(projectId) as Array<{ id: string }>;
+    return rows.flatMap((row) => {
+      const publication = this.getPublication(row.id);
+      return publication ? [publication] : [];
+    });
+  }
+
+  listPublicationsForWorkspace(workspaceId: string) {
+    const rows = this.db.prepare("SELECT publications.id FROM publications JOIN projects ON projects.id = publications.project_id WHERE projects.workspace_id = ? ORDER BY publications.updated_at DESC, publications.id").all(workspaceId) as Array<{ id: string }>;
+    return rows.flatMap((row) => {
+      const publication = this.getPublication(row.id);
+      return publication ? [publication] : [];
+    });
+  }
+
+  saveMetricSnapshot(raw: MetricSnapshot) {
+    const snapshot = MetricSnapshotSchema.parse(raw);
+    if (!this.getPublication(snapshot.publicationId)) throw new Error("指标对应的发布记录不存在");
+    this.db.prepare(`INSERT INTO metric_snapshots(id, publication_id, captured_at, window, source, metrics_json, source_evidence_id, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET publication_id = excluded.publication_id, captured_at = excluded.captured_at, window = excluded.window, source = excluded.source, metrics_json = excluded.metrics_json, source_evidence_id = excluded.source_evidence_id, notes = excluded.notes`)
+      .run(snapshot.id, snapshot.publicationId, snapshot.capturedAt, snapshot.window, snapshot.source, JSON.stringify(snapshot.metrics), snapshot.sourceEvidenceId ?? null, snapshot.notes);
+    return snapshot;
+  }
+
+  getMetricSnapshot(id: string): MetricSnapshot | undefined {
+    const row = this.db.prepare(`SELECT id, publication_id AS publicationId, captured_at AS capturedAt, window, source, metrics_json AS metricsJson, source_evidence_id AS sourceEvidenceId, notes FROM metric_snapshots WHERE id = ?`).get(id) as (Record<string, unknown> & { metricsJson?: string }) | undefined;
+    if (!row) return undefined;
+    return MetricSnapshotSchema.parse({ schemaVersion: 1, id: row.id, publicationId: row.publicationId, capturedAt: row.capturedAt, window: row.window, source: row.source, metrics: parseJson(row.metricsJson ?? "{}", "metric snapshot"), sourceEvidenceId: row.sourceEvidenceId ?? undefined, notes: row.notes });
+  }
+
+  listMetricSnapshots(publicationId: string) {
+    const rows = this.db.prepare("SELECT id FROM metric_snapshots WHERE publication_id = ? ORDER BY captured_at, id").all(publicationId) as Array<{ id: string }>;
+    return rows.flatMap((row) => {
+      const snapshot = this.getMetricSnapshot(row.id);
+      return snapshot ? [snapshot] : [];
+    });
+  }
+
+  saveReviewMemoryProposal(raw: ReviewMemoryProposal) {
+    const proposal = ReviewMemoryProposalSchema.parse(raw);
+    if (!this.getWorkspace(proposal.workspaceId)) throw new Error("复盘记忆建议所属工作区不存在");
+    for (const publicationId of proposal.sourcePublicationIds) {
+      const publication = this.getPublication(publicationId);
+      const project = publication ? this.getProject(publication.projectId) : undefined;
+      if (!publication || !project || project.workspaceId !== proposal.workspaceId) throw new Error("复盘记忆建议引用了跨工作区或不存在的发布记录");
+    }
+    for (const snapshotId of proposal.evidenceSnapshotIds) {
+      if (!this.getMetricSnapshot(snapshotId)) throw new Error("复盘记忆建议引用了不存在的指标证据");
+    }
+    this.db.prepare(`INSERT INTO review_memory_proposals(id, workspace_id, source_publication_ids_json, evidence_snapshot_ids_json, statement, confidence, applies_to_json, status, created_at, confirmed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET source_publication_ids_json = excluded.source_publication_ids_json, evidence_snapshot_ids_json = excluded.evidence_snapshot_ids_json, statement = excluded.statement, confidence = excluded.confidence, applies_to_json = excluded.applies_to_json, status = excluded.status, confirmed_at = excluded.confirmed_at`)
+      .run(proposal.id, proposal.workspaceId, JSON.stringify(proposal.sourcePublicationIds), JSON.stringify(proposal.evidenceSnapshotIds), proposal.statement, proposal.confidence, JSON.stringify(proposal.appliesTo), proposal.status, proposal.createdAt, proposal.confirmedAt ?? null);
+    return proposal;
+  }
+
+  getReviewMemoryProposal(id: string): ReviewMemoryProposal | undefined {
+    const row = this.db.prepare(`SELECT id, workspace_id AS workspaceId, source_publication_ids_json AS sourcePublicationIdsJson, evidence_snapshot_ids_json AS evidenceSnapshotIdsJson, statement, confidence, applies_to_json AS appliesToJson, status, created_at AS createdAt, confirmed_at AS confirmedAt FROM review_memory_proposals WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return ReviewMemoryProposalSchema.parse({ schemaVersion: 1, id: row.id, workspaceId: row.workspaceId, sourcePublicationIds: parseJson(row.sourcePublicationIdsJson as string, "review publication evidence"), evidenceSnapshotIds: parseJson(row.evidenceSnapshotIdsJson as string, "review metric evidence"), statement: row.statement, confidence: row.confidence, appliesTo: parseJson(row.appliesToJson as string, "review applicability"), status: row.status, createdAt: row.createdAt, confirmedAt: row.confirmedAt ?? undefined });
+  }
+
+  listReviewMemoryProposals(workspaceId: string) {
+    const rows = this.db.prepare("SELECT id FROM review_memory_proposals WHERE workspace_id = ? ORDER BY created_at DESC, id").all(workspaceId) as Array<{ id: string }>;
+    return rows.flatMap((row) => {
+      const proposal = this.getReviewMemoryProposal(row.id);
+      return proposal ? [proposal] : [];
+    });
+  }
+
+  confirmReviewMemoryProposal(id: string, confirmedAt = nowIso()) {
+    const current = this.getReviewMemoryProposal(id);
+    if (!current) return false;
+    if (current.status !== "candidate") throw new Error("只有待确认的复盘记忆建议才能确认");
+    const result = this.db.prepare("UPDATE review_memory_proposals SET status = 'confirmed', confirmed_at = ? WHERE id = ? AND status = 'candidate'").run(confirmedAt, id);
+    return result.changes === 1;
   }
 
   saveCaptureWorkflow(input: { project: ProjectRecord; script: Script; storyboard: Storyboard; tasks: ShootTask[]; capturePackage: CapturePackage }) {

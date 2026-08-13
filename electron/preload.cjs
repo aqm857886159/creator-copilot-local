@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld("desktop", {
   renderEdit: (input) => ipcRenderer.invoke("desktop:render-edit", input),
   exportExchange: (input) => ipcRenderer.invoke("desktop:export-exchange", input),
   createPublishPackage: (input) => ipcRenderer.invoke("desktop:create-publish-package", input),
+  listPublications: () => ipcRenderer.invoke("desktop:list-publications"),
+  recordMetrics: (input) => ipcRenderer.invoke("desktop:record-metrics", input),
+  proposeReviewMemory: (input) => ipcRenderer.invoke("desktop:propose-review-memory", input),
+  confirmReviewMemory: (proposalId) => ipcRenderer.invoke("desktop:confirm-review-memory", proposalId),
   openWorkspaceFile: (relativePath) => ipcRenderer.invoke("desktop:open-workspace-file", relativePath),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
 });

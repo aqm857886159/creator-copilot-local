@@ -22,6 +22,7 @@ import { CreationWorkbench } from "./components/creation-workbench";
 import { AiEditWorkbench } from "./components/ai-edit-workbench";
 import { AssetLibraryWorkbench } from "./components/asset-library-workbench";
 import { AccountRadarWorkbench } from "./components/account-radar-workbench";
+import { ReviewWorkbench } from "./components/review-workbench";
 
 const navItems: Array<{ id: ViewId; label: string; icon: typeof LayoutDashboard }> = [
   { id: "today", label: "今天", icon: LayoutDashboard },
@@ -156,6 +157,8 @@ export function App() {
             <AssetLibraryWorkbench workspaceReady={Boolean(workspacePath)} importMedia={importMedia} />
           ) : activeView === "radar" ? (
             <AccountRadarWorkbench workspaceReady={Boolean(workspacePath)} />
+          ) : activeView === "review" ? (
+            <ReviewWorkbench workspaceReady={Boolean(workspacePath)} />
           ) : (
             <section className="empty-view"><div className="empty-icon"><Sparkles size={24} /></div><div className="eyebrow">{activeView.toUpperCase()}</div><h1>{navItems.find((item) => item.id === activeView)?.label ?? "设置"}</h1><p>这个工作区正在从可运行的本地壳开始建设。下一阶段会接入真实项目、素材、命令和任务状态。</p><button className="primary-button" onClick={() => setActiveView("today")}>回到今天</button></section>
           )}

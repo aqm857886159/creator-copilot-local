@@ -1,7 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, shell, utilityProcess } = require("electron");
 const { createHash, randomUUID } = require("node:crypto");
 const { existsSync, mkdirSync, realpathSync } = require("node:fs");
-const { mkdir: makeDirectory, readFile, rm: removeFile, writeFile } = require("node:fs/promises");
+const { mkdir: makeDirectory, readFile, rm: removeFile, stat: statFile, writeFile } = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -560,10 +560,68 @@ ipcMain.handle("desktop:create-publish-package", async (_event, raw) => {
       sourceFiles: { video: path.resolve(workspace.workspacePath, video.relativePath), subtitle: subtitle ? path.resolve(workspace.workspacePath, subtitle.relativePath) : undefined, manifest: canonicalManifestPath },
     });
     const artifactIds = result.files.map((file) => `publish-${raw.renderRunId}-${file.kind}`);
-    workspace.catalog.insertArtifacts(result.files.map((file, index) => ({ schemaVersion: 1, artifactId: artifactIds[index], workspaceId: workspace.workspaceId, kind: `publish-${file.kind}`, relativePath: file.relativePath, mimeType: file.mimeType, contentHash: file.contentHash, byteSize: file.byteSize, parentArtifactIds: spec.assetLocks.map((lock) => lock.assetId), validationStatus: "valid" })));
-    return { ok: true, packageId, manifest: result.manifest, packageRelativePath: path.relative(workspace.workspacePath, result.packageDir).split(path.sep).join("/"), manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") };
+    const manifestStats = await statFile(result.manifestPath);
+    const manifestHash = await runtime.media.sha256File(result.manifestPath);
+    workspace.catalog.insertArtifacts([
+      ...result.files.map((file, index) => ({ schemaVersion: 1, artifactId: artifactIds[index], workspaceId: workspace.workspaceId, kind: `publish-${file.kind}`, relativePath: file.relativePath, mimeType: file.mimeType, contentHash: file.contentHash, byteSize: file.byteSize, parentArtifactIds: spec.assetLocks.map((lock) => lock.assetId), validationStatus: "valid" })),
+      { schemaVersion: 1, artifactId: `publish-${raw.renderRunId}-package-manifest`, workspaceId: workspace.workspaceId, kind: "publish-package-manifest", relativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/"), mimeType: "application/json", contentHash: manifestHash, byteSize: manifestStats.size, parentArtifactIds: artifactIds, validationStatus: "valid" },
+    ]);
+    const now = new Date().toISOString();
+    const publication = workspace.catalog.savePublication({ schemaVersion: 1, id: `publication-${raw.renderRunId}`, projectId: run.projectId, packageId, platform: result.manifest.platform, status: "draft", createdAt: now, updatedAt: now });
+    return { ok: true, packageId, publicationId: publication.id, manifest: result.manifest, packageRelativePath: path.relative(workspace.workspacePath, result.packageDir).split(path.sep).join("/"), manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") };
   } catch (error) {
     return { ok: false, errorCode: "publish_package_failed", message: error instanceof Error ? error.message : "发布包生成失败" };
+  }
+});
+
+ipcMain.handle("desktop:list-publications", async () => {
+  try {
+    const workspace = requireWorkspace();
+    return { ok: true, publications: workspace.catalog.listPublicationsForWorkspace(workspace.workspaceId).map((publication) => ({ publication, snapshots: workspace.catalog.listMetricSnapshots(publication.id) })), proposals: workspace.catalog.listReviewMemoryProposals(workspace.workspaceId) };
+  } catch (error) {
+    return { ok: false, errorCode: "publication_list_failed", message: error instanceof Error ? error.message : "读取发布记录失败" };
+  }
+});
+
+ipcMain.handle("desktop:record-metrics", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    const runtime = await getDesktopRuntime();
+    const publication = typeof raw?.publicationId === "string" ? workspace.catalog.getPublication(raw.publicationId) : undefined;
+    if (!publication || workspace.catalog.getProject(publication.projectId)?.workspaceId !== workspace.workspaceId) throw new Error("发布记录不存在或不属于当前工作区");
+    const snapshot = runtime.publishing.MetricSnapshotSchema.parse({ schemaVersion: 1, id: `metric-${randomUUID()}`, publicationId: publication.id, capturedAt: new Date().toISOString(), window: typeof raw.window === "string" && raw.window.trim() ? raw.window.trim() : "24h", source: "manual", metrics: { views: typeof raw.metrics?.views === "number" ? raw.metrics.views : null, likes: typeof raw.metrics?.likes === "number" ? raw.metrics.likes : null, comments: typeof raw.metrics?.comments === "number" ? raw.metrics.comments : null, shares: typeof raw.metrics?.shares === "number" ? raw.metrics.shares : null, saves: typeof raw.metrics?.saves === "number" ? raw.metrics.saves : null, completionRate: typeof raw.metrics?.completionRate === "number" ? raw.metrics.completionRate : null, averageWatchSeconds: typeof raw.metrics?.averageWatchSeconds === "number" ? raw.metrics.averageWatchSeconds : null, newFollowers: typeof raw.metrics?.newFollowers === "number" ? raw.metrics.newFollowers : null }, notes: typeof raw.notes === "string" ? raw.notes : "" });
+    workspace.catalog.saveMetricSnapshot(snapshot);
+    return { ok: true, snapshot };
+  } catch (error) {
+    return { ok: false, errorCode: "metric_record_failed", message: error instanceof Error ? error.message : "指标录入失败" };
+  }
+});
+
+ipcMain.handle("desktop:propose-review-memory", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    const runtime = await getDesktopRuntime();
+    const publication = typeof raw?.publicationId === "string" ? workspace.catalog.getPublication(raw.publicationId) : undefined;
+    if (!publication || workspace.catalog.getProject(publication.projectId)?.workspaceId !== workspace.workspaceId) throw new Error("发布记录不存在或不属于当前工作区");
+    const snapshots = workspace.catalog.listMetricSnapshots(publication.id);
+    const proposal = runtime.publishing.proposeReviewMemory({ workspaceId: workspace.workspaceId, sourcePublicationIds: [publication.id], snapshots, statement: typeof raw.statement === "string" ? raw.statement : "", appliesTo: { platforms: [publication.platform] } });
+    workspace.catalog.saveReviewMemoryProposal(proposal);
+    return { ok: true, proposal };
+  } catch (error) {
+    return { ok: false, errorCode: "review_memory_failed", message: error instanceof Error ? error.message : "复盘建议生成失败" };
+  }
+});
+
+ipcMain.handle("desktop:confirm-review-memory", async (_event, proposalId) => {
+  try {
+    const workspace = requireWorkspace();
+    if (typeof proposalId !== "string" || !proposalId) throw new Error("复盘建议无效");
+    const proposal = workspace.catalog.getReviewMemoryProposal(proposalId);
+    if (!proposal || proposal.workspaceId !== workspace.workspaceId) throw new Error("复盘建议不存在或不属于当前工作区");
+    if (!workspace.catalog.confirmReviewMemoryProposal(proposalId)) throw new Error("复盘建议不存在或已经处理");
+    return { ok: true, proposal: workspace.catalog.getReviewMemoryProposal(proposalId) };
+  } catch (error) {
+    return { ok: false, errorCode: "review_memory_confirm_failed", message: error instanceof Error ? error.message : "确认复盘记忆失败" };
   }
 });
 

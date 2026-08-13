@@ -9,6 +9,7 @@ import { ScriptSchema, createShootTasks, createStoryboard, type Take } from "../
 import { DEFAULT_VERTICAL_PROFILE, EditProposalSchema, freezeEditProposal } from "../../exchange/src/index";
 import { transcriptFacts, parseWhisperJson } from "../../analysis/src/index";
 import { AccountResearchReportSchema } from "../../research/src/index";
+import { MetricSnapshotSchema, proposeReviewMemory } from "../../publishing/src/index";
 
 function fixtureJob(overrides: Partial<JobRecord> = {}): JobRecord {
   const now = new Date().toISOString();
@@ -39,7 +40,7 @@ describe("SqliteCatalog", () => {
     catalog.createWorkspace({ id: "workspace-1", name: "测试工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
     catalog.createProject({ id: "project-1", workspaceId: "workspace-1", title: "测试项目", stage: "script", revision: 1, payload: { source: "fixture" }, createdAt: now, updatedAt: now });
     catalog.insertArtifact({ schemaVersion: 1, artifactId: "artifact-1", workspaceId: "workspace-1", kind: "proxy", relativePath: "derived/proxy.mp4", mimeType: "video/mp4", contentHash: "sha256:proxy", byteSize: 12, parentArtifactIds: [], validationStatus: "valid" });
-    expect(catalog.schemaVersion()).toBe(6);
+    expect(catalog.schemaVersion()).toBe(7);
     expect(catalog.getProject("project-1")?.payload).toEqual({ source: "fixture" });
     expect(catalog.getArtifact("artifact-1")?.relativePath).toBe("derived/proxy.mp4");
     expect(catalog.updateProject("project-1", 0, { title: "不应覆盖" })).toBe(false);
@@ -169,7 +170,7 @@ describe("SqliteCatalog", () => {
     `);
     legacy.close();
     const catalog = new SqliteCatalog(dbPath);
-    expect(catalog.schemaVersion()).toBe(6);
+    expect(catalog.schemaVersion()).toBe(7);
     catalog.insertJob(fixtureJob({ id: "legacy-job", idempotencyKey: "legacy-job-key" }));
     catalog.enqueueOutbox({ id: "legacy-outbox", kind: "legacy", payload: {}, idempotencyKey: "legacy-outbox-key", idempotencyScope: "workspace-1", state: "queued", attempt: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     catalog.createWorkspace({ id: "workspace-1", name: "工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -213,6 +214,15 @@ describe("SqliteCatalog", () => {
     catalog.saveRenderRun({ schemaVersion: 1, id: "render-run-creation", projectId: "project-creation", frozenEditSpecId: frozen.id, state: "running", createdAt: now, updatedAt: now });
     catalog.saveRenderRun({ schemaVersion: 1, id: "render-run-creation", projectId: "project-creation", frozenEditSpecId: frozen.id, state: "succeeded", manifestRelativePath: "exports/render.manifest.json", manifestHash: "sha256:manifest", createdAt: now, updatedAt: now });
     expect(catalog.getRenderRun("render-run-creation")).toMatchObject({ state: "succeeded", manifestHash: "sha256:manifest" });
+    const publication = catalog.savePublication({ schemaVersion: 1, id: "publication-creation", projectId: "project-creation", packageId: "publish-render-run-creation", platform: "抖音", status: "published", publishedAt: now, createdAt: now, updatedAt: now });
+    const metrics = MetricSnapshotSchema.parse({ schemaVersion: 1, id: "metric-creation", publicationId: publication.id, capturedAt: now, window: "24h", source: "manual", metrics: { views: 1200, likes: 90, comments: 12, shares: 8, saves: 11, completionRate: 0.38, averageWatchSeconds: 16, newFollowers: 5 }, notes: "手动录入" });
+    catalog.saveMetricSnapshot(metrics);
+    const memory = proposeReviewMemory({ workspaceId: "workspace-creation", sourcePublicationIds: [publication.id], snapshots: [metrics], statement: "先讲具体经验再给结论，完播表现值得继续验证。", appliesTo: { formats: ["真人深度口播"], platforms: ["抖音"] }, now });
+    catalog.saveReviewMemoryProposal(memory);
+    expect(catalog.getMetricSnapshot(metrics.id)?.metrics.views).toBe(1200);
+    expect(catalog.getReviewMemoryProposal(memory.id)?.status).toBe("candidate");
+    expect(catalog.confirmReviewMemoryProposal(memory.id, now)).toBe(true);
+    expect(catalog.getReviewMemoryProposal(memory.id)?.status).toBe("confirmed");
     const analysisSegments = parseWhisperJson({ segments: [{ start: 0, end: 1.2, text: "观点需要画面证据" }, { start: 1.2, end: 2.4, text: "素材库可以搜索" }] });
     catalog.saveAnalysisFacts(transcriptFacts({ workspaceId: "workspace-creation", artifactId: "artifact-take-2", segments: analysisSegments, providerKey: "whisper.cpp", modelKey: "ggml-small", contentHash: "sha256:take-2", createdAt: now }));
     expect(catalog.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "素材库" })[0]?.text).toContain("素材库");
@@ -228,6 +238,9 @@ describe("SqliteCatalog", () => {
     expect(restored.getTake("take-2")?.status).toBe("selected");
     expect(restored.getEditProposal("proposal-creation")?.status).toBe("previewed");
     expect(restored.getRenderRun("render-run-creation")?.state).toBe("succeeded");
+    expect(restored.listPublications("project-creation")).toHaveLength(1);
+    expect(restored.listMetricSnapshots(publication.id)).toHaveLength(1);
+    expect(restored.getReviewMemoryProposal(memory.id)?.status).toBe("confirmed");
     expect(restored.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "画面" })).toHaveLength(1);
     expect(restored.listResearchReports("workspace-creation")).toHaveLength(1);
     restored.close();
