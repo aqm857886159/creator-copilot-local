@@ -55,20 +55,21 @@ TikHub 的 Search API、批量高清下载、星图画像和视频生成都不�
 - [最高画质播放链接](https://docs.tikhub.io/312096107e0)
 - [低粉爆款榜](https://docs.tikhub.io/252393854e0)
 
-事实：
+事实（本次通过官方页面再次核对）：
 
 | 能力 | 官方合同/限制 | 对本产品的用途 |
 | --- | --- | --- |
 | 认证 | `Authorization: Bearer <key>` | 只在 Electron main 持有；renderer 只拿 `configured` |
 | 域名 | 中国大陆可用 `api.tikhub.dev`；其他地区 `api.tikhub.io`，路径/参数相同 | Base URL 可配置，默认大陆 `.dev` |
 | App V3 账号 | `GET /api/v1/douyin/app/v3/handler_user_profile?sec_user_id=...` | 账号快照、昵称、粉丝和基础信息 |
-| App V3 作品 | `GET /api/v1/douyin/app/v3/fetch_user_post_videos`，`max_cursor` 翻页，`count` 不超过 20，`sort_type=0` 最新/`1` 最热 | 首次研究固定 20 条，之后按用户动作扩展 |
+| App V3 作品 | `GET /api/v1/douyin/app/v3/fetch_user_post_videos`，`max_cursor` 翻页，第一页为 0，`count` 不超过 20，`sort_type=0` 最新/`1` 最热；官方响应说明本次请求会计费 | 首次研究固定 20 条，之后按用户动作扩展；UI 必须显示范围和预算 |
 | App V3 单视频 | `GET /api/v1/douyin/app/v3/fetch_one_video?aweme_id=...` | 文案、作者、视频/图文元数据 |
 | V3 受限内容 | `fetch_one_video_v3` 可处理更多受限内容，但仍要遵守平台权利和用户授权 | 只作为显式 fallback，不自动下载 |
 | 播放量 | 标准作品接口可能不带播放数；`fetch_video_statistics` 读取 `digg_count/download_count/play_count/share_count`，一次最多 2 个 ID | 研究报告需要把“播放统计来源”单独标证据 |
 | 高画质 | 单条高画质接口价格文档标为 `$0.005/次`；链接有时效性 | 用户点“下载到本地”后立即导入，绝不保存临时 URL 当资产路径 |
 | URL 解析 | Web `get_sec_user_id`、`get_aweme_id` | 粘贴主页/作品链接时先转稳定 ID |
-| 榜单 | Billboard 有低粉爆款、高完播、高点赞、高涨粉等榜；支持关键词/垂类过滤 | 选题雷达的第二入口，必须有成本预估和缓存 |
+| 榜单 | 官方目录提供低粉爆款、高完播、高点赞、高涨粉等 Billboard 接口，并有关键词/垂类过滤能力 | 选题雷达的第二入口，必须有成本预估和缓存；不加入默认账号分析 |
+| 其他研究接口 | 官方目录还列出热搜、话题、音乐、评论、粉丝、合集和星图等接口 | 作为后续可插拔连接器；每个接口单独记录价格、权限、来源与合规限制，不直接暴露给 Agent |
 | 搜索 | 官方产品页标为 `$0.01/请求`、无量价折扣、每次约 6–10 条；Web/App 搜索不作为入口 | 禁止默认后台搜索；用户点击后才执行 |
 | 星图 | 观众画像等企业数据可到 `$0.02/次` 或更高 | 后置为付费研究模块，不阻塞首条账号分析 |
 | 价格/用量 | 有 `get_user_info`、`get_user_daily_usage`、`calculate_price`、endpoint info | 设置页显示调用预算、今日用量和本次预计成本 |

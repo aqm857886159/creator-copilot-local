@@ -17,6 +17,7 @@
     "packages/storage/src/catalog.ts",
     "packages/providers/src/index.ts",
     "packages/agent-runtime/src/index.ts",
-    "packages/analysis/src/index.ts"
+    "packages/analysis/src/index.ts",
+    "packages/research/src/index.ts"
   ]
 }

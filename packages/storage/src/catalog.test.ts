@@ -8,6 +8,7 @@ import type { JobRecord } from "../../contracts/src/index";
 import { ScriptSchema, createShootTasks, createStoryboard, type Take } from "../../creation/src/index";
 import { DEFAULT_VERTICAL_PROFILE, EditProposalSchema, freezeEditProposal } from "../../exchange/src/index";
 import { transcriptFacts, parseWhisperJson } from "../../analysis/src/index";
+import { AccountResearchReportSchema } from "../../research/src/index";
 
 function fixtureJob(overrides: Partial<JobRecord> = {}): JobRecord {
   const now = new Date().toISOString();
@@ -38,7 +39,7 @@ describe("SqliteCatalog", () => {
     catalog.createWorkspace({ id: "workspace-1", name: "测试工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
     catalog.createProject({ id: "project-1", workspaceId: "workspace-1", title: "测试项目", stage: "script", revision: 1, payload: { source: "fixture" }, createdAt: now, updatedAt: now });
     catalog.insertArtifact({ schemaVersion: 1, artifactId: "artifact-1", workspaceId: "workspace-1", kind: "proxy", relativePath: "derived/proxy.mp4", mimeType: "video/mp4", contentHash: "sha256:proxy", byteSize: 12, parentArtifactIds: [], validationStatus: "valid" });
-    expect(catalog.schemaVersion()).toBe(5);
+    expect(catalog.schemaVersion()).toBe(6);
     expect(catalog.getProject("project-1")?.payload).toEqual({ source: "fixture" });
     expect(catalog.getArtifact("artifact-1")?.relativePath).toBe("derived/proxy.mp4");
     expect(catalog.updateProject("project-1", 0, { title: "不应覆盖" })).toBe(false);
@@ -168,7 +169,7 @@ describe("SqliteCatalog", () => {
     `);
     legacy.close();
     const catalog = new SqliteCatalog(dbPath);
-    expect(catalog.schemaVersion()).toBe(5);
+    expect(catalog.schemaVersion()).toBe(6);
     catalog.insertJob(fixtureJob({ id: "legacy-job", idempotencyKey: "legacy-job-key" }));
     catalog.enqueueOutbox({ id: "legacy-outbox", kind: "legacy", payload: {}, idempotencyKey: "legacy-outbox-key", idempotencyScope: "workspace-1", state: "queued", attempt: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     catalog.createWorkspace({ id: "workspace-1", name: "工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -216,6 +217,9 @@ describe("SqliteCatalog", () => {
     catalog.saveAnalysisFacts(transcriptFacts({ workspaceId: "workspace-creation", artifactId: "artifact-take-2", segments: analysisSegments, providerKey: "whisper.cpp", modelKey: "ggml-small", contentHash: "sha256:take-2", createdAt: now }));
     expect(catalog.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "素材库" })[0]?.text).toContain("素材库");
     expect(catalog.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "观点", kind: "transcript" })).toHaveLength(1);
+    const report = AccountResearchReportSchema.parse({ schemaVersion: 1, id: "research-creation", workspaceId: "workspace-creation", providerKey: "tikhub", sourceInput: "https://www.douyin.com/user/fixture", secUserId: "MS4wLjABAAAAfixture", profile: { nickname: "参考账号", followerCount: 1000 }, videos: [], coverage: { requested: 20, received: 0, metadataAnalyzed: 0, mediaAnalyzed: 0, missingMedia: 0, hasMore: false, note: "metadata only" }, findings: [], evidence: [], createdAt: now });
+    catalog.saveResearchReport(report);
+    expect(catalog.getResearchReport(report.id)?.profile.nickname).toBe("参考账号");
     catalog.close();
     const restored = new SqliteCatalog(dbPath);
     expect(restored.getScript(script.id)?.blocks[0].text).toContain("画面变化");
@@ -225,6 +229,7 @@ describe("SqliteCatalog", () => {
     expect(restored.getEditProposal("proposal-creation")?.status).toBe("previewed");
     expect(restored.getRenderRun("render-run-creation")?.state).toBe("succeeded");
     expect(restored.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "画面" })).toHaveLength(1);
+    expect(restored.listResearchReports("workspace-creation")).toHaveLength(1);
     restored.close();
     rmSync(root, { recursive: true, force: true });
   });

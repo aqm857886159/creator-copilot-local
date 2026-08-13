@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.storage.json",
+  "compilerOptions": {
+    "outDir": "./.tsbuild/research"
+  },
+  "include": ["packages/research"]
+}

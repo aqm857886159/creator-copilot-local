@@ -164,5 +164,35 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .asset-fact-row strong { color: #514c44; font-size: 12px; font-weight: 550; line-height: 1.5; }
 .asset-empty { display: flex; min-height: 160px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #aaa095; text-align: center; }
 .asset-empty p { max-width: 280px; margin: 0; color: #9a9185; font-size: 11px; line-height: 1.6; }
+.radar-workbench { display: flex; flex-direction: column; gap: 20px; }
+.radar-query { display: flex; align-items: center; gap: 10px; }
+.radar-query-input { display: flex; align-items: center; flex: 1; gap: 9px; min-width: 0; padding: 10px 12px; border: 1px solid #dcd4c8; border-radius: 9px; background: #faf7f0; color: #9b9488; }
+.radar-query-input input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #4e4941; font-size: 12px; }
+.radar-query label { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 9px; border: 1px solid #ded7ca; border-radius: 8px; background: #faf7f0; color: #8f877b; font-size: 10px; white-space: nowrap; }
+.radar-query select { border: 0; outline: 0; background: transparent; color: #5e574e; font-size: 11px; }
+.radar-safety { display: flex; align-items: center; gap: 7px; color: #6e8368; font-size: 10px; }
+.radar-profile, .radar-coverage, .radar-video-section, .radar-finding { padding: 19px; border: 1px solid #e0d9ce; border-radius: 11px; background: rgba(250, 248, 243, .72); }
+.radar-profile { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.radar-profile-main { min-width: 0; }
+.radar-profile h2 { margin: 8px 0 5px; color: #4b453c; font-family: Georgia, "Songti SC", serif; font-size: 27px; font-weight: 500; }
+.radar-profile p { max-width: 650px; margin: 0; overflow: hidden; color: #887f73; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.radar-profile-stats { display: flex; gap: 22px; color: #9b9387; font-size: 10px; white-space: nowrap; }
+.radar-profile-stats strong { display: block; margin-bottom: 3px; color: #52624d; font-size: 19px; font-weight: 550; }
+.radar-coverage { display: grid; grid-template-columns: 1fr auto; gap: 8px 20px; background: #eaf0e5; border-color: #d3dfce; }
+.radar-coverage h3, .radar-finding h3 { margin: 7px 0 0; color: #475443; font-family: Georgia, "Songti SC", serif; font-size: 22px; font-weight: 500; }
+.radar-coverage p { grid-column: 1 / -1; margin: 5px 0 0; color: #75826e; font-size: 11px; line-height: 1.55; }
+.coverage-numbers { display: flex; align-items: flex-end; gap: 17px; color: #75826e; font-size: 10px; }
+.coverage-numbers strong { color: #52694d; font-size: 17px; font-weight: 550; }
+.radar-video-section { padding-bottom: 13px; }
+.radar-video-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-top: 14px; }
+.radar-video-card { display: flex; min-height: 160px; flex-direction: column; padding: 13px; border: 1px solid #e5ded3; border-radius: 9px; background: #fcfaf5; }
+.radar-video-top, .radar-video-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #9c9488; font-size: 9px; }
+.radar-video-top span:last-child { color: #7b9375; }
+.radar-video-card h4 { display: -webkit-box; min-height: 43px; margin: 14px 0 7px; overflow: hidden; color: #514b42; font-size: 12px; font-weight: 550; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.radar-video-card > p { margin: 0; color: #8e867a; font-size: 10px; }
+.radar-video-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid #eee8df; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.radar-finding { background: #f0e9de; border-color: #e1d6c5; }
+.radar-finding h3 { color: #5d503f; }
+.radar-finding p { margin: 6px 0 0; color: #877965; font-size: 11px; line-height: 1.6; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .001ms !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; } }
 @media (max-width: 1180px) { .sidebar { width: 220px; }.page-content { padding-right: 28px; padding-left: 28px; }.topbar { padding-right: 28px; padding-left: 28px; }.project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

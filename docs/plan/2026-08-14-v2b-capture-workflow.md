@@ -17,7 +17,7 @@
 ## 代码范围
 
 - `packages/creation/src/index.ts`：Script/Shot/Storyboard/ShootTask/CapturePackage/Take 合同、HTML 导出、Take attach/select；
-- `packages/storage/src/catalog.ts`：本阶段交付时为 schema v3 迁移、创建工作流原子事务、Take 持久化和选择；当前 catalog 已迁移到 schema v5（V4 proposal/render + V6 analysis facts/FTS5）。
+- `packages/storage/src/catalog.ts`：本阶段交付时为 schema v3 迁移、创建工作流原子事务、Take 持久化和选择；当前 catalog 已迁移到 schema v6（V4 proposal/render、V6 analysis facts/FTS5、V7 research reports）。
 - `electron/main.cjs` / `electron/preload.cjs`：工作区初始化、拍摄包导出、Take 导入、受控文件打开；
 - `src/components/creation-workbench.tsx` / `src/app.tsx` / `src/styles.css`：可编辑脚本/分镜工作台和状态反馈；
 - `scripts/ui_smoke.py`：保留原首页 smoke；Node Playwright smoke 额外验证创建页的工作区 gate；
@@ -45,4 +45,4 @@
 
 ## 回滚
 
-回滚只需停止使用创建页 IPC；现有首页和 V1/V2a 媒体导入不依赖 V2b 的 UI。schema v3 迁移保持向前兼容，不能用删除数据库的方式回滚；后续 schema v4/v5 同样只能通过迁移或备份恢复回滚。
+回滚只需停止使用创建页 IPC；现有首页和 V1/V2a 媒体导入不依赖 V2b 的 UI。schema v3 迁移保持向前兼容，不能用删除数据库的方式回滚；后续 schema v4/v5/v6 同样只能通过迁移或备份恢复回滚。

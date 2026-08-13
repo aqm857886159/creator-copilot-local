@@ -27,6 +27,22 @@ interface AssetSearchResult {
   facts?: Array<{ id: string; artifactId: string; kind: string; startMs: number; endMs: number; text: string; labels: string[]; providerKey: string }>;
 }
 
+interface AccountResearchResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  report?: {
+    id: string;
+    providerKey: string;
+    sourceInput: string;
+    secUserId: string;
+    profile: { nickname?: string; signature?: string; followerCount?: number; followingCount?: number; awemeCount?: number };
+    videos: Array<{ awemeId: string; description?: string; createTime?: string; shareUrl?: string; durationMs?: number; statistics: Record<string, number>; mediaAnalysisStatus: string; evidenceIds: string[] }>;
+    coverage: { requested: number; received: number; metadataAnalyzed: number; mediaAnalyzed: number; missingMedia: number; hasMore: boolean; note: string };
+    findings: Array<{ id: string; kind: string; title: string; detail: string; evidenceIds: string[] }>;
+  };
+}
+
 interface CaptureWorkflowInput {
   projectTitle: string;
   blocks: Array<{ kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; visualNeed: "none" | "support" | "must_show" }>;
@@ -128,11 +144,13 @@ interface Window {
     chooseWorkspace: () => Promise<ChooseWorkspaceResult>;
     importMedia: () => Promise<ImportMediaResult>;
     searchAssets: (query: string) => Promise<AssetSearchResult>;
+    researchAccount: (input: { sourceInput: string; count?: number }) => Promise<AccountResearchResult>;
     createCaptureWorkflow: (input: CaptureWorkflowInput) => Promise<CaptureWorkflowResult>;
     importTake: (shootTaskId: string) => Promise<ImportTakeResult>;
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;
     proposeEdit: (projectId: string) => Promise<EditProposalResult>;
     renderEdit: (input: { projectId: string; proposal: EditProposal }) => Promise<EditRenderResult>;
     openWorkspaceFile: (relativePath: string) => Promise<{ ok: boolean; message?: string }>;
+    openExternal: (url: string) => Promise<{ ok: boolean; message?: string }>;
   };
 }

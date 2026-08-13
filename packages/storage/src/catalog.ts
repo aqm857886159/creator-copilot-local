@@ -37,8 +37,9 @@ import {
   type Take,
 } from "../../creation/src/index.js";
 import { AnalysisFactSchema, searchQueryForFts, type AnalysisFact } from "../../analysis/src/index.js";
+import { AccountResearchReportSchema, type AccountResearchReport } from "../../research/src/index.js";
 
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 
 const RenderRunRecordSchema = z.object({
   schemaVersion: z.literal(1),
@@ -370,6 +371,18 @@ const migrations: Record<number, string> = {
       tokenize = 'unicode61'
     );
   `,
+  6: `
+    CREATE TABLE IF NOT EXISTS research_reports (
+      id TEXT PRIMARY KEY NOT NULL,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      provider_key TEXT NOT NULL,
+      source_input TEXT NOT NULL,
+      sec_user_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS research_reports_workspace_idx ON research_reports(workspace_id, created_at);
+  `,
 };
 
 function parseJson<T>(value: string, label: string): T {
@@ -693,6 +706,29 @@ export class SqliteCatalog {
       }
     }
     return results;
+  }
+
+  saveResearchReport(raw: AccountResearchReport) {
+    const report = AccountResearchReportSchema.parse(raw);
+    if (!this.getWorkspace(report.workspaceId)) throw new Error("研究报告所属工作区不存在");
+    this.db.prepare(`INSERT INTO research_reports(id, workspace_id, provider_key, source_input, sec_user_id, payload_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET provider_key = excluded.provider_key, source_input = excluded.source_input, sec_user_id = excluded.sec_user_id, payload_json = excluded.payload_json, created_at = excluded.created_at`)
+      .run(report.id, report.workspaceId, report.providerKey, report.sourceInput, report.secUserId, JSON.stringify(report), report.createdAt);
+    return report;
+  }
+
+  getResearchReport(id: string): AccountResearchReport | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM research_reports WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? AccountResearchReportSchema.parse(parseJson(row.payload_json, "research report")) : undefined;
+  }
+
+  listResearchReports(workspaceId: string) {
+    const rows = this.db.prepare("SELECT id FROM research_reports WHERE workspace_id = ? ORDER BY created_at DESC, id").all(workspaceId) as Array<{ id: string }>;
+    return rows.flatMap((row) => {
+      const report = this.getResearchReport(row.id);
+      return report ? [report] : [];
+    });
   }
 
   saveCaptureWorkflow(input: { project: ProjectRecord; script: Script; storyboard: Storyboard; tasks: ShootTask[]; capturePackage: CapturePackage }) {

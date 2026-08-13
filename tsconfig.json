@@ -10,5 +10,6 @@
     ,{ "path": "./tsconfig.providers.json" }
     ,{ "path": "./tsconfig.agent-runtime.json" }
     ,{ "path": "./tsconfig.analysis.json" }
+    ,{ "path": "./tsconfig.research.json" }
   ]
 }

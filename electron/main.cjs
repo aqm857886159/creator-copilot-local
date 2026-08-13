@@ -20,7 +20,8 @@ async function getDesktopRuntime() {
       import(pathToFileURL(path.join(runtimeRoot, "storage", "src", "catalog.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "providers", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "agent-runtime", "src", "index.js")).href),
-    ]).then(([media, creation, exchange, storage, providers, agentRuntime]) => ({ media, creation, exchange, storage, providers, agentRuntime, mediaImporter: new media.LocalMediaImporter() }));
+      import(pathToFileURL(path.join(runtimeRoot, "research", "src", "index.js")).href),
+    ]).then(([media, creation, exchange, storage, providers, agentRuntime, research]) => ({ media, creation, exchange, storage, providers, agentRuntime, research, mediaImporter: new media.LocalMediaImporter() }));
   }
   return desktopRuntimePromise;
 }
@@ -64,6 +65,11 @@ function getEditAgent(runtime) {
     return new runtime.agentRuntime.ProviderEditAgentRuntime(provider, process.env.AI_EDIT_MODEL ?? "gpt-5-nano");
   }
   return new runtime.agentRuntime.LocalEditAgentRuntime();
+}
+
+function getTikHubConnector(runtime) {
+  if (!process.env.TIKHUB_API_KEY) throw new Error("TikHub API key 未配置");
+  return new runtime.providers.TikHubDouyinConnector({ apiKey: process.env.TIKHUB_API_KEY, baseUrl: process.env.TIKHUB_BASE_URL ?? "https://api.tikhub.dev" });
 }
 
 function createWindow() {
@@ -149,6 +155,20 @@ ipcMain.handle("desktop:search-assets", async (_event, rawQuery) => {
     return { ok: true, artifacts: visibleArtifacts, facts };
   } catch (error) {
     return { ok: false, errorCode: "asset_search_failed", message: error instanceof Error ? error.message : "素材搜索失败" };
+  }
+});
+
+ipcMain.handle("desktop:research-account", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.sourceInput !== "string" || !raw.sourceInput.trim()) throw new Error("请输入抖音主页链接或 sec_user_id");
+    const count = raw.count === undefined ? 20 : Number(raw.count);
+    const runtime = await getDesktopRuntime();
+    const report = await runtime.research.buildAccountResearchReport({ workspaceId: workspace.workspaceId, sourceInput: raw.sourceInput.trim(), count, connector: getTikHubConnector(runtime), now: new Date().toISOString() });
+    workspace.catalog.saveResearchReport(report);
+    return { ok: true, report };
+  } catch (error) {
+    return { ok: false, errorCode: "account_research_failed", message: error instanceof Error ? error.message : "对标账号分析失败" };
   }
 });
 
@@ -334,6 +354,18 @@ ipcMain.handle("desktop:open-workspace-file", async (_event, relativePath) => {
     return { ok: true };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "无法打开文件" };
+  }
+});
+
+ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
+  try {
+    if (typeof rawUrl !== "string") throw new Error("外部链接无效");
+    const url = new URL(rawUrl);
+    if (url.protocol !== "https:") throw new Error("仅允许打开 HTTPS 链接");
+    await shell.openExternal(url.toString());
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "无法打开外部链接" };
   }
 });
 
