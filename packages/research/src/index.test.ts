@@ -32,6 +32,7 @@ describe("benchmark account research", () => {
     ] }]);
     expect(patterned.findings.some((finding) => finding.kind === "media_pattern")).toBe(true);
     expect(patterned.opportunities[0]).toMatchObject({ sourceVideoIds: ["aweme-1"], status: "candidate" });
+    expect(patterned.patternSummary).toMatchObject({ analyzedVideoCount: 1, perVideo: [{ awemeId: "aweme-1", shotCount: 1, averageShotDurationMs: 2_000, transcriptCount: 1, ocrCount: 0 }], topByPlayCount: [] });
     const repeated = attachResearchMediaPatterns(patterned, [{ awemeId: "aweme-1", artifactIds: ["source-1"], analyzedAt: "2026-08-14T00:02:00.000Z", facts: analyzedFacts }]);
     expect(repeated.evidence.filter((evidence) => evidence.id === "evidence-media-pattern-MS4wLjABAAAAfixture-1786665720000")).toHaveLength(1);
     expect(repeated.opportunities).toHaveLength(1);
@@ -46,6 +47,27 @@ describe("benchmark account research", () => {
     expect(withAccountAnalysis.accountAnalysis).toMatchObject({ day: 7, metrics: { avg_like_count: 12.5 } });
     expect(withAccountAnalysis.evidence.some((evidence) => evidence.type === "account_analysis")).toBe(true);
     expect(patterned.evidence.at(-1)?.payload).toMatchObject({ totalShotCount: 1, transcriptSegmentCount: 1 });
+  });
+
+  it("compares per-video shot rhythm against available play-count evidence without making a causal claim", async () => {
+    const connector = {
+      providerKey: "tikhub" as const,
+      resolveSecUserId: async () => "MS4wLjABAAAApattern",
+      fetchProfile: async () => ({ secUserId: "MS4wLjABAAAApattern", raw: {} }),
+      fetchUserPosts: async () => ({ providerKey: "tikhub" as const, source: "public" as const, fetchedAt: "2026-08-14T00:00:00.000Z", cursor: 0, hasMore: false, responseHash: "sha256:posts", items: [
+        { awemeId: "aweme-top", description: "高播放样本", createTime: "2026-08-13T00:00:00.000Z", durationMs: 4_000, statistics: { play_count: 1_000 }, raw: {} },
+        { awemeId: "aweme-other", description: "其他样本", createTime: "2026-08-12T00:00:00.000Z", durationMs: 4_000, statistics: { play_count: 100 }, raw: {} },
+      ] }),
+      fetchHighestQualityPlayUrl: async () => ({ awemeId: "aweme-top", url: "https://cdn.example/video.mp4", responseHash: "sha256:download" }),
+    };
+    const report = await buildAccountResearchReport({ workspaceId: "workspace-1", sourceInput: "fixture", connector, count: 2, now: "2026-08-14T00:00:00.000Z" });
+    const patterned = attachResearchMediaPatterns(report, [
+      { awemeId: "aweme-top", artifactIds: ["source-top"], analyzedAt: "2026-08-14T00:02:00.000Z", facts: [{ id: "shot-top-1", artifactId: "source-top", kind: "shot", startMs: 0, endMs: 1_000, text: "镜头 cut", labels: ["cut"], contentHash: "sha256:top" }, { id: "shot-top-2", artifactId: "source-top", kind: "shot", startMs: 1_000, endMs: 2_000, text: "镜头 cut", labels: ["cut"], contentHash: "sha256:top" }] },
+      { awemeId: "aweme-other", artifactIds: ["source-other"], analyzedAt: "2026-08-14T00:02:00.000Z", facts: [{ id: "shot-other-1", artifactId: "source-other", kind: "shot", startMs: 0, endMs: 3_000, text: "镜头 cut", labels: ["cut"], contentHash: "sha256:other" }] },
+    ]);
+    expect(patterned.patternSummary).toMatchObject({ analyzedVideoCount: 2, topByPlayCount: ["aweme-top", "aweme-other"], comparison: { topSampleAwemeId: "aweme-top", topSamplePlayCount: 1_000, topSampleAverageShotDurationMs: 1_000, otherAverageShotDurationMs: 3_000, topSampleShortShotRate: 1, otherShortShotRate: 0 } });
+    expect(patterned.evidence.find((evidence) => evidence.id.startsWith("evidence-media-pattern-"))?.payload).toMatchObject({ patternSummary: { topByPlayCount: ["aweme-top", "aweme-other"] } });
+    expect(patterned.findings.find((finding) => finding.kind === "media_pattern")?.detail).toContain("描述性对照");
   });
 
   it("rejects an unbounded first request", async () => {

@@ -55,6 +55,34 @@ export const AccountResearchOpportunitySchema = z.object({
 }).strict();
 export type AccountResearchOpportunity = z.infer<typeof AccountResearchOpportunitySchema>;
 
+export const AccountMediaPatternSummarySchema = z.object({
+  schemaVersion: z.literal(1),
+  analyzedVideoCount: z.number().int().nonnegative(),
+  perVideo: z.array(z.object({
+    awemeId: id,
+    durationMs: z.number().int().positive().optional(),
+    shotCount: z.number().int().nonnegative(),
+    averageShotDurationMs: z.number().nonnegative().optional(),
+    firstShotDurationMs: z.number().nonnegative().optional(),
+    shortShotRate: z.number().min(0).max(1).optional(),
+    transcriptCount: z.number().int().nonnegative(),
+    ocrCount: z.number().int().nonnegative(),
+    openingText: z.array(z.string().min(1).max(500)).max(3),
+    statistics: z.record(z.number().nonnegative()),
+  }).strict()).max(100),
+  topByPlayCount: z.array(id).max(10),
+  comparison: z.object({
+    topSampleAwemeId: id.optional(),
+    topSamplePlayCount: z.number().nonnegative().optional(),
+    topSampleAverageShotDurationMs: z.number().nonnegative().optional(),
+    otherAverageShotDurationMs: z.number().nonnegative().optional(),
+    topSampleShortShotRate: z.number().min(0).max(1).optional(),
+    otherShortShotRate: z.number().min(0).max(1).optional(),
+  }).strict(),
+  caveat: z.string().min(1).max(500),
+}).strict();
+export type AccountMediaPatternSummary = z.infer<typeof AccountMediaPatternSummarySchema>;
+
 export const AccountMetricsQuoteSchema = z.object({
   schemaVersion: z.literal(1),
   id,
@@ -108,6 +136,7 @@ export const AccountResearchReportSchema = z.object({
   coverage: z.object({ requested: z.number().int().positive(), received: z.number().int().nonnegative(), metadataAnalyzed: z.number().int().nonnegative(), mediaAnalyzed: z.number().int().nonnegative(), mediaPartiallyAnalyzed: z.number().int().nonnegative().default(0), missingMedia: z.number().int().nonnegative(), hasMore: z.boolean(), note: z.string().min(1) }).strict(),
   findings: z.array(z.object({ id, kind: z.enum(["metadata_pattern", "topic_opportunity", "needs_media_analysis", "media_pattern"]), title: id, detail: z.string().min(1), evidenceIds: z.array(id) }).strict()),
   opportunities: z.array(AccountResearchOpportunitySchema).max(20).default([]),
+  patternSummary: AccountMediaPatternSummarySchema.optional(),
   accountAnalysis: z.object({ schemaVersion: z.literal(1), day: z.number().int().positive().max(30), capturedAt: z.string().datetime({ offset: true }), metrics: z.record(z.number().finite()), evidenceId: id, responseHash: id }).strict().optional(),
   evidence: z.array(ResearchEvidenceSchema),
   createdAt: z.string().datetime({ offset: true }),
@@ -173,6 +202,14 @@ function overlap(leftStart: number, leftEnd: number, rightStart: number, rightEn
 function shortText(value: string, max = 90) {
   const normalized = value.trim().replace(/\s+/g, " ");
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+}
+
+function metricValue(statistics: Record<string, number>, keys: string[]) {
+  for (const key of keys) {
+    const value = statistics[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+  }
+  return undefined;
 }
 
 function timelineForFacts(awemeId: string, facts: ResearchTimelineFact[]) {
@@ -326,6 +363,48 @@ export function attachResearchMediaPatterns(report: AccountResearchReport, summa
   const ocrFacts = allFacts.filter((fact) => fact.kind === "ocr");
   const shotDurations = shotFacts.map((fact) => fact.endMs - fact.startMs).filter((duration) => duration > 0);
   const averageShotDurationMs = shotDurations.length > 0 ? Math.round(shotDurations.reduce((sum, duration) => sum + duration, 0) / shotDurations.length) : undefined;
+  const patternPerVideo = validSummaries.map((summary) => {
+    const video = report.videos.find((candidate) => candidate.awemeId === summary.awemeId);
+    const videoShots = summary.facts.filter((fact) => fact.kind === "shot").sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
+    const durations = videoShots.map((fact) => fact.endMs - fact.startMs).filter((duration) => duration > 0);
+    const transcriptsForVideo = summary.facts.filter((fact) => fact.kind === "transcript").sort((left, right) => left.startMs - right.startMs);
+    const shortShotCount = durations.filter((duration) => duration <= 1_500).length;
+    return {
+      awemeId: summary.awemeId,
+      durationMs: video?.durationMs,
+      shotCount: videoShots.length,
+      averageShotDurationMs: durations.length > 0 ? Math.round(durations.reduce((sum, duration) => sum + duration, 0) / durations.length) : undefined,
+      firstShotDurationMs: durations[0],
+      shortShotRate: durations.length > 0 ? Math.round((shortShotCount / durations.length) * 1_000) / 1_000 : undefined,
+      transcriptCount: transcriptsForVideo.length,
+      ocrCount: summary.facts.filter((fact) => fact.kind === "ocr").length,
+      openingText: transcriptsForVideo.filter((fact) => fact.startMs < 3_000).slice(0, 3).map((fact) => shortText(fact.text, 500)),
+      statistics: video?.statistics ?? {},
+    };
+  });
+  const rankedByPlay = patternPerVideo
+    .map((item) => ({ item, playCount: metricValue(item.statistics, ["play_count", "playCount", "view_count", "views"]) }))
+    .filter((item): item is { item: typeof patternPerVideo[number]; playCount: number } => item.playCount !== undefined)
+    .sort((left, right) => right.playCount - left.playCount || left.item.awemeId.localeCompare(right.item.awemeId));
+  const topSample = rankedByPlay[0];
+  const otherVideos = topSample ? patternPerVideo.filter((item) => item.awemeId !== topSample.item.awemeId) : [];
+  const otherWithDuration = otherVideos.filter((item) => item.averageShotDurationMs !== undefined);
+  const otherWithShortRate = otherVideos.filter((item) => item.shortShotRate !== undefined);
+  const patternSummary = AccountMediaPatternSummarySchema.parse({
+    schemaVersion: 1,
+    analyzedVideoCount: patternPerVideo.length,
+    perVideo: patternPerVideo,
+    topByPlayCount: rankedByPlay.slice(0, 10).map(({ item }) => item.awemeId),
+    comparison: {
+      topSampleAwemeId: topSample?.item.awemeId,
+      topSamplePlayCount: topSample?.playCount,
+      topSampleAverageShotDurationMs: topSample?.item.averageShotDurationMs,
+      otherAverageShotDurationMs: otherWithDuration.length > 0 ? Math.round(otherWithDuration.reduce((sum, item) => sum + item.averageShotDurationMs!, 0) / otherWithDuration.length) : undefined,
+      topSampleShortShotRate: topSample?.item.shortShotRate,
+      otherShortShotRate: otherWithShortRate.length > 0 ? Math.round((otherWithShortRate.reduce((sum, item) => sum + item.shortShotRate!, 0) / otherWithShortRate.length) * 1_000) / 1_000 : undefined,
+    },
+    caveat: topSample ? "播放量排序只描述当前已抓取且已分析的样本；镜头节奏与表现之间不构成因果结论。" : "当前样本没有可比较的播放量字段；只展示镜头、ASR 和 OCR 事实，不进行表现排序。",
+  });
   const evidenceId = `evidence-media-pattern-${report.secUserId}-${Math.max(...validSummaries.map((summary) => Date.parse(summary.analyzedAt)))}`;
   const capturedAt = validSummaries.map((summary) => summary.analyzedAt).sort().at(-1) ?? new Date().toISOString();
   const evidence = ResearchEvidenceSchema.parse({ schemaVersion: 1, id: evidenceId, type: "media_fact", sourceId: report.secUserId, label: "选中作品的本地镜头与文字模式", payload: {
@@ -334,6 +413,7 @@ export function attachResearchMediaPatterns(report: AccountResearchReport, summa
     averageShotDurationMs,
     transcriptSegmentCount: transcriptFacts.length,
     ocrCueCount: ocrFacts.length,
+    patternSummary,
     openingTranscriptSamples: transcriptFacts.filter((fact) => fact.startMs < 3_000).sort((left, right) => left.startMs - right.startMs).slice(0, 5).map((fact) => ({ artifactId: fact.artifactId, startMs: fact.startMs, text: fact.text })),
     artifactIds: [...new Set(validSummaries.flatMap((summary) => summary.artifactIds))],
   }, capturedAt });
@@ -342,7 +422,7 @@ export function attachResearchMediaPatterns(report: AccountResearchReport, summa
     id: `finding-media-pattern-${report.secUserId}`,
     kind: "media_pattern" as const,
     title: `已拆解 ${validSummaries.length} 条作品的镜头与文字事实`,
-    detail: `${shotDescription}；共检测 ${shotFacts.length} 个粗切镜头、${transcriptFacts.length} 段 ASR、${ocrFacts.length} 条 OCR。它描述的是已选作品样本，不代表账号整体因果规律。`,
+    detail: `${shotDescription}；共检测 ${shotFacts.length} 个粗切镜头、${transcriptFacts.length} 段 ASR、${ocrFacts.length} 条 OCR。${topSample ? `当前样本中播放量最高的是 ${topSample.item.awemeId}（${topSample.playCount.toLocaleString()}）；其平均镜头 ${patternSummary.comparison.topSampleAverageShotDurationMs === undefined ? "暂无" : `${(patternSummary.comparison.topSampleAverageShotDurationMs / 1000).toFixed(1)} 秒`}，其他样本平均 ${patternSummary.comparison.otherAverageShotDurationMs === undefined ? "暂无" : `${(patternSummary.comparison.otherAverageShotDurationMs / 1000).toFixed(1)} 秒`}。` : "当前没有足够播放量字段做样本排序。"} 这只是已选作品的描述性对照，不代表账号整体因果规律。`,
     evidenceIds: [evidenceId],
   };
   const findings = [patternFinding, ...report.findings.filter((finding) => finding.kind !== "media_pattern")];
@@ -360,7 +440,7 @@ export function attachResearchMediaPatterns(report: AccountResearchReport, summa
   const opportunityFindings = opportunities.map((opportunity) => ({ id: `finding-${opportunity.id}`, kind: "topic_opportunity" as const, title: opportunity.title, detail: opportunity.angle, evidenceIds: opportunity.evidenceIds }));
   const evidenceById = new Map(report.evidence.map((item) => [item.id, item]));
   evidenceById.set(evidence.id, evidence);
-  return AccountResearchReportSchema.parse({ ...report, evidence: [...evidenceById.values()], opportunities, findings: [...opportunityFindings, ...findings.filter((finding) => finding.kind !== "topic_opportunity")] });
+  return AccountResearchReportSchema.parse({ ...report, patternSummary, evidence: [...evidenceById.values()], opportunities, findings: [...opportunityFindings, ...findings.filter((finding) => finding.kind !== "topic_opportunity")] });
 }
 
 export function markResearchMediaFailures(report: AccountResearchReport, awemeIds: string[]) {

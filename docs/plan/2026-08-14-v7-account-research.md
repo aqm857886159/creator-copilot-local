@@ -1,7 +1,7 @@
 # V7：对标账号证据雷达（metadata-first）
 
 日期：2026-08-14  
-状态：metadata-first、选中作品本地化、本地镜头分析 Job、逐作品时间线（镜头/ASR/OCR）、基于证据的待审阅选题切入、账号聚合表现补充和“报价后确认补齐播放统计”已实现；中文 ASR/OCR 仍按能力配置后置；已补受控真实账号链路 smoke
+状态：metadata-first、选中作品本地化、本地镜头分析 Job、逐作品时间线（镜头/ASR/OCR）、跨作品模式摘要、基于证据的待审阅选题切入、账号聚合表现补充和“报价后确认补齐播放统计”已实现；中文 ASR/OCR 仍按能力配置后置；已补受控真实账号链路 smoke
 
 ## 产品名称与用户结果
 
@@ -34,6 +34,7 @@
 - `apps/desktop/main.cjs`：`desktop:analyze-research-media`，为每条作品创建或恢复 `media.analysis` Job，取得 lease 后由 `apps/desktop/analysis-worker.cjs` 执行 FFmpeg/ASR/OCR，main 只回写事实和 Job receipt；没有中文模型时保留 partial 状态，不伪造 ASR/OCR。
 - `packages/research/src/index.ts`：将选中作品的本地事实聚合成描述性账号模式（镜头数量/平均时长、ASR 段数、OCR 条数和开头样本），每条结论关联 `media_fact` evidence；它只描述样本，不把相关性说成因果。
 - `packages/research/src/index.ts`：每条已分析作品现在保存 `analysis.timeline`，按镜头时间段挂接 ASR 和 OCR 文本，并保留缺失能力；根据已观察事实生成 `AccountResearchOpportunity` 候选，明确标记为待审阅假设，不自动进入选题库或脚本。
+- `packages/research/src/index.ts`：跨作品模式摘要现在保存每条作品的镜头数量、平均/首镜头时长、短镜头比例、ASR/OCR 覆盖、开头文本和可用播放量排序；若有播放量，会把最高样本与其他样本的镜头节奏做描述性对照，并在 evidence/finding 中保留“非因果结论”声明。
 - `packages/providers/src/index.ts` + `apps/desktop/main.cjs`：TikHub 批量作品统计只在用户确认报价后调用，最多 50 条；返回的播放/点赞/下载/分享数字写回报告为 `metric` evidence，空结果和部分结果不自动重试。
 - `packages/providers/src/index.ts` + `apps/desktop/main.cjs`：TikHub `fetch_hot_account_item_analysis_list` 以 1–30 天为界读取账号聚合表现；同样经过报价→确认门，返回数字写入 `account_analysis` evidence，不把聚合基准误写成单条作品因果结论。
 - `apps/desktop/renderer/components/account-radar-workbench.tsx`：账号输入、10/20 条范围、覆盖状态、作品选择、显式本地化动作、逐作品“查看拆解”时间线和证据驱动的切入假设展示。
