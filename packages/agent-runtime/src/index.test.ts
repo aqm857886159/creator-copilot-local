@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AiSdkStructuredGenerator } from "../../providers/src/index";
-import { AiSdkEditAgentRuntime, LocalScriptAgentRuntime, MastraEditAgentRuntime, materializeEditProposalDraft, materializeScriptProposal } from "./index";
+import { AiSdkEditAgentRuntime, LocalScriptAgentRuntime, MastraEditAgentRuntime, buildEditProposalPrompt, materializeEditProposalDraft, materializeScriptProposal } from "./index";
 
 const now = "2026-08-14T00:00:00.000Z";
 const script = { schemaVersion: 1 as const, id: "script-1", projectId: "project-1", revision: 1, status: "approved" as const, blocks: [{ schemaVersion: 1 as const, id: "block-1", order: 0, kind: "claim" as const, text: "观点文本", emphasis: [], evidenceIds: [], visualNeed: "support" as const }], estimatedDurationMs: 2_000, createdAt: now, updatedAt: now };
@@ -11,6 +11,13 @@ const take = { schemaVersion: 1 as const, id: "take-1", shootTaskId: "task-1", a
 const input = { projectId: "project-1", script, storyboard, tasks: [task], takesByTask: { "task-1": [take] }, assetFacts: { "asset-1": { contentHash: "sha256:asset-1", durationMs: 2_000 } }, now };
 
 describe("agent edit proposal runtime", () => {
+  it("passes the approved shot and capture intent to the AI proposer", () => {
+    const prompt = buildEditProposalPrompt({ ...input, storyboard: { ...storyboard, shots: [{ ...storyboard.shots[0], framing: "medium", cameraDirection: "手机竖拍，中景固定", deviceHint: "phone", orientation: "portrait", checklist: ["眼睛在上三分之一", "多拍一条备用"] }] }, tasks: [{ ...task, deviceHint: "phone", orientation: "portrait", checklist: ["眼睛在上三分之一", "多拍一条备用"] }] });
+    const payload = JSON.parse(prompt.user) as { STORYBOARD: Array<{ shotPlan: { framing?: string; cameraDirection?: string; checklist: string[] }; captureTask?: { checklist: string[] } }> };
+    expect(payload.STORYBOARD[0].shotPlan).toMatchObject({ framing: "medium", cameraDirection: "手机竖拍，中景固定", checklist: ["眼睛在上三分之一", "多拍一条备用"] });
+    expect(payload.STORYBOARD[0].captureTask?.checklist).toEqual(["眼睛在上三分之一", "多拍一条备用"]);
+  });
+
   it("materializes only confirmed material and assigns safe timeline", () => {
     const result = materializeEditProposalDraft(input, { schemaVersion: 1, operations: [{ shotId: "shot-1", sourceAssetId: "asset-1", sourceSegment: { startMs: 100, endMs: 1_900 }, role: "a_roll", reason: "保持口播连续", evidenceIds: ["shot-1"], confidence: 0.9 }], subtitles: [{ shotId: "shot-1", text: "观点文本" }], missingMaterial: [] }, { providerKey: "mock", modelKey: "mock-model", responseHash: "sha256:response" });
     expect(result).toMatchObject({ status: "ready", provider: { providerKey: "mock" }, proposal: { durationMs: 1_800, operations: [{ timeline: { startMs: 0, endMs: 1_800 }, shotId: "shot-1" }] } });

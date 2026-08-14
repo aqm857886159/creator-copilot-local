@@ -274,6 +274,7 @@ interface SelectTakeResult {
 
 interface EditProposalOperation {
   id: string;
+  shotId: string;
   sourceAssetId: string;
   sourceSegment: { startMs: number; endMs: number };
   timeline: { startMs: number; endMs: number };

@@ -1,7 +1,7 @@
 # V5b 脚本 AI 提案与拍摄包衔接施工记录
 
 日期：2026-08-14  
-状态：已完成首条本地闭环；云端模型为显式可选能力，不覆盖原稿
+状态：已完成首条本地闭环；结构化 shotPlan 已传递给 AI 剪辑提案；云端模型为显式可选能力，不覆盖原稿
 
 ## 1. 这次交付的用户结果
 
@@ -16,6 +16,8 @@
 
 用户确认后，脚本、项目和提案在同一 SQLite 事务中保存；随后可以直接进入分镜和拍摄包，不需要重新复制脚本，也不会重复创建项目。
 
+进入 AI 剪辑后，拍摄任务中的动作、设备、横竖屏和检查清单会继续作为 AI 提案的约束输入，并在每个镜头候选下显示“原拍摄意图”。素材不满足意图时，模型必须返回可见缺口，不能用泛化素材冒充已完成镜头。
+
 产品界面使用“AI 脚本提案”“确认并进入分镜”等用户语言。AI 剪辑仍是后续的“AI 粗剪 / AI 剪辑提案”；渲染执行器的冻结合同不暴露为一个笨的独立功能。
 
 ## 2. 代码边界
@@ -23,7 +25,7 @@
 | 层 | 实现 | 约束 |
 | --- | --- | --- |
 | 领域合同 | `packages/creation/src/index.ts` | `ScriptProposalSchema` 保存 brief、voiceProfile、blocks、visualSuggestion、`shotPlan`、provider 和状态；Shot/Task 会继承拍摄意图 |
-| Agent 运行时 | `packages/agent-runtime/src/index.ts` | `LocalScriptAgentRuntime` 离线可用；`AiSdkScriptAgentRuntime` 只生成结构化草稿；所有输出都经过本地 materializer |
+| Agent 运行时 | `packages/agent-runtime/src/index.ts` | `LocalScriptAgentRuntime` 离线可用；`AiSdkScriptAgentRuntime` 只生成结构化草稿；AI 剪辑 prompt 同时接收 shotPlan/拍摄任务；所有输出都经过本地 materializer |
 | Provider | `apps/desktop/main.cjs` | 仅 main process 持有 APIMart key；`AI_EDIT_PROVIDER=apimart` 才启用云端脚本模型，否则走 local fallback |
 | 持久化 | `packages/storage/src/catalog.ts` | migration 9 新增 `script_proposals`；确认提案、创建项目、保存脚本在一个事务中完成 |
 | UI/IPC | `preload.cjs`、`global.d.ts`、`creation-workbench.tsx` | renderer 只调用类型化 API；用户显式点击生成和确认，不做后台请求或自动覆盖 |
@@ -75,7 +77,7 @@ npm run typecheck
 npm test
 ```
 
-当前通过：11 个 test files、65 个 tests。覆盖本地 fallback、AI SDK edit 既有路径、脚本 evidence 越权、提案确认、SQLite migration/reopen、重复确认和复用项目进入拍摄包。
+当前通过：11 个 test files、66 个 tests。覆盖本地 fallback、AI SDK edit 既有路径、shotPlan 进入 AI 剪辑 prompt、脚本 evidence 越权、提案确认、SQLite migration/reopen、重复确认和复用项目进入拍摄包。
 
 桌面和真实媒体：
 
@@ -98,4 +100,4 @@ node scripts/render-recovery-smoke.mjs
 - 不把模型生成的段落自动晋升为创作记忆；
 - 不承诺已经解决完整的 ASR/OCR/VLM 质量问题。
 
-下一步是让 AI 粗剪把已选 Take、`shotPlan` 和拍摄检查结果作为可审阅输入；更复杂的 VLM 选材和自动补拍建议仍然后置。
+下一步转入 V6 质量门：用脱敏中文口播 fixture 验证 ASR/OCR/镜头事实的时间码和检索首屏命中，再评估跨素材语义重排；VLM 选材和自动补拍建议仍然后置。

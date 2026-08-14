@@ -129,6 +129,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .proposal-topline strong { color: #4f5e4b; font-size: 12px; }
 .proposal-topline span { color: #9b9387; font-size: 10px; }
 .proposal-main p { margin: 5px 0 6px; color: #676056; font-size: 12px; line-height: 1.55; }
+.proposal-intent { margin: 6px 0; padding: 6px 8px; border-left: 2px solid #b8c7a8; background: #f4f7ef; color: #69725f; font-size: 10px; line-height: 1.45; }
 .proposal-evidence { color: #a49a8e; font-size: 10px; line-height: 1.4; }
 .edit-recovery { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 15px; border: 1px solid #e2c7b5; border-radius: 10px; background: #fff5eb; color: #7d6251; }
 .edit-recovery strong { font-size: 11px; }

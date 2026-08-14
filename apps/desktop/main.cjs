@@ -1560,6 +1560,7 @@ app.whenReady().then(() => {
           clickText("生成 AI 剪辑提案");
           await wait(1_000);
           if (!document.querySelector(".proposal-list")) throw new Error("AI 提案没有出现在页面；body=" + (document.body?.innerText ?? "").slice(-1200));
+          if (!document.querySelector(".proposal-intent")) throw new Error("AI 提案没有显示原拍摄意图");
           clickText("确认并导出");
           await wait(2_500);
           if (!document.querySelector(".render-success")) throw new Error("AI 剪辑没有成功导出");
