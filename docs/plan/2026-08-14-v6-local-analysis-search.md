@@ -1,7 +1,7 @@
 # V6 本地分析事实与素材检索
 
 日期：2026-08-14  
-状态：分析合同、whisper.cpp adapter、可选 faster-whisper Python sidecar、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作、本地分析 Job、打包 utility worker 回写和质量评测合同 smoke 已完成；已补用户显式路径的真实 fixture 观察入口，产品质量门仍待人工 Gold
+状态：分析合同、whisper.cpp adapter、可选 faster-whisper Python sidecar、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作、本地分析 Job、分镜级候选召回、打包 utility worker 回写和质量评测合同 smoke 已完成；已补用户显式路径的真实 fixture 观察入口，产品质量门仍待人工 Gold
 
 ## 1. 选型决策
 
@@ -41,7 +41,7 @@ SQLite schema v5 增加：
 
 原始视频行上的“分析素材”动作会在 main 中重新校验 workspace-relative 路径和内容 hash，创建或复用 `media.analysis` Job，执行镜头检测/ASR/OCR worker，并把 `AnalysisFact` 写入同一工作区的 FTS5 索引。已有 succeeded Job 只读复用事实；failed、timed_out 和 needs_attention 通过 lease-safe 状态迁移后才能重试。
 
-没有分析事实时显示明确空状态，不显示虚假标签。
+没有分析事实时显示明确空状态，不显示虚假标签。分镜级候选召回只从已有本地事实中排序，不自动替换 Take。
 
 ## 3. 测试与证据
 
@@ -53,7 +53,7 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 npm run test:analysis:recovery # worker 崩溃、重启恢复、stale lease、重试和取消
 ```
 
-当前测试覆盖（本次变更后 11 files / 68 tests）：
+当前测试覆盖（本次变更后 11 files / 71 tests）：
 
 - whisper.cpp timestamp 字符串、秒和毫秒变体；
 - transcript → AnalysisFact；
@@ -63,11 +63,13 @@ npm run test:analysis:recovery # worker 崩溃、重启恢复、stale lease、�
 - schema v5 迁移；
 - FTS5 写入、查询、kind 过滤、重启后查询；
 - 合成中文质量夹具的 6 项 gate 通过与失败诊断；
+- 分镜级素材候选召回：中文事实匹配、时间码 evidence、稳定排序和未分析素材排除；
 - 导入产物进入 catalog，素材库可读取。
 - 素材库按原始 artifact 创建/复用分析 Job，并支持按 artifactId 限定事实检索。
 - `search-assets` 同时返回工作区内与可见素材关联的 `media.analysis` Job；素材列表明确区分尚未分析、待继续、分析中、已完成和失败，避免应用重启后把排队任务显示成无状态按钮。
 - 正在运行的本地分析可从素材库主动取消；main 只取消自己持有的 utility worker，Job 进入 `cancelled` 并清理 lease，不会把被杀掉的旧 worker 当成成功。
 - `npm run test:analysis:recovery` 已覆盖 worker 崩溃后重启回收、旧 token 拒绝、失败重试 attempt 递增、成功终态清理 lease，以及用户取消；该 smoke 不调用模型、不产生 Provider 费用。
+- `rankAssetCandidates` 已将每个分镜的动作/脚本文本与本地事实做可解释的词面召回，按事实命中、偏好事实类型和时长适配排序；AI 粗剪页展示候选路径、置信度、时间码证据和“打开预览”，但不会自动替换 Take 或冻结时间线。
 
 质量评测报告现在返回 6 个机器可读的 gate result 和失败诊断，不再只有 `passed: boolean`；这让 CI、桌面状态和人工 Gold 评审可以指出具体是 CER、分段召回、时间码、OCR precision/recall 还是 bbox IoU 未达标。
 

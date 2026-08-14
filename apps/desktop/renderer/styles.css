@@ -130,6 +130,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .proposal-topline span { color: #9b9387; font-size: 10px; }
 .proposal-main p { margin: 5px 0 6px; color: #676056; font-size: 12px; line-height: 1.55; }
 .proposal-intent { margin: 6px 0; padding: 6px 8px; border-left: 2px solid #b8c7a8; background: #f4f7ef; color: #69725f; font-size: 10px; line-height: 1.45; }
+.edit-candidates { padding: 19px; border: 1px solid #d8e0d1; border-radius: 11px; background: rgba(247, 250, 244, .78); }
+.edit-candidate-note { margin: 0 0 14px; color: #74816e; font-size: 11px; line-height: 1.55; }
+.edit-candidate-shot + .edit-candidate-shot { margin-top: 14px; }
+.edit-candidate-shot > strong { color: #53674d; font-size: 12px; }
+.edit-candidate-list { display: grid; gap: 7px; margin-top: 8px; }
+.edit-candidate-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 11px; border: 1px solid #e0e7db; border-radius: 8px; background: rgba(255, 255, 251, .76); }
+.edit-candidate-row p { margin: 5px 0 0; color: #687563; font-size: 10px; line-height: 1.45; }
+.edit-candidate-row small { display: block; margin-top: 5px; color: #97a08f; font-size: 9px; }
+.edit-candidate-topline { display: flex; flex-wrap: wrap; gap: 8px; color: #73836d; font-size: 10px; }
+.edit-candidate-topline span:first-child { color: #5d7457; font-weight: 650; }
 .proposal-evidence { color: #a49a8e; font-size: 10px; line-height: 1.4; }
 .edit-recovery { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 15px; border: 1px solid #e2c7b5; border-radius: 10px; background: #fff5eb; color: #7d6251; }
 .edit-recovery strong { font-size: 11px; }

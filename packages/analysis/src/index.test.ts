@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { writeFile } from "node:fs/promises";
-import { AppleVisionOcr, evaluateAnalysisQualityFixture, evaluateOcrQuality, evaluateTranscriptQuality, FasterWhisperSidecarTranscriber, FfmpegSceneDetector, mergeOcrCues, ocrFacts, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
+import { AppleVisionOcr, evaluateAnalysisQualityFixture, evaluateOcrQuality, evaluateTranscriptQuality, FasterWhisperSidecarTranscriber, FfmpegSceneDetector, mergeOcrCues, ocrFacts, parseSceneTimestamps, parseWhisperJson, rankAssetCandidates, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
 
 describe("local analysis facts", () => {
   it("normalizes whisper.cpp timestamp variants into bounded transcript segments", () => {
@@ -11,6 +11,26 @@ describe("local analysis facts", () => {
 
   it("keeps FTS query construction deterministic", () => {
     expect(searchQueryForFts("  观点  画面 ")).toBe('"观点"* AND "画面"*');
+  });
+
+  it("ranks local asset candidates by Chinese fact matches and preserves evidence timecodes", () => {
+    const result = rankAssetCandidates({
+      queries: [{ shotId: "shot-proof", instruction: "拍一段手机屏幕里的真实数据", scriptText: "数据比感觉更能证明观点", mode: "screen_recording", framing: "screen", targetMs: 2_000 }],
+      assets: [
+        { assetId: "asset-screen", relativePath: "originals/screen.mp4", contentHash: "sha256:screen", durationMs: 4_000, facts: [{ id: "fact-screen", kind: "ocr", startMs: 300, endMs: 1_800, text: "真实数据趋势", labels: ["ocr", "屏幕"] }] },
+        { assetId: "asset-room", relativePath: "originals/room.mp4", contentHash: "sha256:room", durationMs: 4_000, facts: [{ id: "fact-room", kind: "shot", startMs: 0, endMs: 4_000, text: "人物中景", labels: ["cut"] }] },
+      ],
+    });
+    expect(result[0].candidates[0]).toMatchObject({ assetId: "asset-screen", confidence: "medium", evidenceIds: ["fact-screen"], sourceSegment: { startMs: 300, endMs: 1_800 } });
+    expect(result[0].candidates[0].reason).toContain("本地事实");
+  });
+
+  it("keeps candidate ranking deterministic and does not return unanalysed assets", () => {
+    const input = { queries: [{ shotId: "shot-1", instruction: "真实物件", mode: "broll" as const }], assets: [{ assetId: "asset-a", relativePath: "a.mp4", contentHash: "sha256:a", facts: [{ id: "fact-a", kind: "ocr" as const, startMs: 0, endMs: 500, text: "真实物件", labels: [] }] }, { assetId: "asset-empty", relativePath: "empty.mp4", contentHash: "sha256:empty", facts: [] }] };
+    const first = rankAssetCandidates(input);
+    const second = rankAssetCandidates(input);
+    expect(first).toEqual(second);
+    expect(first[0].candidates.map((candidate) => candidate.assetId)).toEqual(["asset-a"]);
   });
 
   it("measures transcript text and timestamp quality against a reference", () => {

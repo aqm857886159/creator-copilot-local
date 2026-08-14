@@ -6,6 +6,8 @@ import { promisify } from "node:util";
 import { z } from "zod";
 export { AnalysisQualityFixtureSchema, evaluateAnalysisQualityFixture, evaluateOcrQuality, evaluateTranscriptQuality } from "./quality.js";
 export type { AnalysisQualityFixture, AnalysisQualityGate, QualityCue } from "./quality.js";
+export { AssetCandidateQuerySchema, AssetCandidateSchema, AssetCandidateSetSchema, AssetCandidateSourceSchema, rankAssetCandidates } from "./candidates.js";
+export type { AssetCandidate, AssetCandidateQuery, AssetCandidateSearchInput, AssetCandidateSet, AssetCandidateSource } from "./candidates.js";
 
 const execFile = promisify(execFileCallback);
 const id = z.string().min(1);

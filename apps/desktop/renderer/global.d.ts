@@ -309,6 +309,7 @@ interface EditProposalResult {
   project?: { id: string; title: string };
   missing?: Array<{ shotId: string; taskId?: string; reason: string; instruction: string }>;
   analysisFacts?: Array<{ id: string; artifactId: string; kind: string; startMs: number; endMs: number; text: string; labels: string[]; providerKey: string }>;
+  assetCandidates?: Array<{ shotId: string; candidates: Array<{ assetId: string; relativePath: string; contentHash: string; score: number; confidence: "low" | "medium" | "high"; matchedTerms: string[]; evidenceIds: string[]; sourceSegment?: { startMs: number; endMs: number }; durationMs?: number; reason: string }> }>;
   proposal?: EditProposal;
   assetLocks?: Array<{ assetId: string; contentHash: string }>;
   provider?: { providerKey: string; modelKey?: string; responseHash?: string };
