@@ -1,7 +1,7 @@
 # V2a 本地媒体事实实施记录
 
 日期：2026-08-14  
-状态：media package 与最小 Electron IPC/UI 导入入口已实现；尚未接入真实 Job scheduler 和 catalog manifest 提交
+状态：media package、可恢复的 Electron 媒体导入 Job、catalog artifact 提交与幂等复用已实现；进度流、独立 scheduler 和跨平台 bundled FFmpeg 仍后置
 
 ## 本切片的用户结果
 
@@ -21,6 +21,8 @@
 ## 代码边界
 
 - `packages/media/src/index.ts`：`LocalMediaImporter`、`FfmpegToolchain`、ffprobe 归一化、原子文件写入、hash 和产物关系。
+- `apps/desktop/main.cjs`：`importLocalMediaJob` 负责以源文件 hash 生成稳定 Job/幂等键，取得带 fencing token 的本地租约，写入三份 Artifact manifest，并将 probe/来源名/产物 ID 写入 Job checkpoint。
+- `packages/storage/src/catalog.ts`：Job lease、恢复、artifact transaction 和 workspace 相对路径约束。
 - 默认仅支持视频扩展名（mp4/mov/m4v/webm/mkv/avi）；不把未知文件误送到 FFmpeg 视频链路。
 - ffmpeg/ffprobe 可通过路径和 `CommandRunner` 注入，测试和后续 bundled binary 不依赖 PATH。
 - 临时输出文件和最终文件在同一目录；命令失败会清理本次创建的产物，避免把半成品登记为事实。
@@ -29,16 +31,19 @@
 
 ## 失败和恢复边界
 
-- 源文件不存在、不是普通文件、超大小上限、不是视频或工作区不存在：在写入前拒绝。
+- 源文件不存在、不是普通文件、超大小上限、不是视频或工作区不存在：在写入媒体产物前拒绝；不支持的视频扩展名不会创建 Job，损坏的视频文件会保留失败 Job 以便观察和重试。
 - ffprobe/ffmpeg 失败、取消或输出缺失：删除本次 importer 创建的原件/代理/缩略图，不产生成功结果。
 - 已存在同一 hash 的原件不会覆盖；后续 catalog 层以 artifactId/idempotencyKey 做去重。
-- 当前 importer 返回 manifest，但还没有在 SQLite 中提交 manifest；下一步由 media Job handler 在一个可观察 receipt 中完成提交。
+- 同一源文件 hash 的第二次导入不会重复生成代理片或缩略图；若 Job 已成功且三份 artifact 都存在，则返回 `reused=true`。
+- 进程在 `claimed/running` 期间退出时，下一次工作区初始化会回收过期租约；失败任务进入 `retry_wait` 后可以重新 claim。旧 worker 不能用旧 lease token 覆盖新尝试。
+- 当前导入 Job 已有可观察状态和 `attempt`，但还没有独立后台队列；IPC 调用仍等待本次 FFmpeg 完成，用户关闭窗口前不会获得跨进程进度流。
 
 ## 验证
 
 - `npm run typecheck` ✅
 - `npm test` ✅（4 files / 15 tests）
 - `npm run build` ✅
+- `npm run test:media:import:job` ✅：打包应用对 1.4 秒 fixture 执行首次导入与第二次复用，并对故意的非视频文件执行两次失败重试；最终成功任务 `jobState=succeeded`、`attempt=1`、3 个 artifact、1 个 source artifact，失败任务 `failedAttempt=2`。
 - 真实 FFmpeg smoke ✅：生成 1 秒 320×568 MP4，成功输出约 20KB 代理和 JPEG 缩略图，并返回 1000ms duration。
 - Electron built-dist startup smoke ✅：构建产物可启动，媒体 runtime ESM 可被主进程动态加载。
 

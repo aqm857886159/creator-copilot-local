@@ -251,6 +251,8 @@ TOPIC_RADAR_BILLED_SMOKE=1 TOPIC_RADAR_SOURCE=low_fan npm run test:topic-radar:l
 
 本地 `.env` 仅用于当前机器联调，已被 `.gitignore` 忽略；仓库只提交 `.env.example` 和本文件，不提交任何 key。
 
+2026-08-14 最新默认 live smoke（使用本地 `.env`，未触发计费业务请求）：TikHub health/credential 均 HTTP 200，低粉榜动态报价为 `$0.001` 且限流 `10/second`；APIMart `GET /v1/models?expand=true` HTTP 200，返回 285 个模型。后续真实测试继续从 `npm run test:providers:live` 开始，只有显式设置政策中的开关才允许计费请求。
+
 选题雷达 smoke 的默认边界是单来源、`pageSize=1`、24 小时窗口；`TOPIC_RADAR_BILLED_SMOKE=1` 才会发出一条真实榜单/搜索请求，执行前脚本会先读取动态端点价格。脚本只打印来源、数量、hash 和价格摘要，不打印原始响应、临时 URL、余额或凭证。
 
 ## 5. 第一阶段产品功能映射

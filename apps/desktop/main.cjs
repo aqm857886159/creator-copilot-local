@@ -371,6 +371,87 @@ async function analyzeLocalArtifact({ workspace, runtime, artifact }) {
   }
 }
 
+async function importLocalMediaJob({ workspace, runtime, sourcePath, workerId = "media-import-main", maxBytes }) {
+  if (!runtime.media.mimeTypeForPath(sourcePath).startsWith("video/")) return { ok: false, status: "failed", errorCode: "MEDIA_IMPORT_UNSUPPORTED_TYPE", message: "当前本地导入只支持视频文件。" };
+  const sourceHash = await runtime.media.sha256File(sourcePath);
+  const hashSuffix = sourceHash.slice("sha256:".length, "sha256:".length + 24);
+  const jobId = `media-import-${hashSuffix}`;
+  const now = new Date();
+  workspace.catalog.recoverExpiredLeases(now);
+  let job = workspace.catalog.getJob(jobId);
+  if (!job) {
+    const timestamp = now.toISOString();
+    workspace.catalog.insertJob({
+      schemaVersion: 1,
+      id: jobId,
+      kind: "media.import",
+      inputHash: sourceHash,
+      state: "queued",
+      attempt: 0,
+      idempotencyKey: `media-import-${sourceHash}`,
+      idempotencyScope: workspace.workspaceId,
+      providerKey: "local",
+      correlationId: `media-import-run-${randomUUID()}`,
+      artifactIds: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    job = workspace.catalog.getJob(jobId);
+  } else if (job.inputHash !== sourceHash) {
+    return { ok: false, status: "conflict", errorCode: "MEDIA_IMPORT_INPUT_CHANGED", message: "同一个导入任务的文件内容已经变化，请重新选择文件。", job };
+  } else if (job.state === "succeeded") {
+    const artifacts = job.artifactIds.map((artifactId) => workspace.catalog.getArtifact(artifactId)).filter(Boolean);
+    const checkpoint = job.checkpoint && typeof job.checkpoint.mediaImport === "object" ? job.checkpoint.mediaImport : undefined;
+    if (artifacts.length === job.artifactIds.length && artifacts.length > 0) {
+      return {
+        ok: true,
+        status: "succeeded",
+        reused: true,
+        sourceName: checkpoint && typeof checkpoint.sourceName === "string" ? checkpoint.sourceName : path.basename(sourcePath),
+        probe: checkpoint && checkpoint.probe,
+        artifacts,
+        job,
+      };
+    }
+    return { ok: false, status: "needs_attention", errorCode: "MEDIA_IMPORT_ARTIFACT_MISSING", message: "导入任务已完成，但本地产物不完整；请重新选择该文件。", job };
+  } else if (["claimed", "running"].includes(job.state)) {
+    return { ok: false, status: "running", message: "这段素材正在导入，请等待当前任务完成。", job };
+  } else if (["failed", "timed_out"].includes(job.state)) {
+    workspace.catalog.transitionJob(job.id, job.state, "retry_wait", undefined, { retryAfter: now.toISOString(), lastError: undefined });
+    job = workspace.catalog.getJob(job.id);
+  } else if (job.state === "submission_unknown") {
+    workspace.catalog.transitionJob(job.id, job.state, "needs_attention", undefined, { lastError: undefined });
+    job = workspace.catalog.getJob(job.id);
+    if (job?.state === "needs_attention") {
+      workspace.catalog.transitionJob(job.id, job.state, "queued", undefined, { lastError: undefined });
+      job = workspace.catalog.getJob(job.id);
+    }
+  } else if (job.state === "needs_attention") {
+    workspace.catalog.transitionJob(job.id, job.state, "queued", undefined, { lastError: undefined });
+    job = workspace.catalog.getJob(job.id);
+  } else if (job.state === "cancelled") {
+    return { ok: false, status: "cancelled", message: "这段素材的导入任务已取消，请重新选择文件。", job };
+  }
+  if (!job) throw new Error("媒体导入任务创建失败");
+  const leaseToken = workspace.catalog.claimJob(job.id, workerId, now, 10 * 60 * 1000);
+  if (!leaseToken) return { ok: false, status: "running", message: "导入任务正在运行或暂时无法取得租约。", job: workspace.catalog.getJob(job.id) };
+  if (!workspace.catalog.heartbeatJob(job.id, workerId, leaseToken, new Date(), 10 * 60 * 1000)) return { ok: false, status: "needs_attention", message: "导入任务租约已失效，请稍后重试。", job: workspace.catalog.getJob(job.id) };
+  try {
+    const imported = await runtime.mediaImporter.import({ workspaceRoot: workspace.workspacePath, sourcePath, ...(maxBytes ? { maxBytes } : {}) });
+    if (imported.source.contentHash !== sourceHash) throw new Error("导入过程中文件内容发生变化");
+    const artifacts = [imported.source, imported.proxy, imported.thumbnail].map((artifact) => ({ ...artifact, workspaceId: workspace.workspaceId }));
+    workspace.catalog.insertArtifacts(artifacts);
+    const sourceName = path.basename(sourcePath);
+    const checkpoint = { mediaImport: { sourceName, sourceHash, probe: imported.probe, artifactIds: artifacts.map((artifact) => artifact.artifactId), completedAt: new Date().toISOString() } };
+    if (!workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: artifacts.map((artifact) => artifact.artifactId), checkpoint })) throw new Error("媒体导入任务完成状态未能持久化");
+    return { ok: true, status: "succeeded", reused: false, sourceName, probe: imported.probe, artifacts, job: workspace.catalog.getJob(job.id) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "本地媒体导入失败";
+    const transitioned = workspace.catalog.transitionJob(job.id, "running", "failed", leaseToken, { lastError: { code: "MEDIA_IMPORT_FAILED", message, retryable: true } });
+    return { ok: false, status: transitioned ? "failed" : "needs_attention", errorCode: "media_import_failed", message, job: workspace.catalog.getJob(job.id) };
+  }
+}
+
 async function resolveFrozenRenderAssets({ workspace, runtime, frozen }) {
   const assets = {};
   const workspaceRoot = realpathSync(workspace.workspacePath);
@@ -476,15 +557,18 @@ ipcMain.handle("desktop:import-media", async () => {
   if (result.canceled || result.filePaths.length === 0) return { ok: false, errorCode: "cancelled", message: "已取消导入" };
   try {
     const runtime = await getDesktopRuntime();
-    const imported = await runtime.mediaImporter.import({ workspaceRoot: selectedWorkspacePath, sourcePath: result.filePaths[0] });
     const workspace = requireWorkspace();
-    workspace.catalog.insertArtifacts([imported.source, imported.proxy, imported.thumbnail].map((artifact) => ({ ...artifact, workspaceId: workspace.workspaceId })));
+    const imported = await importLocalMediaJob({ workspace, runtime, sourcePath: result.filePaths[0] });
+    if (!imported.ok) return { ...imported, errorCode: imported.errorCode ?? "media_import_not_completed" };
     return {
       ok: true,
-      sourceName: path.basename(result.filePaths[0]),
-      durationMs: imported.probe.durationMs ?? null,
-      streams: imported.probe.streams.map(({ kind, codec, width, height, frameRate, sampleRate, channels, rotation }) => ({ kind, codec, width, height, frameRate, sampleRate, channels, rotation })),
-      artifacts: [imported.source, imported.proxy, imported.thumbnail],
+      reused: imported.reused,
+      status: imported.status,
+      sourceName: imported.sourceName,
+      durationMs: imported.probe?.durationMs ?? null,
+      streams: imported.probe?.streams.map(({ kind, codec, width, height, frameRate, sampleRate, channels, rotation }) => ({ kind, codec, width, height, frameRate, sampleRate, channels, rotation })) ?? [],
+      artifacts: imported.artifacts,
+      job: imported.job,
     };
   } catch (error) {
     return { ok: false, errorCode: "media_import_failed", message: error instanceof Error ? error.message : "媒体导入失败" };
@@ -796,11 +880,11 @@ ipcMain.handle("desktop:download-research-media", async (_event, raw) => {
       try {
         const playUrl = await connector.fetchHighestQualityPlayUrl({ awemeId: video.awemeId, shareUrl: video.shareUrl, region: "CN" });
         await runtime.media.downloadRemoteFile({ url: playUrl.url, destinationPath: temporaryPath, maxBytes: 1024 * 1024 * 1024 });
-        const imported = await runtime.mediaImporter.import({ workspaceRoot: workspace.workspacePath, sourcePath: temporaryPath, maxBytes: 1024 * 1024 * 1024 });
-        workspace.catalog.insertArtifacts([imported.source, imported.proxy, imported.thumbnail].map((artifact) => ({ ...artifact, workspaceId: workspace.workspaceId })));
-        const artifactIds = [imported.source.artifactId, imported.proxy.artifactId, imported.thumbnail.artifactId];
+        const imported = await importLocalMediaJob({ workspace, runtime, sourcePath: temporaryPath, workerId: "media-research-import-main", maxBytes: 1024 * 1024 * 1024 });
+        if (!imported.ok) throw new Error(imported.message ?? "研究素材导入任务未完成");
+        const artifactIds = imported.artifacts.map((artifact) => artifact.artifactId);
         attachments.push({ awemeId: video.awemeId, artifactIds, attachedAt: new Date().toISOString() });
-        downloaded.push({ awemeId: video.awemeId, reused: false, artifactIds });
+        downloaded.push({ awemeId: video.awemeId, reused: imported.reused, artifactIds });
       } catch (error) {
         failed.push({ awemeId: video.awemeId, message: error instanceof Error ? error.message : "下载或导入失败" });
       } finally {
@@ -1588,12 +1672,15 @@ ipcMain.handle("desktop:import-take", async (_event, shootTaskId) => {
       : await dialog.showOpenDialog({ properties: ["openFile"], title: `为“${task.title}”导入 Take`, filters: [{ name: "视频", extensions: ["mp4", "mov", "m4v", "webm", "mkv", "avi"] }] });
     if (result.canceled || result.filePaths.length === 0) return { ok: false, errorCode: "cancelled", message: "已取消导入" };
     const runtime = await getDesktopRuntime();
-    const imported = await runtime.mediaImporter.import({ workspaceRoot: workspace.workspacePath, sourcePath: result.filePaths[0] });
-    workspace.catalog.insertArtifacts([imported.source, imported.proxy, imported.thumbnail].map((artifact) => ({ ...artifact, workspaceId: workspace.workspaceId })));
+    const imported = await importLocalMediaJob({ workspace, runtime, sourcePath: result.filePaths[0], workerId: "media-take-import-main" });
+    if (!imported.ok) return { ...imported, errorCode: imported.errorCode ?? "take_import_not_completed" };
     const now = new Date().toISOString();
-    const take = runtime.creation.TakeSchema.parse({ schemaVersion: 1, id: `take-${randomUUID()}`, shootTaskId, assetId: imported.source.artifactId, relativePath: imported.source.relativePath, durationMs: imported.probe.durationMs, status: "candidate", createdAt: now, updatedAt: now });
+    const source = imported.artifacts.find((artifact) => artifact.kind === "source");
+    if (!source) throw new Error("媒体导入任务没有返回 source artifact");
+    const take = runtime.creation.TakeSchema.parse({ schemaVersion: 1, id: `take-${randomUUID()}`, shootTaskId, assetId: source.artifactId, relativePath: source.relativePath, durationMs: imported.probe?.durationMs, status: "candidate", createdAt: now, updatedAt: now });
     workspace.catalog.addTake(take);
-    return { ok: true, take, task: workspace.catalog.getShootTask(shootTaskId), sourceName: path.basename(result.filePaths[0]), thumbnail: imported.thumbnail };
+    const thumbnail = imported.artifacts.find((artifact) => artifact.kind === "thumbnail");
+    return { ok: true, take, task: workspace.catalog.getShootTask(shootTaskId), sourceName: imported.sourceName, thumbnail, reused: imported.reused, job: imported.job };
   } catch (error) {
     return { ok: false, errorCode: "take_import_failed", message: error instanceof Error ? error.message : "Take 导入失败" };
   }
@@ -1675,8 +1762,8 @@ ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
 
 app.whenReady().then(() => {
   const start = async () => {
-    if (process.argv.includes("--ui-smoke") || process.argv.includes("--topic-library-smoke")) {
-      const smokeWorkspace = process.env.UI_SMOKE_WORKSPACE;
+    if (process.argv.includes("--ui-smoke") || process.argv.includes("--topic-library-smoke") || process.argv.includes("--media-import-smoke")) {
+      const smokeWorkspace = process.env.UI_SMOKE_WORKSPACE ?? process.env.MEDIA_IMPORT_SMOKE_WORKSPACE;
       if (!smokeWorkspace) throw new Error("UI_SMOKE_WORKSPACE 未配置");
       await initializeWorkspace(smokeWorkspace);
     }
@@ -1730,6 +1817,34 @@ app.whenReady().then(() => {
         app.exit(0);
       } catch (error) {
         console.error(JSON.stringify({ ok: false, smoke: "topic-library-ipc-idempotency", message: error instanceof Error ? error.message : "Topic IPC smoke 失败" }));
+        app.exit(1);
+      }
+    });
+  }
+  if (process.argv.includes("--media-import-smoke")) {
+    window.webContents.once("did-finish-load", async () => {
+      try {
+        const sourcePath = process.env.MEDIA_IMPORT_SMOKE_SOURCE_PATH;
+        if (!sourcePath) throw new Error("MEDIA_IMPORT_SMOKE_SOURCE_PATH 未配置");
+        const badSourcePath = process.env.MEDIA_IMPORT_SMOKE_BAD_SOURCE_PATH;
+        const runtime = await getDesktopRuntime();
+        const workspace = requireWorkspace();
+        const first = await importLocalMediaJob({ workspace, runtime, sourcePath, workerId: "media-import-smoke" });
+        const second = await importLocalMediaJob({ workspace, runtime, sourcePath, workerId: "media-import-smoke" });
+        const jobs = workspace.catalog.listJobsForWorkspace(workspace.workspaceId, "media.import");
+        const sourceArtifactCount = workspace.catalog.listArtifacts(workspace.workspaceId).filter((artifact) => artifact.kind === "source").length;
+        let failedFirst;
+        let failedSecond;
+        if (badSourcePath) {
+          failedFirst = await importLocalMediaJob({ workspace, runtime, sourcePath: badSourcePath, workerId: "media-import-smoke" });
+          failedSecond = await importLocalMediaJob({ workspace, runtime, sourcePath: badSourcePath, workerId: "media-import-smoke" });
+        }
+        const finalJobs = workspace.catalog.listJobsForWorkspace(workspace.workspaceId, "media.import");
+        if (!first.ok || first.reused || first.status !== "succeeded" || !second.ok || !second.reused || second.status !== "succeeded" || finalJobs.length !== (badSourcePath ? 2 : 1) || sourceArtifactCount !== 1 || (badSourcePath && (failedFirst?.ok || failedFirst.status !== "failed" || failedSecond?.ok || failedSecond.status !== "failed" || failedSecond.job?.attempt !== 2))) throw new Error("媒体导入 Job smoke 没有保持成功、幂等复用、失败重试和单份 source artifact");
+        console.log(JSON.stringify({ ok: true, smoke: "media-import-job-idempotency-recovery", firstReused: first.reused, secondReused: second.reused, jobState: second.job?.state, attempt: second.job?.attempt, failedState: failedSecond?.job?.state ?? null, failedAttempt: failedSecond?.job?.attempt ?? null, artifactCount: second.artifacts.length, sourceArtifactCount, jobCount: finalJobs.length, schemaVersion: workspace.catalog.schemaVersion() }));
+        app.exit(0);
+      } catch (error) {
+        console.error(JSON.stringify({ ok: false, smoke: "media-import-job-idempotency", message: error instanceof Error ? error.message : "媒体导入 Job smoke 失败" }));
         app.exit(1);
       }
     });

@@ -223,7 +223,7 @@ interface AgentRuntimePort {
 
 **验收门：** 创建项目 → 重启 → 读回；重复命令不重复写入；target revision 冲突被拒绝；进程崩溃后 outbox 可恢复；数据库和媒体 manifest 可恢复一致；两个 worker 不能同时 claim 同一个 Job。
 
-### V2：单一媒体基线
+### V2：素材库基线与 AI 剪辑的媒体底座
 
 **依赖：V1。**
 
@@ -241,7 +241,11 @@ interface AgentRuntimePort {
 
 实现一个 FFmpeg/ffprobe utility worker，包含进度、取消、崩溃重启、临时文件清理和路径重定位。macOS arm64 通过后再验证 Windows x64；Rust media-core 先只写接口和 reference test，不阻塞首条链路。
 
-**验收门：** CFR/VFR、竖屏、旋转、无音频、双音轨和损坏输入 fixture；输出可播放；产物 hash 与 manifest 对齐；worker 崩溃可重试；内存/CPU/导入 p95 有记录。
+**当前已完成的最小切片（V2a）：** `media.import` Job 已接入 Electron 主进程。Job 以源文件 SHA-256 作为输入幂等键，使用本地 lease/heartbeat，成功后在 catalog 中提交 source/proxy/thumbnail 三份 Artifact manifest，并保存 probe checkpoint；同一文件再次导入返回 `reused=true`。Take 导入和研究素材本地化也复用该 helper。详见 [`2026-08-14-v2a-media-import-job.md`](./plan/2026-08-14-v2a-media-import-job.md)。
+
+这一步仍不是完整后台调度器：当前 IPC 会等待 FFmpeg 完成，进度流、取消、独立 worker pool、Windows bundled FFmpeg 和跨进程 scheduler 后置。
+
+**验收门：** 先通过“首次导入→Job succeeded→第二次复用”的 packaged smoke，再补 CFR/VFR、竖屏、旋转、无音频、双音轨和损坏输入 fixture；输出可播放；产物 hash 与 manifest 对齐；worker 崩溃可重试；内存/CPU/导入 p95 有记录。
 
 ### V3：手动创作到拍摄包
 
@@ -487,7 +491,8 @@ V1-01 contracts package: ids/revision/errors/commands/jobs/artifacts
 V1-02 catalog SQLite migrations + backup/restore
 V1-03 Command Registry + receipt/replay + outbox
 V2-01 import/hash/ffprobe/proxy/thumbnail worker
-V2-02 artifact manifest + crash/cancel/restart fixtures
+V2-02 media.import Job + artifact manifest + idempotent reuse
+V2-03 artifact manifest + crash/cancel/restart fixtures
 V3-01 manual Script/Storyboard/Shot editor contract
 V3-02 static CapturePackage + Take import/select
 V4-01 RenderIR reference compiler + 9:16 golden fixture

@@ -14,10 +14,13 @@ interface ImportMediaResult {
   ok: boolean;
   errorCode?: string;
   message?: string;
+  status?: "succeeded" | "running" | "failed" | "needs_attention" | "cancelled" | "conflict";
+  reused?: boolean;
   sourceName?: string;
   durationMs?: number | null;
   streams?: Array<{ kind: string; codec?: string; width?: number; height?: number; frameRate?: number; sampleRate?: number; channels?: number; rotation?: number }>;
   artifacts?: Array<{ artifactId: string; kind: string; relativePath: string; mimeType: string; contentHash: string; byteSize: number; parentArtifactIds: string[] }>;
+  job?: { id: string; state: string; attempt: number; artifactIds: string[]; lastError?: { code: string; message: string; retryable: boolean } };
 }
 
 interface AssetSearchResult {
@@ -284,10 +287,13 @@ interface ImportTakeResult {
   ok: boolean;
   errorCode?: string;
   message?: string;
+  status?: string;
+  reused?: boolean;
   take?: CaptureTake;
   task?: CaptureShootTask;
   sourceName?: string;
   thumbnail?: { relativePath: string };
+  job?: { id: string; state: string; attempt: number; artifactIds: string[] };
 }
 
 interface SelectTakeResult {
