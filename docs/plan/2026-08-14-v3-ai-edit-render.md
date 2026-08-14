@@ -1,8 +1,8 @@
-# V3 AI 剪辑：提案到可交付视频
+# AI 剪辑：提案到可交付视频
 
 日期：2026-08-14  
 状态：参考执行内核、桌面 AI 粗剪 UI、本地 render Job/Artifact 回写，以及 Provider 提案和 freeze CommandReceipt 已完成；跨进程人工恢复仍待补齐
-对应路线图：`docs/Implementation-Plan-v0.2.md` 的 V4（产品名称为“AI 粗剪 / AI 剪辑”）
+工程阶段：历史 V3 执行内核切片；对应路线图：`docs/Implementation-Plan-v0.2.md` 的 V4。产品名称统一为“AI 粗剪 / AI 剪辑”。
 
 ## 1. 为什么叫 AI 剪辑
 
