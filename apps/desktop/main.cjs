@@ -1119,6 +1119,7 @@ ipcMain.handle("desktop:create-capture-workflow", async (_event, raw) => {
       };
     });
     const storyboard = runtime.creation.createStoryboard({ id: storyboardId, script, shots: shotDrafts, createdAt: now });
+    runtime.creation.assertLayeredStoryboardCoverage(script, storyboard);
     const tasks = runtime.creation.createShootTasks(storyboard, now);
     const capturePackageDraft = runtime.creation.CapturePackageSchema.parse({ schemaVersion: 1, id: capturePackageId, projectId, storyboardRevision: storyboard.revision, format: "html", relativePath: `capture-packages/${capturePackageId}/index.html`, taskIds: tasks.map((task) => task.id), status: "draft", createdAt: now, updatedAt: now });
     const capturePackage = await runtime.creation.exportCapturePackage({ workspaceRoot: workspace.workspacePath, projectTitle: raw.projectTitle.trim(), capturePackage: capturePackageDraft, storyboard, tasks });
@@ -1928,14 +1929,16 @@ app.whenReady().then(() => {
           await wait(900);
           if (!document.querySelector(".capture-result")) throw new Error("拍摄包没有出现在创作页面；body=" + (document.body?.innerText ?? "").slice(-1800));
           if (!document.querySelector(".capture-task-checklist")) throw new Error("拍摄包没有展示拍摄检查清单");
-          for (let index = 0; index < 3; index += 1) {
+          const captureTaskCount = document.querySelectorAll(".capture-task").length;
+          if (captureTaskCount < 3) throw new Error("分镜没有为口播主干和补充画面生成足够拍摄任务");
+          for (let index = 0; index < captureTaskCount; index += 1) {
             await waitFor(() => buttons().some((button) => !button.disabled && button.textContent?.includes("导入 Take")), "Take 导入按钮可用");
             clickText("导入 Take", index);
             await waitFor(() => buttons().filter((button) => button.classList.contains("take-chip")).length >= index + 1, "第 " + (index + 1) + " 个 Take 导入完成");
           }
           const takeButtons = buttons().filter((button) => button.classList.contains("take-chip"));
-          if (takeButtons.length < 3) throw new Error("没有生成三条 Take");
-          for (const button of takeButtons.slice(0, 3)) button.click();
+          if (takeButtons.length < captureTaskCount) throw new Error("没有为每个拍摄任务生成 Take");
+          for (const button of takeButtons.slice(0, captureTaskCount)) button.click();
           await wait(500);
           const assetsBeforeAnalysis = await window.desktop.searchAssets("");
           const sourceArtifact = assetsBeforeAnalysis.artifacts?.find((artifact) => artifact.kind === "source");
@@ -1950,6 +1953,7 @@ app.whenReady().then(() => {
           await wait(1_000);
           if (!document.querySelector(".proposal-list")) throw new Error("AI 提案没有出现在页面；body=" + (document.body?.innerText ?? "").slice(-1200));
           if (!document.querySelector(".proposal-intent")) throw new Error("AI 提案没有显示原拍摄意图");
+          if (!document.querySelector(".proposal-row.overlay") || !document.querySelector(".proposal-row.primary")) throw new Error("AI 提案没有同时生成口播主干和画面覆盖");
           await waitFor(() => buttons().some((button) => !button.disabled && button.textContent?.includes("作为 Take")), "候选素材采用按钮");
           clickText("作为 Take");
           await waitFor(() => (document.body?.innerText ?? "").includes("已复用已有 Take") || (document.body?.innerText ?? "").includes("已创建 Take"), "候选素材写入 Take");
@@ -1963,6 +1967,11 @@ app.whenReady().then(() => {
           const persistedProjects = await window.desktop.listProjects();
           const loaded = projectId ? await window.desktop.loadProject({ projectId }) : null;
           if (!persistedProjects.ok || !persistedProjects.projects?.some((project) => project.id === projectId) || !loaded?.ok || loaded.project?.id !== projectId || !loaded.script || !loaded.storyboard || !loaded.tasks?.length || !loaded.capturePackage) throw new Error("UI smoke 没有从 SQLite 恢复已保存项目的脚本、分镜和拍摄包");
+          for (const block of loaded.script.blocks) {
+            const blockShots = loaded.storyboard.shots.filter((shot) => shot.scriptBlockIds.includes(block.id));
+            if (!blockShots.some((shot) => shot.mode === "talking_head")) throw new Error("脚本段落缺少连续口播主干：" + block.id);
+            if (block.visualNeed !== "none" && !blockShots.some((shot) => shot.mode !== "talking_head")) throw new Error("需要画面支持的脚本段落缺少补充镜头：" + block.id);
+          }
           clickText("创作项目");
           await waitFor(() => document.querySelector(".project-resume-row"), "本地项目恢复列表");
           const continueButton = [...document.querySelectorAll(".project-resume-row button")].find((button) => !button.disabled && button.textContent?.includes("继续编辑"));

@@ -269,6 +269,8 @@ interface AgentRuntimePort {
 
 **当前状态（2026-08-14）：** reference RenderIR、MP4/SRT/manifest、AI 粗剪人工审阅、render Job/lease、输出 ArtifactManifest、启动时过期租约恢复，以及 AI proposal/freeze 的 CommandReceipt 已落地；freeze 失败回执和 FrozenEditSpec 已进入同一事务；Provider `submission_unknown` 已支持重启后发现、用户核对用量后的人工收口与新幂等键重试；`test:creation:edit:e2e` 已用真实 FFmpeg/SQLite 跑通“脚本→分镜→拍摄包→导入/选择 Take→本地 AI 提案→冻结→导出”域级用户任务；`list-render-recoveries` / `retry-render` 和 `test:render:recovery` 已验证过期 lease 恢复、失败重试及同一 FrozenEditSpec 成功重渲染；`test:desktop:ui` 已在真实 macOS arm64 打包应用中验证创作→导入/选择 Take→AI 提案→导出，并对照 SQLite 成功 render run；更广泛故障注入和 Rust 对账仍未完成。
 
+**当前增量（V4b）：** 已把 AI 粗剪从“顺序串片”扩展为口播主干 + 画面覆盖：每个脚本段落生成 talking-head 主干任务，需要视觉证据时额外生成 B-roll/录屏任务；提案、FrozenEditSpec 和 RenderIR 分出 `primary` / `overlay` 视频轨，overlay 默认静音并只在对应口播时间段覆盖。旧项目没有 layered 结构时仍走兼容单轨路径。真实 fixture 已验证 4 秒 A-roll 中间 1 秒 B-roll 覆盖并恢复前后画面、最终仅保留主干音轨；打包 UI smoke 已验证 3 段脚本生成 5 个拍摄任务和 5 条提案。施工记录见 [`2026-08-14-v4b-layered-ai-editing.md`](./plan/2026-08-14-v4b-layered-ai-editing.md)。
+
 产品对外名称是“AI 粗剪 / AI 剪辑”。这一阶段不是取消 AI，而是把 AI 放在正确的位置：模型根据脚本、分镜、ASR/OCR/视觉事实和素材库生成 `EditProposal`，用户可以预览、替换、拒绝、撤销并确认；确认后的 `FrozenEditSpec` 再由无模型的媒体执行器稳定编译和导出。这样每次重渲染都不会偷偷换镜头或改变用户已经确认的创作意图。
 
 实现顺序：
@@ -500,6 +502,7 @@ V3-02 static CapturePackage + Take import/select
 V3-03 project list + persisted workflow resume
 V4-01 RenderIR reference compiler + 9:16 golden fixture
 V4-02 FFmpeg render + MP4/SRT/manifest + reopen smoke
+V4-03 layered A-roll primary + B-roll overlay proposal/render/UI smoke
 V5-01 AI SDK ProviderPort + mock/one real smoke
 V5-02 AgentRuntimePort + one proposal + approval/reject/undo
 V5-03 Mastra adapter contract (Memory/MCP disabled initially)

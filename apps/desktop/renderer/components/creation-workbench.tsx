@@ -9,8 +9,11 @@ const initialBlocks: CaptureWorkflowInput["blocks"] = [
 
 const initialShots: CaptureWorkflowInput["shots"] = [
   { scriptBlockIndex: 0, purpose: "emotion", mode: "talking_head", framing: "medium", cameraDirection: "正面固定，问题说完后停顿半秒。", actionDescription: "面对镜头说出问题，保持眼神稳定。", targetMs: 4_000, sourceRequirement: "shoot_task" },
-  { scriptBlockIndex: 1, purpose: "explain", mode: "talking_head", framing: "close", cameraDirection: "轻微推近或切近景。", actionDescription: "用更近的景别讲出核心判断。", targetMs: 5_000, sourceRequirement: "shoot_task" },
-  { scriptBlockIndex: 2, purpose: "prove", mode: "broll", framing: "detail", cameraDirection: "手机俯拍，缓慢横移。", actionDescription: "拍桌面上带有圈画和修改痕迹的草稿。", targetMs: 3_000, sourceRequirement: "shoot_task" },
+  { scriptBlockIndex: 0, purpose: "prove", mode: "broll", framing: "detail", cameraDirection: "拍下一个能让问题立刻具体化的动作或细节。", actionDescription: "拍摄能够支撑开头问题的具体画面，作为短暂覆盖。", targetMs: 2_000, sourceRequirement: "shoot_task" },
+  { scriptBlockIndex: 1, purpose: "explain", mode: "talking_head", framing: "close", cameraDirection: "轻微推近或切近景。", actionDescription: "面对镜头讲出核心判断，保留自然停顿。", targetMs: 5_000, sourceRequirement: "shoot_task" },
+  { scriptBlockIndex: 1, purpose: "prove", mode: "broll", framing: "detail", cameraDirection: "手机俯拍，缓慢横移。", actionDescription: "拍桌面上带有圈画和修改痕迹的草稿，作为这一段口播的视觉证据。", targetMs: 3_000, sourceRequirement: "shoot_task" },
+  { scriptBlockIndex: 2, purpose: "explain", mode: "talking_head", framing: "close", cameraDirection: "轻微推近或切近景。", actionDescription: "面对镜头讲出具体例子，保持表达连贯。", targetMs: 5_000, sourceRequirement: "shoot_task" },
+  { scriptBlockIndex: 2, purpose: "prove", mode: "broll", framing: "detail", cameraDirection: "手机俯拍，缓慢横移。", actionDescription: "拍桌面上带有圈画和修改痕迹的草稿，覆盖在对应口播上。", targetMs: 3_000, sourceRequirement: "shoot_task" },
 ];
 
 const shotPurposes = ["explain", "prove", "transition", "emotion", "reset", "brand"] as const;
@@ -27,22 +30,27 @@ function savedLiteral<T extends readonly string[]>(value: unknown, allowed: T, f
 
 function restoreScriptDraftShots(script: NonNullable<LoadProjectResult["script"]>, payload: Record<string, unknown>): CaptureWorkflowInput["shots"] {
   const rawPlans = payload.shotPlans && typeof payload.shotPlans === "object" && !Array.isArray(payload.shotPlans) ? payload.shotPlans as Record<string, unknown> : {};
-  return script.blocks.map((block, index) => {
+  return script.blocks.flatMap((block, index) => {
     const rawPlan = rawPlans[block.id] && typeof rawPlans[block.id] === "object" && !Array.isArray(rawPlans[block.id]) ? rawPlans[block.id] as Record<string, unknown> : {};
     const defaultPurpose = block.kind === "evidence" || block.kind === "example" ? "prove" : index === 0 ? "emotion" : "explain";
-    return {
+    const supplementalMode = savedLiteral(rawPlan.mode, shotModes, "talking_head");
+    const primary = {
       scriptBlockIndex: index,
-      purpose: savedLiteral(rawPlan.purpose, shotPurposes, defaultPurpose),
-      mode: savedLiteral(rawPlan.mode, shotModes, "talking_head"),
+      purpose: (block.kind === "hook" ? "emotion" : "explain") as CaptureWorkflowInput["shots"][number]["purpose"],
+      mode: "talking_head" as const,
       framing: savedLiteral(rawPlan.framing, shotFramings, index === 0 ? "medium" : "close"),
-      cameraDirection: typeof rawPlan.cameraDirection === "string" ? rawPlan.cameraDirection : "保持主体清晰，完整拍一条备用版本。",
-      deviceHint: savedLiteral(rawPlan.deviceHint, deviceHints, "any"),
+      cameraDirection: "手机竖拍，中景，完整讲完这一段并在结尾多留两秒。",
+      deviceHint: savedLiteral(rawPlan.deviceHint, deviceHints, "phone"),
       orientation: savedLiteral(rawPlan.orientation, orientations, "portrait"),
       checklist: Array.isArray(rawPlan.checklist) ? rawPlan.checklist.filter((item): item is string => typeof item === "string") : [],
-      actionDescription: typeof rawPlan.actionDescription === "string" ? rawPlan.actionDescription : `拍摄能够支撑“${block.text}”的画面。`,
+      actionDescription: `面对镜头自然讲出：${block.text}`,
       targetMs: typeof rawPlan.targetMs === "number" && rawPlan.targetMs > 0 ? rawPlan.targetMs : 4_000,
-      sourceRequirement: savedLiteral(rawPlan.sourceRequirement, sourceRequirements, "shoot_task"),
+      sourceRequirement: "shoot_task" as const,
     };
+    const supplementalModeForBlock = supplementalMode === "talking_head" ? "broll" as const : supplementalMode;
+    const shouldSupplement = block.visualNeed !== "none" || supplementalMode !== "talking_head";
+    const supplemental = shouldSupplement && savedLiteral(rawPlan.sourceRequirement, sourceRequirements, "shoot_task") !== "generated_asset" ? [{ scriptBlockIndex: index, purpose: savedLiteral(rawPlan.purpose, shotPurposes, "prove"), mode: supplementalModeForBlock, framing: supplementalModeForBlock === "broll" ? "detail" as const : savedLiteral(rawPlan.framing, shotFramings, "detail"), cameraDirection: supplementalMode === "talking_head" ? "手机俯拍或录屏，完整展示能证明这一段话的具体画面。" : typeof rawPlan.cameraDirection === "string" ? rawPlan.cameraDirection : "保持主体清晰，拍摄一条备用版本。", deviceHint: supplementalModeForBlock === "screen_recording" ? "screen" as const : savedLiteral(rawPlan.deviceHint, deviceHints, "phone"), orientation: savedLiteral(rawPlan.orientation, orientations, "portrait"), checklist: primary.checklist, actionDescription: supplementalMode === "talking_head" ? `拍摄能够支撑“${block.text}”的真实画面。` : typeof rawPlan.actionDescription === "string" ? rawPlan.actionDescription : `拍摄能够支撑“${block.text}”的真实画面。`, targetMs: typeof rawPlan.targetMs === "number" && rawPlan.targetMs > 0 ? Math.min(rawPlan.targetMs, 3_000) : 3_000, sourceRequirement: supplementalModeForBlock === "screen_recording" ? "shoot_task" as const : savedLiteral(rawPlan.sourceRequirement, sourceRequirements, "shoot_task") }] : [];
+    return [primary, ...supplemental];
   });
 }
 
@@ -157,7 +165,7 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
   function addBlockAndShot() {
     const blockIndex = blocks.length;
     setBlocks((current) => [...current, { kind: "evidence", text: "补充一个新的表达段落。", visualNeed: "support" }]);
-    setShots((current) => [...current, { scriptBlockIndex: blockIndex, purpose: "prove", mode: "broll", framing: "detail", cameraDirection: "保持主体清晰，拍摄一条备用版本。", actionDescription: "描述这个段落需要补拍的具体画面。", targetMs: 3_000, sourceRequirement: "shoot_task" }]);
+    setShots((current) => [...current, { scriptBlockIndex: blockIndex, purpose: "explain", mode: "talking_head", framing: "medium", cameraDirection: "手机竖拍，中景，完整讲完这一段。", actionDescription: "面对镜头自然讲出这个新增段落。", targetMs: 4_000, sourceRequirement: "shoot_task" }, { scriptBlockIndex: blockIndex, purpose: "prove", mode: "broll", framing: "detail", cameraDirection: "保持主体清晰，拍摄一条备用版本。", actionDescription: "描述这个段落需要补拍的具体画面。", targetMs: 3_000, sourceRequirement: "shoot_task" }]);
   }
 
   async function exportWorkflow() {
@@ -208,11 +216,15 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
       }
       const nextBlocks = result.script.blocks.map((block) => ({ kind: block.kind as CaptureWorkflowInput["blocks"][number]["kind"], text: block.text, visualNeed: block.visualNeed }));
       const proposalBlocks = result.proposal?.blocks ?? scriptProposal.blocks;
-      const nextShots = nextBlocks.map((block, index) => {
+      const nextShots = nextBlocks.flatMap((block, index) => {
         const plan = proposalBlocks[index]?.shotPlan;
-        if (plan) return { scriptBlockIndex: index, purpose: plan.purpose, mode: plan.mode, framing: plan.framing, cameraDirection: plan.cameraDirection, deviceHint: plan.deviceHint, orientation: plan.orientation, checklist: plan.checklist, actionDescription: plan.actionDescription, targetMs: plan.targetMs, sourceRequirement: plan.sourceRequirement };
-        const fallback = initialShots[index] ?? initialShots[initialShots.length - 1];
-        return { ...fallback, scriptBlockIndex: index, purpose: block.kind === "hook" ? "emotion" as const : block.kind === "example" || block.kind === "evidence" ? "prove" as const : "explain" as const };
+        const fallbackPurpose = block.kind === "hook" ? "emotion" as const : block.kind === "example" || block.kind === "evidence" ? "prove" as const : "explain" as const;
+        const fallbackPrimary = initialShots.find((shot) => shot.scriptBlockIndex === index && shot.mode === "talking_head") ?? initialShots[0];
+        const primary = plan ? { scriptBlockIndex: index, purpose: (block.kind === "hook" ? "emotion" : "explain") as CaptureWorkflowInput["shots"][number]["purpose"], mode: "talking_head" as const, framing: plan.framing ?? "medium", cameraDirection: "手机竖拍，中景，完整讲完这一段并在结尾多留两秒。", deviceHint: plan.deviceHint === "screen" ? "phone" as const : plan.deviceHint, orientation: plan.orientation, checklist: plan.checklist, actionDescription: `面对镜头自然讲出：${block.text}`, targetMs: plan.targetMs, sourceRequirement: "shoot_task" as const } : { ...fallbackPrimary, scriptBlockIndex: index, purpose: fallbackPurpose };
+        const supplementalMode = plan?.mode === "talking_head" ? "broll" as const : plan?.mode;
+        const shouldSupplement = plan ? block.visualNeed !== "none" || plan.mode !== "talking_head" : block.visualNeed !== "none";
+        const supplemental = shouldSupplement && plan && supplementalMode && plan.sourceRequirement !== "generated_asset" ? [{ scriptBlockIndex: index, purpose: plan.mode === "talking_head" ? "prove" as const : plan.purpose, mode: supplementalMode, framing: plan.mode === "talking_head" ? "detail" as const : plan.framing, cameraDirection: plan.mode === "talking_head" ? "手机俯拍或录屏，完整展示能证明这一段话的具体画面。" : plan.cameraDirection, deviceHint: supplementalMode === "screen_recording" ? "screen" as const : plan.deviceHint, orientation: plan.orientation, checklist: plan.checklist, actionDescription: plan.mode === "talking_head" ? `拍摄能够支撑“${block.text}”的真实画面。` : plan.actionDescription, targetMs: plan.mode === "talking_head" ? Math.min(plan.targetMs, 3_000) : plan.targetMs, sourceRequirement: plan.mode === "talking_head" ? "shoot_task" as const : plan.sourceRequirement }] : !plan && shouldSupplement ? [{ ...(initialShots.find((shot) => shot.scriptBlockIndex === index && shot.mode !== "talking_head") ?? initialShots[2]), scriptBlockIndex: index }] : [];
+        return [primary, ...supplemental];
       });
       setBlocks(nextBlocks);
       setShots(nextShots);

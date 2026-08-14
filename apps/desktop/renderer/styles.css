@@ -135,11 +135,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .missing-row div { min-width: 0; }
 .missing-row strong { color: #80584d; font-size: 12px; }
 .missing-row p { margin: 4px 0 0; color: #9b7269; font-size: 11px; line-height: 1.5; }
+.missing-row.optional { color: #8a7a5c; }
+.missing-row.optional strong { color: #806e4d; }
+.missing-row.optional p { color: #928267; }
 .proposal-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 13px; padding: 16px 0; border-bottom: 1px solid #ebe5db; }
 .proposal-row:last-child { border-bottom: 0; padding-bottom: 2px; }
 .proposal-row.rejected { opacity: .55; }
 .proposal-index { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: #ece7dd; color: #968d80; font-family: Georgia, serif; font-size: 11px; }
 .proposal-row.accepted .proposal-index { background: #dce8d7; color: #55724e; }
+.proposal-row.overlay { padding-left: 12px; border-left: 2px solid #b7c8ad; background: linear-gradient(90deg, rgba(235, 242, 230, .7), transparent 42%); }
 .proposal-main { min-width: 0; }
 .proposal-topline { display: flex; align-items: center; gap: 10px; }
 .proposal-topline strong { color: #4f5e4b; font-size: 12px; }

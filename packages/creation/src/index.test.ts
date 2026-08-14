@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ScriptSchema, attachTake, createShootTasks, createStoryboard, exportCapturePackage, selectTake, type Take } from "./index";
+import { ScriptSchema, assertLayeredStoryboardCoverage, attachTake, createShootTasks, createStoryboard, exportCapturePackage, selectTake, type Take } from "./index";
 
 const now = "2026-08-14T00:00:00.000Z";
 const script = ScriptSchema.parse({
@@ -53,5 +53,19 @@ describe("creation workflow contracts", () => {
 
   it("rejects a shot that references an unknown script block", () => {
     expect(() => createStoryboard({ id: "storyboard-invalid", script, createdAt: now, shots: [{ id: "shot-1", order: 0, scriptBlockIds: ["missing"], purpose: "explain", mode: "talking_head", actionDescription: "无效", targetMs: 1_000, sourceRequirement: "shoot_task" }] })).toThrow("不存在");
+  });
+
+  it("requires one talking-head primary and supplemental visuals for each visual script block", () => {
+    const valid = createStoryboard({ id: "storyboard-layered", script, createdAt: now, shots: [
+      { id: "primary-1", order: 0, scriptBlockIds: ["block-1"], purpose: "emotion", mode: "talking_head", actionDescription: "说出问题", targetMs: 4_000, sourceRequirement: "shoot_task" },
+      { id: "overlay-1", order: 1, scriptBlockIds: ["block-1"], purpose: "prove", mode: "broll", actionDescription: "展示问题", targetMs: 2_000, sourceRequirement: "shoot_task" },
+      { id: "primary-2", order: 2, scriptBlockIds: ["block-2"], purpose: "explain", mode: "talking_head", actionDescription: "讲出判断", targetMs: 4_000, sourceRequirement: "shoot_task" },
+      { id: "overlay-2", order: 3, scriptBlockIds: ["block-2"], purpose: "prove", mode: "screen_recording", actionDescription: "展示证据", targetMs: 2_000, sourceRequirement: "shoot_task" },
+    ] });
+    expect(() => assertLayeredStoryboardCoverage(script, valid)).not.toThrow();
+    const missingSupplement = { ...valid, shots: valid.shots.filter((shot) => shot.id !== "overlay-1") };
+    expect(() => assertLayeredStoryboardCoverage(script, missingSupplement)).toThrow("至少一个补充画面");
+    const duplicatePrimary = { ...valid, shots: [...valid.shots, { ...valid.shots[0], id: "primary-duplicate", order: 4 }] };
+    expect(() => assertLayeredStoryboardCoverage(script, duplicatePrimary)).toThrow("只能有一个口播主干");
   });
 });

@@ -38,6 +38,7 @@ export const SourceClipSchema = z.object({
   sourceSegment: TimeRangeSchema,
   timeline: TimeRangeSchema,
   role: z.enum(["a_roll", "b_roll", "screen", "generated", "still"]),
+  placement: z.enum(["primary", "overlay"]).optional(),
   transform: z.object({ x: z.number().optional(), y: z.number().optional(), scale: z.number().positive().optional(), rotation: z.number().optional(), crop: z.string().optional() }).strict().optional(),
   opacity: z.number().min(0).max(1).optional(),
   volume: z.number().nonnegative().optional(),
@@ -79,8 +80,22 @@ export type EditProposal = z.infer<typeof EditProposalSchema>;
 export const FrozenTrackSchema = z.object({
   id,
   kind: z.enum(["video", "audio", "subtitle", "text", "effect"]),
+  layer: z.enum(["primary", "overlay"]).optional(),
   clips: z.array(z.union([SourceClipSchema, SubtitleClipSchema])),
-}).strict();
+}).strict().superRefine((track, context) => {
+  if (track.kind !== "video" && track.kind !== "subtitle") context.addIssue({ code: z.ZodIssueCode.custom, path: ["kind"], message: "当前剪辑规格只支持 video/subtitle 轨道" });
+  if (track.layer !== undefined && track.kind !== "video") context.addIssue({ code: z.ZodIssueCode.custom, path: ["layer"], message: "只有视频轨道可以声明 primary/overlay" });
+  for (const [index, clip] of track.clips.entries()) {
+    const sourceClip = "sourceAssetId" in clip;
+    if (track.kind === "video" && !sourceClip) context.addIssue({ code: z.ZodIssueCode.custom, path: ["clips", index], message: "视频轨道只能包含视频片段" });
+    if (track.kind === "subtitle" && sourceClip) context.addIssue({ code: z.ZodIssueCode.custom, path: ["clips", index], message: "字幕轨道只能包含字幕片段" });
+    if (track.kind === "video" && sourceClip) {
+      if (track.layer === "primary" && clip.placement !== "primary") context.addIssue({ code: z.ZodIssueCode.custom, path: ["clips", index, "placement"], message: "primary 轨道只能包含 primary 片段" });
+      if (track.layer === "overlay" && clip.placement !== "overlay") context.addIssue({ code: z.ZodIssueCode.custom, path: ["clips", index, "placement"], message: "overlay 轨道只能包含 overlay 片段" });
+      if (track.layer === undefined && clip.placement !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["clips", index, "placement"], message: "旧单轨片段不能声明 layered placement" });
+    }
+  }
+});
 export type FrozenTrack = z.infer<typeof FrozenTrackSchema>;
 
 export const FrozenEditSpecSchema = z.object({
@@ -97,7 +112,14 @@ export const FrozenEditSpecSchema = z.object({
   status: z.enum(["draft", "frozen", "compiled", "rendered", "validated", "delivered"]),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
-}).strict();
+}).strict().superRefine((spec, context) => {
+  const videoTracks = spec.tracks.filter((track) => track.kind === "video");
+  const layered = videoTracks.some((track) => track.layer !== undefined);
+  const primaryCount = videoTracks.filter((track) => track.layer === "primary").length;
+  if (videoTracks.length === 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: "剪辑规格必须包含视频轨道" });
+  if (layered && (primaryCount !== 1 || videoTracks.some((track) => track.layer === undefined))) context.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: "layered 剪辑必须且只能有一条 primary 视频轨，且所有视频轨都要声明 layer" });
+  if (!layered && videoTracks.length !== 1) context.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: "旧单轨剪辑只能有一条视频轨道" });
+});
 export type FrozenEditSpec = z.infer<typeof FrozenEditSpecSchema>;
 
 export const RenderClipSchema = z.object({
@@ -109,6 +131,7 @@ export const RenderClipSchema = z.object({
   sourceSegment: TimeRangeSchema,
   timeline: TimeRangeSchema,
   role: z.enum(["a_roll", "b_roll", "screen", "generated", "still"]),
+  placement: z.enum(["primary", "overlay"]).optional(),
   opacity: z.number().min(0).max(1).optional(),
   volume: z.number().nonnegative().optional(),
 }).strict();
@@ -117,8 +140,22 @@ export type RenderClip = z.infer<typeof RenderClipSchema>;
 export const RenderTrackSchema = z.object({
   id,
   kind: z.enum(["video", "audio", "subtitle", "text", "effect"]),
+  layer: z.enum(["primary", "overlay"]).optional(),
   clips: z.array(z.union([RenderClipSchema, SubtitleClipSchema])),
-}).strict();
+}).strict().superRefine((track, context) => {
+  if (track.kind !== "video" && track.kind !== "subtitle") context.addIssue({ code: z.ZodIssueCode.custom, path: ["kind"], message: "当前 RenderIR 只支持 video/subtitle 轨道" });
+  if (track.layer !== undefined && track.kind !== "video") context.addIssue({ code: z.ZodIssueCode.custom, path: ["layer"], message: "只有视频轨道可以声明 primary/overlay" });
+  for (const [index, clip] of track.clips.entries()) {
+    const renderClip = "sourceAssetId" in clip;
+    if (track.kind === "video" && !renderClip) context.addIssue({ code: z.ZodIssueCode.custom, path: ["clips", index], message: "视频轨道只能包含视频片段" });
+    if (track.kind === "subtitle" && renderClip) context.addIssue({ code: z.ZodIssueCode.custom, path: ["clips", index], message: "字幕轨道只能包含字幕片段" });
+    if (track.kind === "video" && renderClip) {
+      if (track.layer === "primary" && clip.placement !== "primary") context.addIssue({ code: z.ZodIssueCode.custom, path: ["clips", index, "placement"], message: "primary 轨道只能包含 primary 片段" });
+      if (track.layer === "overlay" && clip.placement !== "overlay") context.addIssue({ code: z.ZodIssueCode.custom, path: ["clips", index, "placement"], message: "overlay 轨道只能包含 overlay 片段" });
+      if (track.layer === undefined && clip.placement !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["clips", index, "placement"], message: "旧单轨片段不能声明 layered placement" });
+    }
+  }
+});
 export type RenderTrack = z.infer<typeof RenderTrackSchema>;
 
 export const RenderIRSchema = z.object({
@@ -131,7 +168,14 @@ export const RenderIRSchema = z.object({
   tracks: z.array(RenderTrackSchema),
   outputProfile: OutputProfileSchema,
   deterministic: z.literal(true),
-}).strict();
+}).strict().superRefine((ir, context) => {
+  const videoTracks = ir.tracks.filter((track) => track.kind === "video");
+  const layered = videoTracks.some((track) => track.layer !== undefined);
+  const primaryCount = videoTracks.filter((track) => track.layer === "primary").length;
+  if (videoTracks.length === 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: "RenderIR 必须包含视频轨道" });
+  if (layered && (primaryCount !== 1 || videoTracks.some((track) => track.layer === undefined))) context.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: "layered RenderIR 必须且只能有一条 primary 视频轨" });
+  if (!layered && videoTracks.length !== 1) context.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: "旧单轨 RenderIR 只能有一条视频轨道" });
+});
 export type RenderIR = z.infer<typeof RenderIRSchema>;
 
 export const RenderManifestSchema = z.object({
@@ -198,6 +242,7 @@ export type EditProposalMissingMaterial = {
   taskId?: string;
   reason: "take_not_selected" | "asset_fact_missing" | "no_suitable_asset";
   instruction: string;
+  required?: boolean;
 };
 
 /**
@@ -225,28 +270,71 @@ export function proposeEditFromCapture(input: {
   const operations: ProposalOperation[] = [];
   const subtitles: SubtitleClip[] = [];
   const assetLocks = new Map<string, { assetId: string; contentHash: string }>();
-  for (const shot of [...storyboard.shots].sort((left, right) => left.order - right.order)) {
+
+  const roleForShot = (shot: Storyboard["shots"][number]): SourceClip["role"] => shot.mode === "talking_head" ? "a_roll" : shot.mode === "broll" ? "b_roll" : shot.mode === "screen_recording" ? "screen" : shot.mode === "still" ? "still" : "generated";
+  const selectedForShot = (shot: Storyboard["shots"][number], required: boolean) => {
     const task = taskByShot.get(shot.id);
     const selectedTake = task ? input.takesByTask[task.id]?.map((take) => TakeSchema.parse(take)).find((take) => take.status === "selected") : undefined;
     if (!task || !selectedTake) {
-      missing.push({ shotId: shot.id, taskId: task?.id, reason: "take_not_selected", instruction: task?.instruction ?? shot.actionDescription });
-      continue;
+      missing.push({ shotId: shot.id, taskId: task?.id, reason: "take_not_selected", instruction: task?.instruction ?? shot.actionDescription, required });
+      return undefined;
     }
     const assetFact = input.assetFacts[selectedTake.assetId];
     if (!assetFact) {
-      missing.push({ shotId: shot.id, taskId: task.id, reason: "asset_fact_missing", instruction: "素材事实尚未准备好，请重新导入或等待素材分析完成" });
-      continue;
+      missing.push({ shotId: shot.id, taskId: task.id, reason: "asset_fact_missing", instruction: "素材事实尚未准备好，请重新导入或等待素材分析完成", required });
+      return undefined;
     }
     const availableMs = assetFact.durationMs ?? selectedTake.durationMs ?? shot.targetMs;
-    const durationMs = Math.min(shot.targetMs, availableMs);
-    if (durationMs <= 0) {
-      missing.push({ shotId: shot.id, taskId: task.id, reason: "asset_fact_missing", instruction: "素材没有有效时长" });
-      continue;
+    if (availableMs <= 0) {
+      missing.push({ shotId: shot.id, taskId: task.id, reason: "asset_fact_missing", instruction: "素材没有有效时长", required });
+      return undefined;
     }
-    const sourceAssetId = selectedTake.assetId;
-    assetLocks.set(sourceAssetId, { assetId: sourceAssetId, contentHash: assetFact.contentHash });
-    const role: SourceClip["role"] = shot.mode === "talking_head" ? "a_roll" : shot.mode === "broll" ? "b_roll" : shot.mode === "screen_recording" ? "screen" : shot.mode === "still" ? "still" : "generated";
-    operations.push({ id: `proposal-op-${shot.id}`, shotId: shot.id, sourceAssetId, sourceSegment: { startMs: 0, endMs: durationMs }, timeline: { startMs: cursorMs, endMs: cursorMs + durationMs }, role, reason: shot.actionDescription, evidenceIds: [shot.id, task.id], confidence: selectedTake.status === "selected" ? 0.86 : 0.6, status: "suggested" });
+    assetLocks.set(selectedTake.assetId, { assetId: selectedTake.assetId, contentHash: assetFact.contentHash });
+    return { task, selectedTake, assetFact, availableMs };
+  };
+
+  const shotsByBlock = new Map(script.blocks.map((block) => [block.id, storyboard.shots.filter((shot) => shot.scriptBlockIds.includes(block.id)).sort((left, right) => left.order - right.order)]));
+  const layered = script.blocks.length > 0 && script.blocks.every((block) => shotsByBlock.get(block.id)?.some((shot) => shot.mode === "talking_head"));
+
+  if (layered) {
+    for (const block of [...script.blocks].sort((left, right) => left.order - right.order)) {
+      const blockShots = shotsByBlock.get(block.id) ?? [];
+      const primaryShot = blockShots.find((shot) => shot.mode === "talking_head");
+      if (!primaryShot) continue;
+      const primary = selectedForShot(primaryShot, true);
+      if (!primary) continue;
+      const primaryDurationMs = Math.min(primaryShot.targetMs, primary.availableMs);
+      const blockStartMs = cursorMs;
+      const blockEndMs = blockStartMs + primaryDurationMs;
+      operations.push({ id: `proposal-op-${primaryShot.id}`, shotId: primaryShot.id, sourceAssetId: primary.selectedTake.assetId, sourceSegment: { startMs: 0, endMs: primaryDurationMs }, timeline: { startMs: blockStartMs, endMs: blockEndMs }, role: "a_roll", placement: "primary", reason: primaryShot.actionDescription, evidenceIds: [primaryShot.id, primary.task.id], confidence: 0.86, status: "suggested" });
+      if (block.text.trim()) subtitles.push({ id: `subtitle-${primaryShot.id}`, timeline: { startMs: blockStartMs, endMs: blockEndMs }, text: block.text.trim() });
+
+      let overlayCursorMs = blockStartMs + Math.min(500, Math.floor(primaryDurationMs * 0.15));
+      for (const overlayShot of blockShots.filter((shot) => shot.mode !== "talking_head")) {
+        const overlay = selectedForShot(overlayShot, false);
+        if (!overlay) continue;
+        const remainingMs = blockEndMs - overlayCursorMs;
+        const overlayDurationMs = Math.min(overlayShot.targetMs, overlay.availableMs, remainingMs);
+        if (overlayDurationMs <= 0) {
+          missing.push({ shotId: overlayShot.id, taskId: overlay.task.id, reason: "no_suitable_asset", instruction: "当前段落没有足够的主干时长容纳这条补充画面", required: false });
+          continue;
+        }
+        operations.push({ id: `proposal-op-${overlayShot.id}`, shotId: overlayShot.id, sourceAssetId: overlay.selectedTake.assetId, sourceSegment: { startMs: 0, endMs: overlayDurationMs }, timeline: { startMs: overlayCursorMs, endMs: overlayCursorMs + overlayDurationMs }, role: roleForShot(overlayShot), placement: "overlay", reason: overlayShot.actionDescription, evidenceIds: [overlayShot.id, overlay.task.id], confidence: 0.82, status: "suggested", volume: 0 });
+        overlayCursorMs += overlayDurationMs;
+      }
+      cursorMs = blockEndMs;
+    }
+    if (missing.some((item) => item.required !== false)) return { status: "needs_material" as const, missing };
+    if (operations.length === 0 || cursorMs <= 0) return { status: "needs_material" as const, missing: [{ shotId: storyboard.id, reason: "no_suitable_asset" as const, instruction: "没有可用于口播主干的已选素材", required: true }] };
+    const proposal = EditProposalSchema.parse({ schemaVersion: 1, id: `proposal-${input.projectId}-${Date.now()}`, projectId: input.projectId, basedOn: { scriptRevision: script.revision, storyboardRevision: storyboard.revision }, durationMs: cursorMs, operations, subtitles, outputProfile: DEFAULT_VERTICAL_PROFILE, rationale: operations.map((operation) => ({ operationId: operation.id, shotId: operation.shotId, reason: operation.reason, confidence: operation.confidence })), status: "previewed", createdAt: input.now, updatedAt: input.now });
+    return { status: "ready" as const, missing, proposal, assetLocks: [...assetLocks.values()].sort((left, right) => left.assetId.localeCompare(right.assetId)) };
+  }
+
+  for (const shot of [...storyboard.shots].sort((left, right) => left.order - right.order)) {
+    const selected = selectedForShot(shot, true);
+    if (!selected) continue;
+    const durationMs = Math.min(shot.targetMs, selected.availableMs);
+    operations.push({ id: `proposal-op-${shot.id}`, shotId: shot.id, sourceAssetId: selected.selectedTake.assetId, sourceSegment: { startMs: 0, endMs: durationMs }, timeline: { startMs: cursorMs, endMs: cursorMs + durationMs }, role: roleForShot(shot), reason: shot.actionDescription, evidenceIds: [shot.id, selected.task.id], confidence: 0.86, status: "suggested" });
     const text = shot.scriptBlockIds.map((blockId) => blockById.get(blockId)?.text).filter((value): value is string => Boolean(value)).join(" ").trim();
     if (text) subtitles.push({ id: `subtitle-${shot.id}`, timeline: { startMs: cursorMs, endMs: cursorMs + durationMs }, text });
     cursorMs += durationMs;
@@ -307,6 +395,37 @@ function assertContiguousTimeline(clips: Array<{ id: string; timeline: TimeRange
   }
 }
 
+function assertSourceDurationMatchesTimeline(clips: Array<{ id: string; sourceSegment: TimeRange; timeline: TimeRange }>, label: string) {
+  for (const clip of clips) {
+    const sourceDurationMs = clip.sourceSegment.endMs - clip.sourceSegment.startMs;
+    const timelineDurationMs = clip.timeline.endMs - clip.timeline.startMs;
+    if (sourceDurationMs !== timelineDurationMs) {
+      throw new Error(`${label} ${clip.id} 的源片段时长与成片时长不一致；当前版本不支持隐式变速`);
+    }
+  }
+}
+
+function assertSupportedClipSemantics(clips: Array<{ id: string; placement?: "primary" | "overlay"; transform?: unknown; opacity?: number; volume?: number }>, label: string) {
+  for (const clip of clips) {
+    if (clip.transform !== undefined) throw new Error(`${label} ${clip.id} 使用了当前剪辑内核尚未实现的画面变换`);
+    if (clip.opacity !== undefined && clip.opacity !== 1) throw new Error(`${label} ${clip.id} 使用了当前剪辑内核尚未实现的透明度`);
+    if (clip.placement === "overlay") {
+      if (clip.volume !== undefined && clip.volume !== 0) throw new Error(`${label} ${clip.id} 的覆盖画面不能接管主音频`);
+    } else if (clip.volume !== undefined && clip.volume !== 1) {
+      throw new Error(`${label} ${clip.id} 使用了当前剪辑内核尚未实现的主干音量调整`);
+    }
+  }
+}
+
+function assertVideoTrackTimelines(tracks: Array<{ kind: string; layer?: "primary" | "overlay"; clips: Array<SourceClip | RenderClip | SubtitleClip> }>, durationMs: number) {
+  const videoTracks = tracks.filter((track) => track.kind === "video");
+  const layered = videoTracks.some((track) => track.layer !== undefined);
+  const primaryTrack = layered ? videoTracks.find((track) => track.layer === "primary") : videoTracks[0];
+  if (!primaryTrack) throw new Error("剪辑规格缺少视频主干轨道");
+  assertContiguousTimeline(primaryTrack.clips as Array<SourceClip | RenderClip>, durationMs, layered ? "口播主干" : "视频片段");
+  for (const track of videoTracks.filter((track) => track.layer === "overlay")) assertTimeline(track.clips as RenderClip[], durationMs, "画面覆盖");
+}
+
 function sourceClipsFromProposal(proposal: EditProposal, selectedOperationIds?: string[]) {
   const selected = selectedOperationIds ? new Set(selectedOperationIds) : undefined;
   const operations = proposal.operations.filter((operation) => operation.status !== "rejected" && (!selected || selected.has(operation.id)));
@@ -318,12 +437,25 @@ export function freezeEditProposal(input: { proposal: EditProposal; assetLocks: 
   const proposal = EditProposalSchema.parse(input.proposal);
   const now = input.now ?? proposal.updatedAt;
   const clips = sourceClipsFromProposal(proposal, input.selectedOperationIds);
-  assertContiguousTimeline(clips, proposal.durationMs, "视频片段");
+  assertSourceDurationMatchesTimeline(clips, "视频片段");
+  assertSupportedClipSemantics(clips, "视频片段");
   assertTimeline(proposal.subtitles, proposal.durationMs, "字幕");
-  const tracks: FrozenTrack[] = [
-    { id: `${proposal.id}-video`, kind: "video", clips },
-    ...(proposal.subtitles.length > 0 ? [{ id: `${proposal.id}-subtitle`, kind: "subtitle" as const, clips: sortByTimeline(proposal.subtitles) }] : []),
-  ];
+  const layered = clips.some((clip) => clip.placement !== undefined);
+  let videoTracks: FrozenTrack[];
+  if (layered) {
+    const primaryClips = clips.filter((clip) => clip.placement !== "overlay");
+    const overlayClips = clips.filter((clip) => clip.placement === "overlay");
+    assertContiguousTimeline(primaryClips, proposal.durationMs, "口播主干");
+    assertTimeline(overlayClips, proposal.durationMs, "画面覆盖");
+    videoTracks = [
+      { id: `${proposal.id}-primary-video`, kind: "video", layer: "primary", clips: primaryClips },
+      ...(overlayClips.length > 0 ? [{ id: `${proposal.id}-overlay-video`, kind: "video" as const, layer: "overlay" as const, clips: overlayClips }] : []),
+    ];
+  } else {
+    assertContiguousTimeline(clips, proposal.durationMs, "视频片段");
+    videoTracks = [{ id: `${proposal.id}-video`, kind: "video", clips }];
+  }
+  const tracks: FrozenTrack[] = [...videoTracks, ...(proposal.subtitles.length > 0 ? [{ id: `${proposal.id}-subtitle`, kind: "subtitle" as const, clips: sortByTimeline(proposal.subtitles) }] : [])];
   const candidate = {
     schemaVersion: 1 as const,
     id: `${proposal.id}-frozen-${proposal.updatedAt.replace(/[^0-9]/g, "").slice(-14)}`,
@@ -346,6 +478,9 @@ export function freezeEditProposal(input: { proposal: EditProposal; assetLocks: 
 
 export function compileFrozenEditSpec(input: { spec: FrozenEditSpec; assets: Record<string, RenderAsset> }) {
   const spec = FrozenEditSpecSchema.parse(input.spec);
+  const { authoredSpecHash, ...authoredSpec } = spec;
+  if (sha256Text(authoredSpec) !== authoredSpecHash) throw new Error("FrozenEditSpec 内容与 authoredSpecHash 不一致");
+  assertVideoTrackTimelines(spec.tracks, spec.durationMs);
   const locks = new Map(spec.assetLocks.map((lock) => [lock.assetId, lock]));
   const renderTracks: RenderTrack[] = spec.tracks.map((track) => {
     const clips = track.kind === "subtitle" ? sortByTimeline(track.clips as SubtitleClip[]) : sortByTimeline(track.clips as SourceClip[]).map((clip) => {
@@ -363,10 +498,15 @@ export function compileFrozenEditSpec(input: { spec: FrozenEditSpec; assets: Rec
         sourceSegment: clip.sourceSegment,
         timeline: clip.timeline,
         role: clip.role,
+        placement: clip.placement,
         opacity: clip.opacity,
         volume: clip.volume,
       });
     });
+    if (track.kind === "video") {
+      assertSourceDurationMatchesTimeline(clips as RenderClip[], `${track.layer === "overlay" ? "画面覆盖" : "视频主干"}轨道`);
+      assertSupportedClipSemantics(clips as RenderClip[], `${track.layer === "overlay" ? "画面覆盖" : "视频主干"}轨道`);
+    }
     assertTimeline(clips, spec.durationMs, `${track.kind} 轨道`);
     return RenderTrackSchema.parse({ ...track, clips });
   });
@@ -381,6 +521,7 @@ export function compileFrozenEditSpec(input: { spec: FrozenEditSpec; assets: Rec
     outputProfile: spec.outputProfile,
     deterministic: true,
   });
+  assertVideoTrackTimelines(ir.tracks, ir.durationMs);
   return ir;
 }
 
@@ -396,8 +537,12 @@ function frameDurationForFps(fps: number) {
 
 function exchangeAssets(ir: RenderIR) {
   const clips = ir.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips as RenderClip[]);
-  const byId = new Map<string, RenderClip>();
-  for (const clip of clips) if (!byId.has(clip.sourceAssetId)) byId.set(clip.sourceAssetId, clip);
+  const byId = new Map<string, { sourceAssetId: string; sourceRelativePath: string; sourceContentHash: string; availableEndMs: number }>();
+  for (const clip of clips) {
+    const existing = byId.get(clip.sourceAssetId);
+    if (!existing) byId.set(clip.sourceAssetId, { sourceAssetId: clip.sourceAssetId, sourceRelativePath: clip.sourceRelativePath, sourceContentHash: clip.sourceContentHash, availableEndMs: clip.sourceSegment.endMs });
+    else existing.availableEndMs = Math.max(existing.availableEndMs, clip.sourceSegment.endMs);
+  }
   return [...byId.values()].sort((left, right) => left.sourceAssetId.localeCompare(right.sourceAssetId));
 }
 
@@ -408,6 +553,8 @@ export function exportFcpXml(input: { ir: RenderIR; workspaceRoot: string; forma
   const losses: ExchangeLoss[] = [];
   const subtitleClips = ir.tracks.filter((track) => track.kind === "subtitle").flatMap((track) => track.clips as SubtitleClip[]);
   if (subtitleClips.length > 0) losses.push({ kind: "subtitle", sourceId: ir.frozenEditSpecId, severity: "warning", message: "基线 FCPXML 适配器保留媒体时间线，但不生成带样式的字幕 Title；请同时使用 SRT。" });
+  const overlayTracks = ir.tracks.filter((track) => track.kind === "video" && track.layer === "overlay");
+  if (overlayTracks.length > 0) losses.push({ kind: "track", sourceId: ir.frozenEditSpecId, severity: "warning", message: "基线 FCPXML spine 适配器暂不映射 B-roll 覆盖轨；请使用 OTIO 或本地 MP4。" });
   for (const clip of ir.tracks.flatMap((track) => track.clips as Array<RenderClip | SubtitleClip>)) {
     if ("sourceAssetId" in clip && (clip.opacity !== undefined || clip.volume !== undefined)) losses.push({ kind: clip.volume !== undefined ? "audio" : "transform", sourceId: clip.id, severity: "warning", message: "基线 FCPXML 适配器暂不映射 opacity/volume 参数。" });
   }
@@ -418,11 +565,12 @@ export function exportFcpXml(input: { ir: RenderIR; workspaceRoot: string; forma
     ...assets.map((clip, index) => {
       const path = resolve(root, clip.sourceRelativePath);
       ensureWithin(root, path);
-      return `<asset id="asset-${index + 1}" name="${xmlEscape(clip.sourceAssetId)}" src="${xmlEscape(pathToFileURL(path).href)}" start="0s" duration="${seconds(clip.sourceSegment.endMs)}s" hasVideo="1" hasAudio="1" format="${formatId}"/>`;
+      return `<asset id="asset-${index + 1}" name="${xmlEscape(clip.sourceAssetId)}" src="${xmlEscape(pathToFileURL(path).href)}" start="0s" duration="${seconds(clip.availableEndMs)}s" hasVideo="1" hasAudio="1" format="${formatId}"/>`;
     }),
   ].join("\n    ");
   const assetIds = new Map(assets.map((clip, index) => [clip.sourceAssetId, `asset-${index + 1}`]));
-  const spine = (ir.tracks.find((track) => track.kind === "video")?.clips as RenderClip[] ?? []).map((clip) => `<asset-clip name="${xmlEscape(clip.id)}" ref="${assetIds.get(clip.sourceAssetId) ?? ""}" offset="${seconds(clip.timeline.startMs)}s" start="${seconds(clip.sourceSegment.startMs)}s" duration="${seconds(clip.sourceSegment.endMs - clip.sourceSegment.startMs)}s"/>`).join("\n        ");
+  const spineTrack = ir.tracks.find((track) => track.kind === "video" && track.layer === "primary") ?? ir.tracks.find((track) => track.kind === "video");
+  const spine = (spineTrack?.clips as RenderClip[] ?? []).map((clip) => `<asset-clip name="${xmlEscape(clip.id)}" ref="${assetIds.get(clip.sourceAssetId) ?? ""}" offset="${seconds(clip.timeline.startMs)}s" start="${seconds(clip.sourceSegment.startMs)}s" duration="${seconds(clip.sourceSegment.endMs - clip.sourceSegment.startMs)}s"/>`).join("\n        ");
   const body = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE fcpxml>\n<fcpxml version="${xmlEscape(formatVersion)}">\n  <resources>\n    ${resources}\n  </resources>\n  <library>\n    <event name="Creator Copilot">\n      <project name="${xmlEscape(ir.projectId)}">\n        <sequence format="${formatId}" duration="${seconds(ir.durationMs)}s">\n          <spine>\n        ${spine}\n          </spine>\n        </sequence>\n      </project>\n    </event>\n  </library>\n</fcpxml>\n`;
   const report = ExchangeCapabilityReportSchema.parse({ schemaVersion: 1, adapter: "fcpxml", formatVersion, supported: ["video", "audio", "asset references"], losses });
   return { body, report };
@@ -438,21 +586,25 @@ export function exportOtio(input: { ir: RenderIR; workspaceRoot: string }) {
   const losses: ExchangeLoss[] = [];
   const subtitleClips = ir.tracks.filter((track) => track.kind === "subtitle").flatMap((track) => track.clips as SubtitleClip[]);
   if (subtitleClips.length > 0) losses.push({ kind: "subtitle", sourceId: ir.frozenEditSpecId, severity: "warning", message: "OTIO 基线适配器保留视频时间线；字幕请使用同目录 SRT。" });
-  const tracks = ir.tracks.filter((track) => track.kind === "video" || track.kind === "audio").map((track) => ({
-    OTIO_SCHEMA: "Track.1",
-    name: track.id,
-    kind: track.kind === "audio" ? "Audio" : "Video",
-    children: (track.clips as RenderClip[]).map((clip) => {
+  const tracks = ir.tracks.filter((track) => track.kind === "video").map((track) => {
+    const clips = sortByTimeline(track.clips as RenderClip[]);
+    const children: unknown[] = [];
+    let cursorMs = 0;
+    for (const clip of clips) {
+      if (clip.timeline.startMs > cursorMs) children.push({ OTIO_SCHEMA: "Gap.1", name: `Gap ${cursorMs}-${clip.timeline.startMs}`, source_range: { OTIO_SCHEMA: "TimeRange.1", start_time: otioTime(0, ir.outputProfile.fps), duration: otioTime(clip.timeline.startMs - cursorMs, ir.outputProfile.fps) } });
       const absolutePath = resolve(root, clip.sourceRelativePath);
       ensureWithin(root, absolutePath);
-      return {
+      children.push({
         OTIO_SCHEMA: "Clip.2",
         name: clip.id,
         source_range: { OTIO_SCHEMA: "TimeRange.1", start_time: otioTime(clip.sourceSegment.startMs, ir.outputProfile.fps), duration: otioTime(clip.sourceSegment.endMs - clip.sourceSegment.startMs, ir.outputProfile.fps) },
         media_reference: { OTIO_SCHEMA: "ExternalReference.1", target_url: pathToFileURL(absolutePath).href, available_range: { OTIO_SCHEMA: "TimeRange.1", start_time: otioTime(0, ir.outputProfile.fps), duration: otioTime(clip.sourceSegment.endMs, ir.outputProfile.fps) }, metadata: { creatorCopilot: { assetId: clip.sourceAssetId, contentHash: clip.sourceContentHash } } },
-      };
-    }),
-  }));
+      });
+      cursorMs = clip.timeline.endMs;
+    }
+    if (cursorMs < ir.durationMs) children.push({ OTIO_SCHEMA: "Gap.1", name: `Gap ${cursorMs}-${ir.durationMs}`, source_range: { OTIO_SCHEMA: "TimeRange.1", start_time: otioTime(0, ir.outputProfile.fps), duration: otioTime(ir.durationMs - cursorMs, ir.outputProfile.fps) } });
+    return { OTIO_SCHEMA: "Track.1", name: track.id, kind: "Video", children };
+  });
   const timeline = { OTIO_SCHEMA: "Timeline.1", name: ir.projectId, global_start_time: otioTime(0, ir.outputProfile.fps), duration: otioTime(ir.durationMs, ir.outputProfile.fps), tracks: { OTIO_SCHEMA: "Stack.1", children: tracks } };
   const report = ExchangeCapabilityReportSchema.parse({ schemaVersion: 1, adapter: "otio", formatVersion: "OTIO 1.x JSON", supported: ["video", "audio", "external media references", "content hashes"], losses });
   return { body: `${JSON.stringify(timeline, null, 2)}\n`, report };
@@ -484,17 +636,22 @@ function seconds(milliseconds: number) {
 }
 
 function codecArgs(profile: OutputProfile) {
-  if (profile.container !== "mp4" || profile.videoCodec !== "h264" || profile.audioCodec !== "aac") throw new Error("V3 reference renderer 当前只支持 MP4/H.264/AAC；其他格式保留为 OutputProfile 合同");
+  if (profile.container !== "mp4" || profile.videoCodec !== "h264" || profile.audioCodec !== "aac") throw new Error("当前参考剪辑内核只支持 MP4/H.264/AAC；其他格式保留为 OutputProfile 合同");
   return ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", String(profile.audioSampleRate), "-movflags", "+faststart"];
 }
 
 export async function renderMp4(input: { ir: RenderIR; assets: Record<string, RenderAsset>; outputPath: string; ffmpegPath?: string; runner?: (binary: string, args: string[]) => Promise<{ stdout: string; stderr: string }> }) {
   const ir = RenderIRSchema.parse(input.ir);
-  const videoTrack = ir.tracks.find((track) => track.kind === "video");
-  if (!videoTrack || videoTrack.clips.length === 0) throw new Error("RenderIR 缺少视频轨道");
-  if (ir.outputProfile.subtitle === "burn_in") throw new Error("V3 reference renderer 尚未支持烧录字幕，请导出 SRT/VTT");
-  const clips = sortByTimeline(videoTrack.clips as RenderClip[]);
-  const assets = clips.map((clip) => {
+  const videoTracks = ir.tracks.filter((track) => track.kind === "video");
+  const primaryTrack = videoTracks.find((track) => track.layer === "primary") ?? videoTracks[0];
+  if (!primaryTrack || primaryTrack.clips.length === 0) throw new Error("RenderIR 缺少视频主干轨道");
+  if (ir.outputProfile.subtitle === "burn_in") throw new Error("V4b reference renderer 尚未支持烧录字幕，请导出 SRT/VTT");
+  const primaryClips = sortByTimeline(primaryTrack.clips as RenderClip[]);
+  const overlayClips = videoTracks.filter((track) => track !== primaryTrack && track.layer === "overlay").flatMap((track) => track.clips as RenderClip[]);
+  assertSourceDurationMatchesTimeline([...primaryClips, ...overlayClips], "RenderIR 视频片段");
+  assertSupportedClipSemantics([...primaryClips, ...overlayClips], "RenderIR 视频片段");
+  assertVideoTrackTimelines(ir.tracks, ir.durationMs);
+  const assets = [...primaryClips, ...sortByTimeline(overlayClips)].map((clip) => {
     const asset = input.assets[clip.sourceAssetId];
     if (!asset || !isAbsolute(asset.absolutePath)) throw new Error(`缺少素材路径：${clip.sourceAssetId}`);
     return { clip, asset };
@@ -502,19 +659,28 @@ export async function renderMp4(input: { ir: RenderIR; assets: Record<string, Re
   const args = ["-hide_banner", "-loglevel", "error", "-y"];
   for (const { clip, asset } of assets) args.push("-ss", seconds(clip.sourceSegment.startMs), "-t", seconds(clip.sourceSegment.endMs - clip.sourceSegment.startMs), "-i", asset.absolutePath);
   const filters: string[] = [];
-  const videoRefs: string[] = [];
-  const audioRefs: string[] = [];
-  for (const [index, { clip, asset }] of assets.entries()) {
-    const videoRef = `v${index}`;
-    const audioRef = `a${index}`;
+  const primaryVideoRefs: string[] = [];
+  const primaryAudioRefs: string[] = [];
+  for (const [index, { clip, asset }] of assets.slice(0, primaryClips.length).entries()) {
+    const videoRef = `primary-v${index}`;
+    const audioRef = `primary-a${index}`;
     filters.push(`[${index}:v]scale=${ir.outputProfile.width}:${ir.outputProfile.height}:force_original_aspect_ratio=decrease,pad=${ir.outputProfile.width}:${ir.outputProfile.height}:(ow-iw)/2:(oh-ih)/2:color=black,fps=${ir.outputProfile.fps},format=yuv420p,setpts=PTS-STARTPTS[${videoRef}]`);
     if (asset.hasAudio === false) filters.push(`anullsrc=r=${ir.outputProfile.audioSampleRate}:cl=stereo,atrim=duration=${seconds(clip.sourceSegment.endMs - clip.sourceSegment.startMs)},asetpts=PTS-STARTPTS[${audioRef}]`);
     else filters.push(`[${index}:a]aresample=${ir.outputProfile.audioSampleRate},asetpts=PTS-STARTPTS[${audioRef}]`);
-    videoRefs.push(`[${videoRef}]`);
-    audioRefs.push(`[${audioRef}]`);
+    primaryVideoRefs.push(`[${videoRef}]`);
+    primaryAudioRefs.push(`[${audioRef}]`);
   }
-  const concatInputs = assets.flatMap((_, index) => [videoRefs[index], audioRefs[index]]).join("");
-  filters.push(`${concatInputs}concat=n=${assets.length}:v=1:a=1[vout][aout]`);
+  filters.push(`${primaryVideoRefs.map((reference, index) => `${reference}${primaryAudioRefs[index]}`).join("")}concat=n=${primaryClips.length}:v=1:a=1[basev][aout]`);
+  let currentVideo = "[basev]";
+  for (const [overlayIndex, { clip }] of assets.slice(primaryClips.length).entries()) {
+    const inputIndex = primaryClips.length + overlayIndex;
+    const overlayRef = `overlay-v${overlayIndex}`;
+    const nextVideo = `mixed-v${overlayIndex}`;
+    filters.push(`[${inputIndex}:v]scale=${ir.outputProfile.width}:${ir.outputProfile.height}:force_original_aspect_ratio=decrease,pad=${ir.outputProfile.width}:${ir.outputProfile.height}:(ow-iw)/2:(oh-ih)/2:color=black,fps=${ir.outputProfile.fps},format=yuv420p,setpts=PTS-STARTPTS+${seconds(clip.timeline.startMs)}/TB[${overlayRef}]`);
+    filters.push(`${currentVideo}[${overlayRef}]overlay=0:0:eof_action=pass:shortest=0[${nextVideo}]`);
+    currentVideo = `[${nextVideo}]`;
+  }
+  filters.push(`${currentVideo}format=yuv420p[vout]`);
   args.push("-filter_complex", filters.join(";"), "-map", "[vout]", "-map", "[aout]", "-r", String(ir.outputProfile.fps), ...codecArgs(ir.outputProfile), input.outputPath);
   await mkdir(dirname(input.outputPath), { recursive: true });
   const temporaryPath = `${input.outputPath}.tmp-${process.pid}-${Date.now()}${extname(input.outputPath) || ".mp4"}`;
@@ -533,6 +699,13 @@ export async function renderMp4(input: { ir: RenderIR; assets: Record<string, Re
   return input.outputPath;
 }
 
+async function probeRenderedDurationMs(outputPath: string, ffprobePath = "ffprobe") {
+  const result = await execFile(ffprobePath, ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", outputPath], { encoding: "utf8", maxBuffer: 1024 * 1024 });
+  const secondsValue = Number(result.stdout.trim());
+  if (!Number.isFinite(secondsValue) || secondsValue <= 0) throw new Error("ffprobe 没有返回有效的成片时长");
+  return Math.round(secondsValue * 1000);
+}
+
 export async function exportRenderPackage(input: {
   workspaceRoot: string;
   renderId: string;
@@ -542,6 +715,7 @@ export async function exportRenderPackage(input: {
   subtitleRelativePath?: string;
   manifestRelativePath?: string;
   ffmpegPath?: string;
+  ffprobePath?: string;
 }) {
   const spec = FrozenEditSpecSchema.parse(input.frozenEditSpec);
   const root = resolve(input.workspaceRoot);
@@ -558,6 +732,18 @@ export async function exportRenderPackage(input: {
     ensureWithin(root, asset.absolutePath);
   }
   await renderMp4({ ir, assets: input.assets, outputPath, ffmpegPath: input.ffmpegPath });
+  let renderedDurationMs: number;
+  try {
+    renderedDurationMs = await probeRenderedDurationMs(outputPath, input.ffprobePath);
+  } catch (error) {
+    await rm(outputPath, { force: true });
+    throw error;
+  }
+  const durationToleranceMs = Math.max(100, Math.ceil(2000 / ir.outputProfile.fps));
+  if (Math.abs(renderedDurationMs - ir.durationMs) > durationToleranceMs) {
+    await rm(outputPath, { force: true });
+    throw new Error(`成片时长 ${renderedDurationMs}ms 与已确认时间线 ${ir.durationMs}ms 不一致`);
+  }
   const subtitleText = renderSrt(ir);
   const outputs: RenderManifest["outputs"] = [];
   const outputHash = await sha256File(outputPath);

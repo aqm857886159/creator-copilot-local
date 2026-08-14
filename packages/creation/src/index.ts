@@ -202,6 +202,19 @@ export function createStoryboard(input: {
   return storyboard;
 }
 
+export function assertLayeredStoryboardCoverage(scriptInput: Script, storyboardInput: Storyboard) {
+  const script = ScriptSchema.parse(scriptInput);
+  const storyboard = StoryboardSchema.parse(storyboardInput);
+  if (storyboard.scriptId !== script.id || storyboard.scriptRevision !== script.revision) throw new Error("分镜与脚本版本不一致");
+  for (const block of script.blocks) {
+    const shots = storyboard.shots.filter((shot) => shot.scriptBlockIds.includes(block.id));
+    const primaryShots = shots.filter((shot) => shot.mode === "talking_head");
+    if (primaryShots.length !== 1) throw new Error(`脚本段落 ${block.id} 必须且只能有一个口播主干镜头`);
+    if (primaryShots[0].scriptBlockIds.length !== 1) throw new Error(`口播主干镜头 ${primaryShots[0].id} 只能对应一个脚本段落`);
+    if (block.visualNeed !== "none" && !shots.some((shot) => shot.mode !== "talking_head")) throw new Error(`脚本段落 ${block.id} 需要至少一个补充画面`);
+  }
+}
+
 export function createShootTasks(storyboard: Storyboard, createdAt: string) {
   return storyboard.shots.filter((shot) => shot.sourceRequirement === "shoot_task" || shot.mode === "talking_head" || shot.mode === "broll").map((shot) => ShootTaskSchema.parse({
     schemaVersion: 1,

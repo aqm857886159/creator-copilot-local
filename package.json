@@ -22,6 +22,7 @@
     "start": "tsx server/index.ts",
     "test": "vitest run",
     "test:render:smoke": "npm run build && node scripts/render-smoke.mjs",
+    "test:render:layered": "npm run build && node scripts/layered-render-smoke.mjs",
     "test:creation:edit:e2e": "npm run build && node scripts/creation-edit-e2e.mjs",
     "test:render:recovery": "npm run build && node scripts/render-recovery-smoke.mjs",
     "test:analysis:sidecar": "node scripts/analysis-sidecar-smoke.mjs",

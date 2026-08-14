@@ -347,6 +347,7 @@ interface EditProposalOperation {
   sourceSegment: { startMs: number; endMs: number };
   timeline: { startMs: number; endMs: number };
   role: "a_roll" | "b_roll" | "screen" | "generated" | "still";
+  placement?: "primary" | "overlay";
   reason: string;
   evidenceIds: string[];
   confidence: number;
@@ -374,7 +375,7 @@ interface EditProposalResult {
   idempotencyKey?: string;
   jobId?: string;
   project?: { id: string; title: string };
-  missing?: Array<{ shotId: string; taskId?: string; reason: string; instruction: string }>;
+  missing?: Array<{ shotId: string; taskId?: string; reason: string; instruction: string; required?: boolean }>;
   analysisFacts?: Array<{ id: string; artifactId: string; kind: string; startMs: number; endMs: number; text: string; labels: string[]; providerKey: string }>;
   assetCandidates?: Array<{ shotId: string; candidates: Array<{ assetId: string; relativePath: string; contentHash: string; score: number; confidence: "low" | "medium" | "high"; matchedTerms: string[]; evidenceIds: string[]; sourceSegment?: { startMs: number; endMs: number }; durationMs?: number; reason: string }> }>;
   proposal?: EditProposal;

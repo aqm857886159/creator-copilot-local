@@ -40,6 +40,31 @@ describe("agent edit proposal runtime", () => {
     expect(() => materializeEditProposalDraft({ ...input, analysisFacts }, { ...draft, operations: [{ ...draft.operations[0], evidenceIds: ["fabricated-fact"] }] })).toThrow("未确认的证据");
   });
 
+  it("materializes talking-head primary plus optional b-roll overlay for one script block", () => {
+    const layeredStoryboard = { ...storyboard, shots: [
+      { ...storyboard.shots[0], id: "shot-primary", mode: "talking_head" as const, actionDescription: "连续讲出观点" },
+      { ...storyboard.shots[0], id: "shot-overlay", mode: "broll" as const, purpose: "prove" as const, actionDescription: "覆盖桌面草稿证据" },
+    ] };
+    const layeredTasks = [
+      { ...task, id: "task-primary", shotId: "shot-primary", takeIds: ["take-primary"] },
+      { ...task, id: "task-overlay", shotId: "shot-overlay", takeIds: ["take-overlay"] },
+    ];
+    const layeredInput = { ...input, storyboard: layeredStoryboard, tasks: layeredTasks, takesByTask: { "task-primary": [{ ...take, id: "take-primary", shootTaskId: "task-primary", assetId: "asset-primary", durationMs: 2_000 }], "task-overlay": [{ ...take, id: "take-overlay", shootTaskId: "task-overlay", assetId: "asset-overlay", durationMs: 800 }] }, assetFacts: { "asset-primary": { contentHash: "sha256:primary", durationMs: 2_000 }, "asset-overlay": { contentHash: "sha256:overlay", durationMs: 800 } } };
+    const result = materializeEditProposalDraft(layeredInput, { schemaVersion: 1, operations: [
+      { shotId: "shot-primary", sourceAssetId: "asset-primary", sourceSegment: { startMs: 0, endMs: 2_000 }, role: "a_roll", reason: "保留主干", evidenceIds: ["shot-primary"], confidence: 0.95 },
+      { shotId: "shot-overlay", sourceAssetId: "asset-overlay", sourceSegment: { startMs: 0, endMs: 800 }, role: "b_roll", reason: "补充证据", evidenceIds: ["shot-overlay"], confidence: 0.9 },
+    ], subtitles: [], missingMaterial: [] });
+    expect(result).toMatchObject({ status: "ready", proposal: { operations: [{ shotId: "shot-primary", placement: "primary", timeline: { startMs: 0, endMs: 2000 } }, { shotId: "shot-overlay", placement: "overlay", timeline: { startMs: 300, endMs: 1100 } }] } });
+    const optionalMissing = materializeEditProposalDraft({ ...layeredInput, takesByTask: { ...layeredInput.takesByTask, "task-overlay": [{ ...layeredInput.takesByTask["task-overlay"][0], status: "candidate" as const }] } }, { schemaVersion: 1, operations: [{ shotId: "shot-primary", sourceAssetId: "asset-primary", sourceSegment: { startMs: 0, endMs: 2_000 }, role: "a_roll", reason: "保留主干", evidenceIds: ["shot-primary"], confidence: 0.95 }], subtitles: [], missingMaterial: [] });
+    expect(optionalMissing).toMatchObject({ status: "ready", missing: [{ shotId: "shot-overlay", required: false }] });
+    const misleadingPrimaryGap = materializeEditProposalDraft({ ...layeredInput, takesByTask: { ...layeredInput.takesByTask, "task-primary": [{ ...layeredInput.takesByTask["task-primary"][0], status: "candidate" as const }] } }, { schemaVersion: 1, operations: [], subtitles: [], missingMaterial: [{ shotId: "shot-primary", reason: "take_not_selected", instruction: "缺少口播", required: false }] });
+    expect(misleadingPrimaryGap).toMatchObject({ status: "needs_material", missing: [{ shotId: "shot-primary", required: true }] });
+    const primaryOperation = { shotId: "shot-primary", sourceAssetId: "asset-primary", sourceSegment: { startMs: 0, endMs: 2_000 }, role: "a_roll" as const, reason: "保留主干", evidenceIds: ["shot-primary"], confidence: 0.95 };
+    expect(() => materializeEditProposalDraft(layeredInput, { schemaVersion: 1, operations: [primaryOperation, primaryOperation], subtitles: [], missingMaterial: [] })).toThrow("多个操作");
+    expect(() => materializeEditProposalDraft(layeredInput, { schemaVersion: 1, operations: [primaryOperation], subtitles: [], missingMaterial: [{ shotId: "shot-primary", reason: "no_suitable_asset", instruction: "自相矛盾" }] })).toThrow("同时选择素材并声明缺口");
+    expect(() => materializeEditProposalDraft(layeredInput, { schemaVersion: 1, operations: [{ ...primaryOperation, shotId: "unknown-shot" }], subtitles: [], missingMaterial: [] })).toThrow("不存在的分镜操作");
+  });
+
   it("turns an AI SDK draft into a reviewable proposal without bypassing material locks", async () => {
     const fetcher: typeof fetch = async () => new Response(JSON.stringify({
       id: "response-edit-proposal",
