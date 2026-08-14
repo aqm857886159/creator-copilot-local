@@ -31,7 +31,8 @@ const workspaceId = "workspace-v4-render-recovery";
 const projectId = "project-v4-render-recovery";
 const renderRunId = "render-v4-recovery";
 const jobId = `job-${renderRunId}`;
-const now = "2026-08-14T00:00:00.000Z";
+const now = new Date().toISOString();
+const at = (offsetMs) => new Date(Date.parse(now) + offsetMs).toISOString();
 
 await rm(root, { recursive: true, force: true });
 await mkdir(metadataDir, { recursive: true });
@@ -75,20 +76,20 @@ assert(catalog.heartbeatJob(jobId, "render-crash-worker", firstLease, new Date(n
 catalog.close();
 
 catalog = new storage.SqliteCatalog(join(metadataDir, "catalog.sqlite"));
-const recoveredCount = catalog.recoverExpiredLeases(new Date("2026-08-14T00:00:02.000Z"));
+const recoveredCount = catalog.recoverExpiredLeases(new Date(at(2_000)));
 assert(recoveredCount === 1, `启动恢复数量错误：${recoveredCount}`);
 assert(catalog.getJob(jobId)?.state === "queued", "过期 lease 没有恢复为 queued");
 assert(catalog.getRenderRun(renderRunId)?.state === "running", "恢复不应丢失原 render run");
 
-const failedLease = catalog.claimJob(jobId, "render-failing-worker", new Date("2026-08-14T00:00:03.000Z"), 60_000);
-assert(failedLease && catalog.heartbeatJob(jobId, "render-failing-worker", failedLease, new Date("2026-08-14T00:00:03.000Z"), 60_000), "失败尝试没有取得 lease");
+const failedLease = catalog.claimJob(jobId, "render-failing-worker", new Date(at(3_000)), 60_000);
+assert(failedLease && catalog.heartbeatJob(jobId, "render-failing-worker", failedLease, new Date(at(3_000)), 60_000), "失败尝试没有取得 lease");
 assert(catalog.transitionJob(jobId, "running", "failed", failedLease, { lastError: { code: "INJECTED_RENDER_FAILURE", message: "模拟 FFmpeg 进程崩溃", retryable: true } }), "注入失败状态没有持久化");
-catalog.saveRenderRun({ ...catalog.getRenderRun(renderRunId), state: "failed", error: { code: "injected_render_failure", message: "模拟 FFmpeg 进程崩溃" }, updatedAt: new Date("2026-08-14T00:00:04.000Z").toISOString() });
-assert(catalog.transitionJob(jobId, "failed", "retry_wait", undefined, { retryAfter: "2026-08-14T00:00:04.000Z", lastError: undefined }), "失败任务没有进入 retry_wait");
+catalog.saveRenderRun({ ...catalog.getRenderRun(renderRunId), state: "failed", error: { code: "injected_render_failure", message: "模拟 FFmpeg 进程崩溃" }, updatedAt: at(4_000) });
+assert(catalog.transitionJob(jobId, "failed", "retry_wait", undefined, { retryAfter: at(4_000), lastError: undefined }), "失败任务没有进入 retry_wait");
 assert(catalog.transitionJob(jobId, "retry_wait", "queued"), "retry_wait 没有重新排队");
 
-const retryLease = catalog.claimJob(jobId, "render-retry-worker", new Date("2026-08-14T00:00:05.000Z"), 60_000);
-assert(retryLease && catalog.heartbeatJob(jobId, "render-retry-worker", retryLease, new Date("2026-08-14T00:00:05.000Z"), 60_000), "重试没有取得 lease");
+const retryLease = catalog.claimJob(jobId, "render-retry-worker", new Date(at(5_000)), 60_000);
+assert(retryLease && catalog.heartbeatJob(jobId, "render-retry-worker", retryLease, new Date(at(5_000)), 60_000), "重试没有取得 lease");
 const retryJob = catalog.getJob(jobId);
 assert(retryJob?.attempt === 3, `重试 attempt 应为 3（含崩溃尝试），实际为 ${retryJob?.attempt}`);
 const renderId = `${renderRunId}-attempt-${retryJob.attempt}`;

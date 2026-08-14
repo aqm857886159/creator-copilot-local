@@ -1,7 +1,7 @@
 # Provider 官方接入调研与小额联调记录 v0.1
 
 日期：2026-08-14
-状态：已完成官方文档核对；已完成无生成任务的真实 smoke；未接入 UI 和正式任务调度。
+状态：已完成官方文档核对；已完成无生成任务的真实 smoke；账号研究、AI 粗剪和脚本提案均通过显式 main-process IPC 接入；正式的通用 Provider Job 调度仍后置。
 范围：TikHub（抖音研究）与 APIMart（文本/视觉/音频/视频模型网关）。
 
 ## 1. 结论先行
@@ -215,6 +215,9 @@ PROVIDER_LIVE_TESTS=1 PROVIDER_BILLED_SMOKE=1 npm run test:providers:live
 # 只执行 1 次 AI SDK 结构化剪辑提案
 AGENT_PROVIDER_LIVE=1 AI_EDIT_ADAPTER=ai-sdk npm run test:agent:live
 
+# 只执行 1 次脚本 AI 提案结构化请求；默认跳过，不会后台调用
+AGENT_SCRIPT_LIVE=1 npm run test:script:live
+
 # 选题雷达默认只读动态价格，不计费；如需一次受控榜单请求，显式打开且最多 1 条
 npm run test:topic-radar:live
 TOPIC_RADAR_BILLED_SMOKE=1 TOPIC_RADAR_SOURCE=low_fan npm run test:topic-radar:live
@@ -232,6 +235,9 @@ TOPIC_RADAR_BILLED_SMOKE=1 TOPIC_RADAR_SOURCE=low_fan npm run test:topic-radar:l
 - APIMart AI SDK 首次请求因网关默认 SSE 失败；随后做 1 条直接 `json_schema` 诊断、1 条原 HTTP adapter 对照、1 条修复后的 AI SDK 提案，共 4 个小文本请求；最终 AI SDK 返回 1 个合法操作、0 个素材缺口，且只使用确认素材；
 - 未运行 TikHub 批量下载、星图画像、评论抓取，未运行 APIMart 图片/视频/语音生成；
 - 所有 SDK mock 都设置 `maxRetries: 0`；真实响应正文、密钥、余额和用户账户字段均未写入仓库或日志。
+- 脚本提案真实联调使用独立的 `scripts/script-proposal-smoke.mjs`，一次只发一条结构化文本请求；默认跳过，输出只包含 provider/model、响应 hash 是否存在、段落数量和视觉建议数量，不输出脚本文本或来源内容。
+- 2026-08-14 脚本结构化 smoke 使用 `gpt-4.1-mini` 成功返回 1–2 个段落；同日用 `gpt-5-nano` 请求该较深的嵌套脚本 schema 时出现 `No output generated`，因此脚本默认模型定为 `gpt-4.1-mini`。模型目录里的 `supported_endpoint_types=openai` 不能单独证明某模型支持 JSON Schema，切换模型前必须先做一次受控 structured-output smoke。
+- 脚本使用独立的 `AI_SCRIPT_MODEL`，不自动继承 `AI_EDIT_MODEL`；剪辑提案和脚本提案的结构化 schema/兼容性分别验收，避免一个模型配置变化同时破坏两条用户旅途。
 
 本地 `.env` 仅用于当前机器联调，已被 `.gitignore` 忽略；仓库只提交 `.env.example` 和本文件，不提交任何 key。
 

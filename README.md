@@ -24,7 +24,7 @@ pnpm --filter @creator-copilot/desktop build
 npm run dev:desktop
 ```
 
-云端能力默认关闭。将 `.env.example` 复制为本地 `.env` 后可配置 TikHub/APIMart；密钥只由 Electron main 和受控联调脚本读取。`AI_EDIT_PROVIDER=apimart` 会启用 AI SDK 结构化剪辑提案，`AI_EDIT_PROVIDER=local-fallback` 保持完全离线。
+云端能力默认关闭。将 `.env.example` 复制为本地 `.env` 后可配置 TikHub/APIMart；密钥只由 Electron main 和受控联调脚本读取。`AI_EDIT_PROVIDER=apimart` 会启用 AI SDK 结构化剪辑/脚本提案，`AI_EDIT_PROVIDER=local-fallback` 保持完全离线。脚本提案使用独立的 `AI_SCRIPT_MODEL`，默认是经过 smoke 验证的 `gpt-4.1-mini`。
 
 ## 文档入口
 
@@ -34,6 +34,7 @@ npm run dev:desktop
 - [Agent 技术栈 CTO 评审](docs/Agent-Stack-CTO-Review-v0.1.md)
 - [数据库选型 ADR](docs/Database-Decision-ADR-v0.1.md)
 - [Provider 官方接入与小额联调记录](docs/Provider-Official-Integration-Research-v0.1.md)
+- [脚本 AI 提案与拍摄包衔接施工记录](docs/plan/2026-08-14-v5-script-proposal.md)
 - [选题雷达垂直切片施工记录](docs/plan/2026-08-14-v7-topic-radar.md)
 
 ## 验证
@@ -48,6 +49,9 @@ npm run test:desktop:package
 
 # 打包应用真实用户旅途：创作项目 → 拍摄包 → 三个 Take → 本地分析 → AI 剪辑提案 → 导出
 npm run test:desktop:ui
+
+# 默认跳过；显式打开时只执行 1 条 APIMart 脚本结构化请求
+AGENT_SCRIPT_LIVE=1 npm run test:script:live
 ```
 
 打包产物位于 `release/`，仅为本地未签名目录产物。

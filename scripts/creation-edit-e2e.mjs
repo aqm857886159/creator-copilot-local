@@ -25,7 +25,7 @@ const root = join(process.cwd(), ".data", "v4-creation-edit-e2e");
 const incomingDir = join(root, "incoming");
 const metadataDir = join(root, ".creator-copilot");
 const fixturePath = join(incomingDir, "phone-take.mp4");
-const now = "2026-08-14T00:00:00.000Z";
+const now = new Date().toISOString();
 
 await rm(root, { recursive: true, force: true });
 await mkdir(metadataDir, { recursive: true });
@@ -161,5 +161,5 @@ console.log(JSON.stringify({
   frozen: { id: frozen.id, authoredSpecHash: frozen.authoredSpecHash, durationMs: frozen.durationMs },
   render: { id: renderId, video: `exports/${renderId}.mp4`, subtitle: Boolean(result.subtitlePath), manifest: `exports/${renderId}.manifest.json`, byteSize: outputStats.size, durationMs: Math.round(Number(probe.format.duration) * 1000), width: probe.streams.find((stream) => stream.codec_type === "video")?.width, height: probe.streams.find((stream) => stream.codec_type === "video")?.height },
   publishing: { packageId, manifest: `publish/${packageId}/publish-package.manifest.json`, fileKinds: publishPackage.manifest.files.map((file) => file.kind), publicationId: publication.id, metricSnapshotId: snapshot.id, reviewMemoryStatus: persistedReview?.status },
-  persistence: { schemaVersion: 8, jobState: persistedJob?.state, attempt: persistedJob?.attempt, artifactCount: persistedArtifacts.length, renderArtifactCount: outputArtifacts.length },
+  persistence: { schemaVersion: 9, jobState: persistedJob?.state, attempt: persistedJob?.attempt, artifactCount: persistedArtifacts.length, renderArtifactCount: outputArtifacts.length },
 }));

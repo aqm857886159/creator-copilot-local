@@ -95,6 +95,18 @@ function getEditAgent(runtime) {
   return new runtime.agentRuntime.LocalEditAgentRuntime();
 }
 
+function getScriptAgent(runtime) {
+  const providerKey = process.env.AI_EDIT_PROVIDER ?? "local-fallback";
+  if (providerKey === "apimart" && process.env.APIMART_API_KEY) {
+    const modelKey = process.env.AI_SCRIPT_MODEL ?? "gpt-4.1-mini";
+    const configuredBaseUrl = process.env.APIMART_BASE_URL ?? "https://api.apimart.ai";
+    const baseUrl = configuredBaseUrl.replace(/\/+$/, "").endsWith("/v1") ? configuredBaseUrl : `${configuredBaseUrl.replace(/\/+$/, "")}/v1`;
+    const generator = new runtime.providers.AiSdkStructuredGenerator({ apiKey: process.env.APIMART_API_KEY, baseUrl });
+    return new runtime.agentRuntime.AiSdkScriptAgentRuntime(generator, modelKey);
+  }
+  return new runtime.agentRuntime.LocalScriptAgentRuntime();
+}
+
 function getTikHubConnector(runtime) {
   if (!process.env.TIKHUB_API_KEY) throw new Error("TikHub API key 未配置");
   return new runtime.providers.TikHubDouyinConnector({ apiKey: process.env.TIKHUB_API_KEY, baseUrl: process.env.TIKHUB_BASE_URL ?? "https://api.tikhub.dev" });
@@ -744,6 +756,38 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
   }
 });
 
+ipcMain.handle("desktop:propose-script", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.brief !== "string" || !raw.brief.trim()) throw new Error("请先写下你真正想讲的主题或原始思路");
+    const runtime = await getDesktopRuntime();
+    const sourceEvidence = Array.isArray(raw.sourceEvidence) ? raw.sourceEvidence.filter((item) => item && typeof item.id === "string" && typeof item.text === "string").slice(0, 20) : [];
+    const result = await getScriptAgent(runtime).proposeScript({ workspaceId: workspace.workspaceId, brief: raw.brief.trim(), voiceProfile: typeof raw.voiceProfile === "string" ? raw.voiceProfile : undefined, sourceEvidence, now: new Date().toISOString() });
+    workspace.catalog.saveScriptProposal(result.proposal);
+    return { ok: true, proposal: result.proposal, provider: result.provider };
+  } catch (error) {
+    return { ok: false, errorCode: "script_proposal_failed", message: error instanceof Error ? error.message : "脚本提案失败" };
+  }
+});
+
+ipcMain.handle("desktop:accept-script-proposal", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.proposalId !== "string" || typeof raw.projectTitle !== "string" || !raw.projectTitle.trim()) throw new Error("确认脚本需要提案 ID 和项目标题");
+    const proposal = workspace.catalog.getScriptProposal(raw.proposalId);
+    if (!proposal || proposal.workspaceId !== workspace.workspaceId) throw new Error("脚本提案不存在或不属于当前工作区");
+    const runtime = await getDesktopRuntime();
+    const now = new Date().toISOString();
+    const projectId = `project-${randomUUID()}`;
+    const script = runtime.creation.ScriptSchema.parse({ schemaVersion: 1, id: `script-${randomUUID()}`, projectId, revision: 1, status: "approved", blocks: proposal.blocks.map((block) => ({ schemaVersion: 1, id: block.id, order: block.order, kind: block.kind, text: block.text, emphasis: block.emphasis, evidenceIds: block.evidenceIds, visualNeed: block.visualNeed })), estimatedDurationMs: proposal.blocks.reduce((total, block) => total + Math.max(1_500, Math.round(block.text.length * 260)), 0), createdAt: now, updatedAt: now });
+    const project = { id: projectId, workspaceId: workspace.workspaceId, title: raw.projectTitle.trim(), stage: "script", revision: 1, payload: { scriptId: script.id, scriptProposalId: proposal.id, visualSuggestions: Object.fromEntries(proposal.blocks.map((block) => [block.id, block.visualSuggestion])) }, createdAt: now, updatedAt: now };
+    const accepted = workspace.catalog.acceptScriptProposal({ proposalId: proposal.id, workspaceId: workspace.workspaceId, project, script });
+    return { ok: true, proposal: accepted.proposal, project: accepted.project, script: accepted.script };
+  } catch (error) {
+    return { ok: false, errorCode: "script_accept_failed", message: error instanceof Error ? error.message : "脚本确认失败" };
+  }
+});
+
 ipcMain.handle("desktop:create-capture-workflow", async (_event, raw) => {
   try {
     const workspace = requireWorkspace();
@@ -752,13 +796,19 @@ ipcMain.handle("desktop:create-capture-workflow", async (_event, raw) => {
     if (!Array.isArray(raw.shots) || raw.shots.length === 0 || raw.shots.length > 60) throw new Error("分镜数量必须在 1–60 之间");
     const runtime = await getDesktopRuntime();
     const now = new Date().toISOString();
-    const projectId = `project-${randomUUID()}`;
-    const scriptId = `script-${randomUUID()}`;
+    const existingProjectId = typeof raw.existingProjectId === "string" ? raw.existingProjectId : undefined;
+    const existingScriptId = typeof raw.existingScriptId === "string" ? raw.existingScriptId : undefined;
+    const existingProject = existingProjectId ? workspace.catalog.getProject(existingProjectId) : undefined;
+    const existingScript = existingScriptId ? workspace.catalog.getScript(existingScriptId) : undefined;
+    if (existingProjectId && (!existingProject || existingProject.workspaceId !== workspace.workspaceId)) throw new Error("已确认的脚本项目不存在或不属于当前工作区");
+    if (existingScriptId && (!existingScript || !existingProject || existingScript.projectId !== existingProject.id)) throw new Error("已确认的脚本版本不存在或项目归属不一致");
+    const projectId = existingProject?.id ?? `project-${randomUUID()}`;
+    const scriptId = existingScript?.id ?? `script-${randomUUID()}`;
     const storyboardId = `storyboard-${randomUUID()}`;
     const capturePackageId = `capture-${randomUUID()}`;
     const blocks = raw.blocks.map((block, index) => ({
       schemaVersion: 1,
-      id: `${scriptId}-block-${String(index + 1).padStart(2, "0")}`,
+      id: existingScript?.blocks[index]?.id ?? `${scriptId}-block-${String(index + 1).padStart(2, "0")}`,
       order: index,
       kind: block.kind,
       text: String(block.text ?? "").trim(),
@@ -767,7 +817,9 @@ ipcMain.handle("desktop:create-capture-workflow", async (_event, raw) => {
       visualNeed: block.visualNeed,
     }));
     const estimatedDurationMs = blocks.reduce((total, block) => total + Math.max(1500, Math.round(block.text.length * 260)), 0);
-    const script = runtime.creation.ScriptSchema.parse({ schemaVersion: 1, id: scriptId, projectId, revision: 1, status: "approved", blocks, estimatedDurationMs, createdAt: now, updatedAt: now });
+    const script = existingScript
+      ? runtime.creation.ScriptSchema.parse({ ...existingScript, revision: existingScript.revision + 1, blocks, estimatedDurationMs, updatedAt: now })
+      : runtime.creation.ScriptSchema.parse({ schemaVersion: 1, id: scriptId, projectId, revision: 1, status: "approved", blocks, estimatedDurationMs, createdAt: now, updatedAt: now });
     const shotDrafts = raw.shots.map((shot, index) => {
       const scriptBlock = blocks[Number(shot.scriptBlockIndex)];
       if (!scriptBlock) throw new Error(`第 ${index + 1} 个分镜没有对应脚本段落`);
@@ -788,7 +840,7 @@ ipcMain.handle("desktop:create-capture-workflow", async (_event, raw) => {
     const tasks = runtime.creation.createShootTasks(storyboard, now);
     const capturePackageDraft = runtime.creation.CapturePackageSchema.parse({ schemaVersion: 1, id: capturePackageId, projectId, storyboardRevision: storyboard.revision, format: "html", relativePath: `capture-packages/${capturePackageId}/index.html`, taskIds: tasks.map((task) => task.id), status: "draft", createdAt: now, updatedAt: now });
     const capturePackage = await runtime.creation.exportCapturePackage({ workspaceRoot: workspace.workspacePath, projectTitle: raw.projectTitle.trim(), capturePackage: capturePackageDraft, storyboard, tasks });
-    workspace.catalog.saveCaptureWorkflow({ project: { id: projectId, workspaceId: workspace.workspaceId, title: raw.projectTitle.trim(), stage: "capture", revision: 1, payload: { scriptId, storyboardId, capturePackageId, taskIds: tasks.map((task) => task.id) }, createdAt: now, updatedAt: now }, script, storyboard, tasks, capturePackage });
+    workspace.catalog.saveCaptureWorkflow({ project: existingProject ? { ...existingProject, title: raw.projectTitle.trim(), stage: "capture", payload: { ...existingProject.payload, scriptId, storyboardId, capturePackageId, taskIds: tasks.map((task) => task.id) }, updatedAt: now } : { id: projectId, workspaceId: workspace.workspaceId, title: raw.projectTitle.trim(), stage: "capture", revision: 1, payload: { scriptId, storyboardId, capturePackageId, taskIds: tasks.map((task) => task.id) }, createdAt: now, updatedAt: now }, script, storyboard, tasks, capturePackage });
     return { ok: true, projectId, script, storyboard, tasks, capturePackage };
   } catch (error) {
     return { ok: false, errorCode: "capture_workflow_failed", message: error instanceof Error ? error.message : "拍摄包生成失败" };
@@ -1475,9 +1527,13 @@ app.whenReady().then(() => {
           clickText("创作项目");
           await wait(300);
           if (!document.querySelector("h1")?.textContent?.includes("脚本、分镜与拍摄包")) throw new Error("没有进入创作项目页面");
+          clickText("生成脚本提案");
+          await waitFor(() => document.querySelector(".script-proposal-review"), "脚本提案预览");
+          clickText("确认并保存脚本");
+          await waitFor(() => document.querySelector(".script-proposal-review")?.textContent?.includes("脚本已确认"), "脚本提案确认");
           clickText("生成并导出拍摄包");
           await wait(900);
-          if (!document.querySelector(".capture-result")) throw new Error("拍摄包没有出现在创作页面");
+          if (!document.querySelector(".capture-result")) throw new Error("拍摄包没有出现在创作页面；body=" + (document.body?.innerText ?? "").slice(-1800));
           for (let index = 0; index < 3; index += 1) {
             await waitFor(() => buttons().some((button) => !button.disabled && button.textContent?.includes("导入 Take")), "Take 导入按钮可用");
             clickText("导入 Take", index);

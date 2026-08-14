@@ -197,6 +197,25 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .asset-empty { display: flex; min-height: 160px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #aaa095; text-align: center; }
 .asset-empty p { max-width: 280px; margin: 0; color: #9a9185; font-size: 11px; line-height: 1.6; }
 .radar-workbench { display: flex; flex-direction: column; gap: 20px; }
+.script-ai-panel { padding: 19px; border: 1px solid #d8dfd2; border-radius: 11px; background: #eef3ea; }
+.script-ai-heading, .script-proposal-review-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
+.script-ai-heading h2 { margin: 7px 0 0; color: #4b5a47; font-family: Georgia, "Songti SC", serif; font-size: 23px; font-weight: 500; }
+.script-ai-heading p { margin: 7px 0 0; color: #7b8875; font-size: 11px; line-height: 1.5; }
+.script-ai-heading .secondary-button, .script-proposal-review-top .primary-button { flex: 0 0 auto; min-height: 35px; padding: 8px 11px; font-size: 10px; }
+.script-brief-input, .script-voice-input { display: block; width: 100%; box-sizing: border-box; margin-top: 14px; border: 1px solid #d2ddcc; border-radius: 8px; outline: none; background: #fbfdf9; color: #554f46; font-size: 12px; line-height: 1.6; }
+.script-brief-input { min-height: 96px; padding: 11px 12px; resize: vertical; }
+.script-voice-input { min-height: 36px; padding: 0 11px; }
+.script-proposal-review { margin-top: 15px; padding-top: 15px; border-top: 1px solid #d2ddcc; }
+.script-proposal-review-top { align-items: center; }
+.script-proposal-review-top strong, .script-proposal-review-top span { display: block; }
+.script-proposal-review-top strong { color: #4b6047; font-size: 12px; }
+.script-proposal-review-top span { margin-top: 4px; color: #8a9884; font-size: 10px; }
+.script-proposal-blocks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 13px; }
+.script-proposal-blocks article { padding: 11px; border: 1px solid #d6e0d1; border-radius: 8px; background: rgba(255, 255, 251, .72); }
+.script-proposal-blocks p { margin: 6px 0 0; color: #5c574f; font-size: 11px; line-height: 1.55; }
+.script-proposal-blocks small { display: block; margin-top: 8px; color: #82917c; font-size: 9px; line-height: 1.45; }
+.script-proposal-note, .script-proposal-warning { margin: 11px 0 0; color: #71836b; font-size: 10px; line-height: 1.5; }
+.script-proposal-warning { color: #9a7259; }
 .radar-query { display: flex; align-items: center; gap: 10px; }
 .radar-query-input { display: flex; align-items: center; flex: 1; gap: 9px; min-width: 0; padding: 10px 12px; border: 1px solid #dcd4c8; border-radius: 9px; background: #faf7f0; color: #9b9488; }
 .radar-query-input input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #4e4941; font-size: 12px; }
@@ -356,7 +375,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .radar-opportunity p { margin: 8px 0 0; color: #687563; font-size: 11px; line-height: 1.6; }
 .radar-opportunity small { display: block; margin-top: 9px; padding-top: 8px; border-top: 1px solid #e0e7db; color: #8a9884; font-size: 9px; line-height: 1.5; }
 .radar-opportunity-evidence { margin-top: 8px; color: #708168; font-size: 9px; }
-@media (max-width: 980px) { .topic-source-grid, .topic-radar-quote-lines { grid-template-columns: 1fr; }.topic-opportunity-grid { grid-template-columns: 1fr; }.topic-radar-fields { grid-template-columns: minmax(0, 1fr) 1fr 1fr; } }
+@media (max-width: 980px) { .topic-source-grid, .topic-radar-quote-lines, .script-proposal-blocks { grid-template-columns: 1fr; }.topic-opportunity-grid { grid-template-columns: 1fr; }.topic-radar-fields { grid-template-columns: minmax(0, 1fr) 1fr 1fr; } }
 @media (max-width: 980px) { .radar-opportunity-grid { grid-template-columns: 1fr; }.radar-timeline-row { grid-template-columns: 78px minmax(0, 1fr); }.radar-account-analysis { align-items: flex-start; flex-direction: column; }.radar-account-analysis-metrics { justify-content: flex-start; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .001ms !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; } }
 @media (max-width: 1180px) { .sidebar { width: 220px; }.page-content { padding-right: 28px; padding-left: 28px; }.topbar { padding-right: 28px; padding-left: 28px; }.project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

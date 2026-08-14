@@ -60,7 +60,7 @@ npm run test:desktop:ui
 
 通过条件：
 
-- 60 个单元/合同测试全部通过，包含 Mastra fake Agent 测试；
+- 65 个单元/合同测试全部通过，包含 Mastra fake Agent 和脚本 proposal materializer 测试；
 - macOS arm64 packaged smoke 能启动、完成 preload IPC、SQLite 和 AI 剪辑导出闭环；
 - 默认 `AI_EDIT_ADAPTER=ai-sdk` 行为不变；
 - Mastra 适配器异常转为统一 `AgentProposalError`，不泄露 prompt、key 或原始响应；

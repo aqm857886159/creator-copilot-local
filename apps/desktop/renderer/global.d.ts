@@ -68,6 +68,38 @@ interface AccountResearchResult {
   };
 }
 
+interface ScriptProposalView {
+  schemaVersion: 1;
+  id: string;
+  workspaceId: string;
+  brief: string;
+  voiceProfile?: string;
+  blocks: Array<{ schemaVersion: 1; id: string; order: number; kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; emphasis: string[]; evidenceIds: string[]; visualNeed: "none" | "support" | "must_show"; visualSuggestion: string }>;
+  styleNotes: string[];
+  warnings: string[];
+  status: "previewed" | "accepted" | "rejected" | "expired";
+  provider: { providerKey: string; modelKey?: string; responseHash?: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ScriptProposalResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  proposal?: ScriptProposalView;
+  provider?: { providerKey: string; modelKey?: string; responseHash?: string };
+}
+
+interface ScriptAcceptResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  proposal?: ScriptProposalView;
+  project?: { id: string; workspaceId: string; title: string; stage: string; revision: number; payload: Record<string, unknown>; createdAt: string; updatedAt: string };
+  script?: { id: string; projectId: string; revision: number; blocks: Array<{ id: string; order: number; kind: string; text: string; emphasis: string[]; evidenceIds: string[]; visualNeed: "none" | "support" | "must_show" }>; estimatedDurationMs: number };
+}
+
 interface AccountMetricsQuoteView {
   schemaVersion: 1;
   id: string;
@@ -183,6 +215,8 @@ interface TopicRadarRunResult { ok: boolean; errorCode?: string; message?: strin
 
 interface CaptureWorkflowInput {
   projectTitle: string;
+  existingProjectId?: string;
+  existingScriptId?: string;
   blocks: Array<{ kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; visualNeed: "none" | "support" | "must_show" }>;
   shots: Array<{ scriptBlockIndex: number; purpose: "explain" | "prove" | "transition" | "emotion" | "reset" | "brand"; mode: "talking_head" | "broll" | "screen_recording" | "graphic" | "generated" | "still"; framing?: "wide" | "medium" | "close" | "detail" | "screen"; cameraDirection?: string; actionDescription: string; targetMs: number; sourceRequirement: "existing_asset" | "shoot_task" | "generated_asset" | "any" }>;
 }
@@ -390,6 +424,8 @@ interface Window {
     runAccountAnalysis: (quoteId: string) => Promise<AccountWorkAnalysisRunResult>;
     downloadResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<DownloadResearchMediaResult>;
     analyzeResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<AnalyzeResearchMediaResult>;
+    proposeScript: (input: { brief: string; voiceProfile?: string; sourceEvidence?: Array<{ id: string; text: string; source?: string }> }) => Promise<ScriptProposalResult>;
+    acceptScriptProposal: (input: { proposalId: string; projectTitle: string }) => Promise<ScriptAcceptResult>;
     quoteTopicRadar: (input: TopicRadarQueryView) => Promise<TopicRadarQuoteResult>;
     runTopicRadar: (quoteId: string) => Promise<TopicRadarRunResult>;
     listTopicRadarReports: () => Promise<TopicRadarRunResult>;

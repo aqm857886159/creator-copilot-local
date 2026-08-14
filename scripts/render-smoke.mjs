@@ -39,7 +39,7 @@ await makeFixture(bRollPath, "0x607d8b", 1.5, 660);
 const [aRollHash, bRollHash] = await Promise.all([hashFile(aRollPath), hashFile(bRollPath)]);
 const { DEFAULT_VERTICAL_PROFILE, EditProposalSchema, exportRenderPackage, freezeEditProposal } = await import("../dist-electron/packages/exchange/src/index.js");
 const { SqliteCatalog } = await import("../dist-electron/packages/storage/src/catalog.js");
-const now = "2026-08-14T00:00:00.000Z";
+const now = new Date().toISOString();
 const proposal = EditProposalSchema.parse({
   schemaVersion: 1,
   id: "proposal-v3-smoke",
@@ -97,5 +97,5 @@ console.log(JSON.stringify({
   output: { relativePath: "exports/render-v3-smoke.mp4", byteSize: outputStats.size, durationMs: Math.round(Number(probe.format.duration) * 1000), streams: probe.streams.map((stream) => ({ codecType: stream.codec_type, codec: stream.codec_name, width: stream.width, height: stream.height, sampleRate: stream.sample_rate })) },
   subtitle: { relativePath: "exports/render-v3-smoke.srt", exists: Boolean(result.subtitlePath) },
   manifest: { relativePath: "exports/render-v3-smoke.manifest.json", resolvedSpecHash: result.manifest.resolvedSpecHash, outputCount: result.manifest.outputs.length },
-  catalog: { schemaVersion: 8, persistedArtifactCount, jobState: persistedJob?.state, jobArtifactCount: persistedJob?.artifactIds.length ?? 0 },
+  catalog: { schemaVersion: 9, persistedArtifactCount, jobState: persistedJob?.state, jobArtifactCount: persistedJob?.artifactIds.length ?? 0 },
 }));

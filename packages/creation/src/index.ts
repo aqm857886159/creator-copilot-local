@@ -32,6 +32,35 @@ export const ScriptSchema = z.object({
 
 export type Script = z.infer<typeof ScriptSchema>;
 
+export const ScriptProposalBlockSchema = z.object({
+  schemaVersion: z.literal(1),
+  id,
+  order: z.number().int().nonnegative(),
+  kind: ScriptBlockSchema.shape.kind,
+  text: z.string().min(1).max(2_000),
+  emphasis: z.array(z.string().min(1).max(100)).max(12),
+  evidenceIds: z.array(id).max(20),
+  visualNeed: ScriptBlockSchema.shape.visualNeed,
+  visualSuggestion: z.string().min(1).max(500),
+}).strict();
+export type ScriptProposalBlock = z.infer<typeof ScriptProposalBlockSchema>;
+
+export const ScriptProposalSchema = z.object({
+  schemaVersion: z.literal(1),
+  id,
+  workspaceId: id,
+  brief: z.string().min(1).max(5_000),
+  voiceProfile: z.string().max(3_000).optional(),
+  blocks: z.array(ScriptProposalBlockSchema).min(1).max(30),
+  styleNotes: z.array(z.string().min(1).max(300)).max(12),
+  warnings: z.array(z.string().min(1).max(300)).max(12),
+  status: z.enum(["previewed", "accepted", "rejected", "expired"]),
+  provider: z.object({ providerKey: id, modelKey: id.optional(), responseHash: id.optional() }).strict(),
+  createdAt: isoDate,
+  updatedAt: isoDate,
+}).strict();
+export type ScriptProposal = z.infer<typeof ScriptProposalSchema>;
+
 export const ShotSchema = z.object({
   schemaVersion: z.literal(1),
   id,

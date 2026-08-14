@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AiSdkStructuredGenerator } from "../../providers/src/index";
-import { AiSdkEditAgentRuntime, MastraEditAgentRuntime, materializeEditProposalDraft } from "./index";
+import { AiSdkEditAgentRuntime, LocalScriptAgentRuntime, MastraEditAgentRuntime, materializeEditProposalDraft, materializeScriptProposal } from "./index";
 
 const now = "2026-08-14T00:00:00.000Z";
 const script = { schemaVersion: 1 as const, id: "script-1", projectId: "project-1", revision: 1, status: "approved" as const, blocks: [{ schemaVersion: 1 as const, id: "block-1", order: 0, kind: "claim" as const, text: "观点文本", emphasis: [], evidenceIds: [], visualNeed: "support" as const }], estimatedDurationMs: 2_000, createdAt: now, updatedAt: now };
@@ -74,5 +74,17 @@ describe("agent edit proposal runtime", () => {
     expect(received?.messages).toContain("CONFIRMED_MATERIALS");
     expect(received?.options.maxSteps).toBe(1);
     expect(received?.options.structuredOutput.schema).toBeDefined();
+  });
+
+  it("keeps a script proposal voice-first and warns when evidence is missing", async () => {
+    const runtime = new LocalScriptAgentRuntime();
+    const result = await runtime.proposeScript({ workspaceId: "workspace-1", brief: "我以前以为只要多拍几个镜头就会更丰富。\n后来发现问题不在镜头数量，而在每个画面有没有证明观点。", now });
+    expect(result).toMatchObject({ status: "ready", proposal: { status: "previewed", provider: { providerKey: "local-fallback" }, blocks: [{ kind: "hook" }, { kind: "example" }] } });
+    expect(result.proposal.warnings).toContain("当前没有附加来源证据；涉及事实的句子需要创作者自行核验。");
+  });
+
+  it("rejects script evidence invented by a model", async () => {
+    const draft = { schemaVersion: 1 as const, blocks: [{ kind: "hook" as const, text: "一个问题", emphasis: [], evidenceIds: ["not-confirmed"], visualNeed: "none" as const, visualSuggestion: "看镜头说" }], styleNotes: [], warnings: [] };
+    expect(() => materializeScriptProposal({ workspaceId: "workspace-1", brief: "一个主题", sourceEvidence: [{ id: "fact-1", text: "已核验事实" }], now }, draft, { providerKey: "test" })).toThrow("未提供的证据");
   });
 });

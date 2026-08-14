@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("desktop", {
   runAccountAnalysis: (quoteId) => ipcRenderer.invoke("desktop:run-account-analysis", quoteId),
   downloadResearchMedia: (input) => ipcRenderer.invoke("desktop:download-research-media", input),
   analyzeResearchMedia: (input) => ipcRenderer.invoke("desktop:analyze-research-media", input),
+  proposeScript: (input) => ipcRenderer.invoke("desktop:propose-script", input),
+  acceptScriptProposal: (input) => ipcRenderer.invoke("desktop:accept-script-proposal", input),
   quoteTopicRadar: (input) => ipcRenderer.invoke("desktop:quote-topic-radar", input),
   runTopicRadar: (quoteId) => ipcRenderer.invoke("desktop:run-topic-radar", quoteId),
   listTopicRadarReports: () => ipcRenderer.invoke("desktop:list-topic-radar-reports"),

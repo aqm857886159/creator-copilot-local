@@ -25,6 +25,7 @@ import {
 import {
   CapturePackageSchema,
   ScriptSchema,
+  ScriptProposalSchema,
   ShootTaskSchema,
   StoryboardSchema,
   TakeSchema,
@@ -32,6 +33,7 @@ import {
   selectTake,
   type CapturePackage,
   type Script,
+  type ScriptProposal,
   type ShootTask,
   type Storyboard,
   type Take,
@@ -40,7 +42,7 @@ import { AnalysisFactSchema, searchQueryForFts, type AnalysisFact } from "../../
 import { AccountResearchReportSchema, TopicRadarReportSchema, type AccountResearchReport, type TopicRadarReport } from "../../research/src/index.js";
 import { MetricSnapshotSchema, PublicationSchema, ReviewMemoryProposalSchema, type MetricSnapshot, type Publication, type ReviewMemoryProposal } from "../../publishing/src/index.js";
 
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 
 const RenderRunRecordSchema = z.object({
   schemaVersion: z.literal(1),
@@ -434,6 +436,17 @@ const migrations: Record<number, string> = {
     );
     CREATE INDEX IF NOT EXISTS topic_radar_reports_workspace_idx ON topic_radar_reports(workspace_id, created_at);
   `,
+  9: `
+    CREATE TABLE IF NOT EXISTS script_proposals (
+      id TEXT PRIMARY KEY NOT NULL,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK (status IN ('previewed', 'accepted', 'rejected', 'expired')),
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS script_proposals_workspace_idx ON script_proposals(workspace_id, updated_at);
+  `,
 };
 
 function parseJson<T>(value: string, label: string): T {
@@ -605,6 +618,67 @@ export class SqliteCatalog {
   getScript(id: string): Script | undefined {
     const row = this.db.prepare("SELECT payload_json FROM scripts WHERE id = ?").get(id) as { payload_json: string } | undefined;
     return row ? ScriptSchema.parse(parseJson(row.payload_json, "script")) : undefined;
+  }
+
+  saveScriptProposal(raw: ScriptProposal) {
+    const proposal = ScriptProposalSchema.parse(raw);
+    if (!this.getWorkspace(proposal.workspaceId)) throw new Error("脚本提案所属工作区不存在");
+    const existing = this.getScriptProposal(proposal.id);
+    if (existing && existing.workspaceId !== proposal.workspaceId) throw new Error("脚本提案不能跨工作区覆盖");
+    if (existing && existing.status !== proposal.status && existing.status !== "previewed") throw new Error("已处理的脚本提案不能回退状态");
+    this.db.prepare(`INSERT INTO script_proposals(id, workspace_id, status, payload_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET status = excluded.status, payload_json = excluded.payload_json, updated_at = excluded.updated_at`)
+      .run(proposal.id, proposal.workspaceId, proposal.status, JSON.stringify(proposal), proposal.createdAt, proposal.updatedAt);
+    return proposal;
+  }
+
+  acceptScriptProposal(input: { proposalId: string; workspaceId: string; project: ProjectRecord; script: Script }) {
+    const transaction = this.db.transaction(() => {
+      const proposal = this.getScriptProposal(input.proposalId);
+      if (!proposal || proposal.workspaceId !== input.workspaceId) throw new Error("脚本提案不存在或不属于当前工作区");
+      if (proposal.status !== "previewed") throw new Error("只有待审阅的脚本提案才能确认");
+      if (input.project.workspaceId !== input.workspaceId || input.script.projectId !== input.project.id) throw new Error("脚本提案的项目归属不一致");
+      const existingProject = this.getProject(input.project.id);
+      if (!existingProject) this.createProject(input.project);
+      else if (existingProject.workspaceId !== input.project.workspaceId) throw new Error("项目不属于当前工作区");
+      const existingScript = this.getScript(input.script.id);
+      if (!existingScript) {
+        if (!this.saveScript(input.script)) throw new Error("脚本初始修订写入失败");
+      } else if (stableStringify(existingScript) !== stableStringify(input.script)) {
+        throw new Error("已有脚本版本与提案脚本不一致");
+      }
+      if (existingProject) {
+        const projectUpdate = this.db.prepare("UPDATE projects SET title = ?, stage = ?, revision = ?, payload_json = ?, updated_at = ? WHERE id = ? AND revision = ?").run(input.project.title, input.project.stage, input.project.revision, JSON.stringify(input.project.payload), input.project.updatedAt, input.project.id, existingProject.revision);
+        if (projectUpdate.changes !== 1) throw new Error("项目版本更新失败");
+      }
+      const accepted = ScriptProposalSchema.parse({ ...proposal, status: "accepted", updatedAt: input.script.updatedAt });
+      this.db.prepare("UPDATE script_proposals SET status = 'accepted', payload_json = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND status = 'previewed'")
+        .run(JSON.stringify(accepted), accepted.updatedAt, proposal.id, input.workspaceId);
+      return { proposal: accepted, project: input.project, script: input.script };
+    }).immediate;
+    return transaction();
+  }
+
+  getScriptProposal(id: string): ScriptProposal | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM script_proposals WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? ScriptProposalSchema.parse(parseJson(row.payload_json, "script proposal")) : undefined;
+  }
+
+  updateScriptProposalStatus(id: string, workspaceId: string, status: ScriptProposal["status"], updatedAt = nowIso()) {
+    const proposal = this.getScriptProposal(id);
+    if (!proposal || proposal.workspaceId !== workspaceId) return false;
+    if (proposal.status === "rejected" || proposal.status === "expired" || (proposal.status === "accepted" && status !== "accepted")) throw new Error("脚本提案已经结束，不能再次修改");
+    const next = ScriptProposalSchema.parse({ ...proposal, status, updatedAt });
+    const result = this.db.prepare("UPDATE script_proposals SET status = ?, payload_json = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND status IN ('previewed', 'accepted')")
+      .run(next.status, JSON.stringify(next), next.updatedAt, id, workspaceId);
+    return result.changes === 1;
+  }
+
+  listScriptProposals(workspaceId: string, limit = 20) {
+    const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+    const rows = this.db.prepare("SELECT payload_json FROM script_proposals WHERE workspace_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?").all(workspaceId, safeLimit) as Array<{ payload_json: string }>;
+    return rows.map((row) => ScriptProposalSchema.parse(parseJson(row.payload_json, "script proposal")));
   }
 
   saveStoryboard(raw: Storyboard) {
@@ -917,8 +991,20 @@ export class SqliteCatalog {
       if (input.storyboard.scriptId !== input.script.id || input.storyboard.scriptRevision !== input.script.revision) throw new Error("分镜没有引用当前脚本修订");
       const taskIds = new Set(input.tasks.map((task) => task.id));
       if (input.capturePackage.taskIds.some((taskId) => !taskIds.has(taskId))) throw new Error("拍摄包引用了不存在的任务");
-      this.createProject(input.project);
-      if (!this.saveScript(input.script)) throw new Error("脚本初始修订写入失败");
+      const existingProject = this.getProject(input.project.id);
+      if (!existingProject) {
+        this.createProject(input.project);
+      } else {
+        if (existingProject.workspaceId !== input.project.workspaceId) throw new Error("项目不属于当前工作区");
+        if (input.project.revision !== existingProject.revision) throw new Error("项目版本已变化，请重新打开创作工作流");
+        if (!this.updateProject(existingProject.id, existingProject.revision, { title: input.project.title, stage: input.project.stage, payload: input.project.payload })) throw new Error("项目版本更新失败");
+      }
+      const existingScript = this.getScript(input.script.id);
+      if (!existingScript) {
+        if (!this.saveScript(input.script)) throw new Error("脚本初始修订写入失败");
+      } else if (stableStringify(existingScript) !== stableStringify(input.script)) {
+        if (existingScript.projectId !== input.script.projectId || input.script.revision !== existingScript.revision + 1 || !this.saveScript(input.script)) throw new Error("已有脚本版本与拍摄包脚本不一致");
+      }
       if (!this.saveStoryboard(input.storyboard)) throw new Error("分镜初始修订写入失败");
       for (const task of input.tasks) this.saveShootTask(task);
       this.saveCapturePackage(input.capturePackage);

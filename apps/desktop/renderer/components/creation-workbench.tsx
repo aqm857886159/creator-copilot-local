@@ -18,6 +18,12 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
   const [blocks, setBlocks] = useState(initialBlocks);
   const [shots, setShots] = useState(initialShots);
   const [workflow, setWorkflow] = useState<CaptureWorkflowResult | null>(null);
+  const [scriptBrief, setScriptBrief] = useState("我以前以为只要多拍几个镜头，口播就会更丰富。\n后来我发现，问题不在镜头数量，而在每个画面有没有真正证明观点。\n所以真正需要补的不是泛化 B-roll，而是能让观众看见证据的画面。")
+  const [voiceProfile, setVoiceProfile] = useState("像平时聊天一样，有判断但不端着；保留具体经历，不用万能金句。")
+  const [scriptProposal, setScriptProposal] = useState<ScriptProposalView | null>(null);
+  const [acceptedScript, setAcceptedScript] = useState<ScriptAcceptResult["script"] | null>(null);
+  const [acceptedProjectId, setAcceptedProjectId] = useState<string | undefined>();
+  const [scriptBusy, setScriptBusy] = useState(false);
   const [takesByTask, setTakesByTask] = useState<Record<string, CaptureTake[]>>({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -42,12 +48,48 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
     setBusy(true);
     setMessage(null);
     try {
-      const result = await desktop.createCaptureWorkflow({ projectTitle, blocks, shots });
+      const result = await desktop.createCaptureWorkflow({ projectTitle, existingProjectId: acceptedProjectId, existingScriptId: acceptedScript?.id, blocks, shots });
       setWorkflow(result);
       onWorkflowReady(result);
       if (!result.ok) setMessage(result.message ?? "拍摄包生成失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function proposeScript() {
+    if (!window.desktop || !workspaceReady || scriptBusy || !scriptBrief.trim()) return;
+    setScriptBusy(true);
+    setMessage(null);
+    try {
+      const result = await window.desktop.proposeScript({ brief: scriptBrief, voiceProfile });
+      if (result.proposal) setScriptProposal(result.proposal);
+      if (!result.ok) setMessage(result.message ?? "脚本提案失败");
+    } finally {
+      setScriptBusy(false);
+    }
+  }
+
+  async function acceptScript() {
+    if (!window.desktop || !scriptProposal || scriptBusy || !projectTitle.trim()) return;
+    setScriptBusy(true);
+    setMessage(null);
+    try {
+      const result = await window.desktop.acceptScriptProposal({ proposalId: scriptProposal.id, projectTitle });
+      if (!result.ok || !result.script) {
+        setMessage(result.message ?? "脚本确认失败");
+        return;
+      }
+      const nextBlocks = result.script.blocks.map((block) => ({ kind: block.kind as CaptureWorkflowInput["blocks"][number]["kind"], text: block.text, visualNeed: block.visualNeed }));
+      const nextShots = nextBlocks.map((block, index) => ({ ...(initialShots[index] ?? initialShots[initialShots.length - 1]), scriptBlockIndex: index, purpose: block.kind === "hook" ? "emotion" as const : block.kind === "example" || block.kind === "evidence" ? "prove" as const : "explain" as const }));
+      setBlocks(nextBlocks);
+      setShots(nextShots);
+      setAcceptedScript(result.script);
+      setAcceptedProjectId(result.project?.id);
+      setScriptProposal(result.proposal ?? { ...scriptProposal, status: "accepted" });
+      setMessage("脚本已确认并保存为本地版本；现在可以继续补分镜和拍摄包。");
+    } finally {
+      setScriptBusy(false);
     }
   }
 
@@ -91,6 +133,8 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
       {!workspaceReady && <div className="workspace-gate"><FileText size={19} /><div><strong>先选择一个本地工作区</strong><p>脚本、SQLite、拍摄包和导入的 Take 都会保存在这个目录。</p></div><button className="primary-button" onClick={chooseWorkspace}>选择工作区</button></div>}
 
       <label className="project-title-field"><span>项目标题</span><input value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} /></label>
+
+      <section className="script-ai-panel"><div className="script-ai-heading"><div><div className="eyebrow">SCRIPT EDITOR · VOICE FIRST</div><h2>先把你真正想说的写下来</h2><p>AI 只整理表达，不替你发明经历、事实或“金句”。确认前不会覆盖脚本。</p></div><button className="secondary-button" onClick={() => void proposeScript()} disabled={!workspaceReady || scriptBusy || !scriptBrief.trim()}>{scriptBusy ? "整理中…" : "生成脚本提案"}</button></div><textarea className="script-brief-input" value={scriptBrief} onChange={(event) => setScriptBrief(event.target.value)} placeholder="写下你的原始想法，允许不完整、口语化、带犹豫。" /><input className="script-voice-input" value={voiceProfile} onChange={(event) => setVoiceProfile(event.target.value)} placeholder="表达偏好：例如像平时聊天、不用万能金句、保留具体经历" />{scriptProposal && <div className="script-proposal-review"><div className="script-proposal-review-top"><div><strong>{scriptProposal.status === "accepted" ? "脚本已确认" : "一份待审阅的脚本提案"}</strong><span>{scriptProposal.provider.providerKey} · {scriptProposal.blocks.length} 段 · 原稿不会被覆盖</span></div>{scriptProposal.status === "previewed" && <button className="primary-button" onClick={() => void acceptScript()} disabled={scriptBusy}>确认并保存脚本</button>}</div><div className="script-proposal-blocks">{scriptProposal.blocks.map((block) => <article key={block.id}><div className="eyebrow">{block.kind}</div><p>{block.text}</p><small>画面：{block.visualSuggestion}</small></article>)}</div>{scriptProposal.styleNotes.length > 0 && <p className="script-proposal-note">表达提醒：{scriptProposal.styleNotes.join(" · ")}</p>}{scriptProposal.warnings.length > 0 && <p className="script-proposal-warning">需要你核验：{scriptProposal.warnings.join(" · ")}</p>}</div>}</section>
 
       <div className="creation-editor-grid">
         <section className="creation-column"><div className="column-title"><div><span>01</span><h2>脚本段落</h2></div><small>写你真正想说的话</small></div>{blocks.map((block, index) => <article className="editor-card" key={`block-${index}`}><div className="editor-card-top"><b>段落 {String(index + 1).padStart(2, "0")}</b><select value={block.kind} onChange={(event) => updateBlock(index, { kind: event.target.value as typeof block.kind })}><option value="hook">开头</option><option value="claim">观点</option><option value="evidence">证据</option><option value="example">案例</option><option value="counterpoint">反方</option><option value="conclusion">结论</option><option value="cta">行动</option></select></div><textarea value={block.text} onChange={(event) => updateBlock(index, { text: event.target.value })} /><label className="inline-field"><span>画面需要</span><select value={block.visualNeed} onChange={(event) => updateBlock(index, { visualNeed: event.target.value as typeof block.visualNeed })}><option value="none">不需要补画面</option><option value="support">建议补画面</option><option value="must_show">必须展示</option></select></label></article>)}</section>

@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { SqliteCatalog } from "./catalog";
 import type { JobRecord } from "../../contracts/src/index";
-import { ScriptSchema, createShootTasks, createStoryboard, type Take } from "../../creation/src/index";
+import { ScriptProposalSchema, ScriptSchema, createShootTasks, createStoryboard, type Take } from "../../creation/src/index";
 import { DEFAULT_VERTICAL_PROFILE, EditProposalSchema, freezeEditProposal } from "../../exchange/src/index";
 import { transcriptFacts, parseWhisperJson } from "../../analysis/src/index";
 import { AccountResearchReportSchema, TopicRadarReportSchema } from "../../research/src/index";
@@ -40,7 +40,7 @@ describe("SqliteCatalog", () => {
     catalog.createWorkspace({ id: "workspace-1", name: "测试工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
     catalog.createProject({ id: "project-1", workspaceId: "workspace-1", title: "测试项目", stage: "script", revision: 1, payload: { source: "fixture" }, createdAt: now, updatedAt: now });
     catalog.insertArtifact({ schemaVersion: 1, artifactId: "artifact-1", workspaceId: "workspace-1", kind: "proxy", relativePath: "derived/proxy.mp4", mimeType: "video/mp4", contentHash: "sha256:proxy", byteSize: 12, parentArtifactIds: [], validationStatus: "valid" });
-    expect(catalog.schemaVersion()).toBe(8);
+    expect(catalog.schemaVersion()).toBe(9);
     expect(catalog.getProject("project-1")?.payload).toEqual({ source: "fixture" });
     expect(catalog.getArtifact("artifact-1")?.relativePath).toBe("derived/proxy.mp4");
     expect(catalog.updateProject("project-1", 0, { title: "不应覆盖" })).toBe(false);
@@ -89,7 +89,7 @@ describe("SqliteCatalog", () => {
     catalog.insertJob(fixtureJob({ id: "other-workspace", kind: "media.analysis", idempotencyScope: "workspace-2", idempotencyKey: "other-analysis-key" }));
     catalog.insertJob(fixtureJob({ id: "proxy-1", kind: "media.proxy", artifactIds: ["artifact-1"], idempotencyKey: "proxy-key" }));
     expect(catalog.listJobsForWorkspace("workspace-1", "media.analysis").map((job) => job.id)).toEqual(["analysis-1"]);
-    expect(catalog.listJobsForWorkspace("workspace-1").map((job) => job.id)).toEqual(["analysis-1", "proxy-1"]);
+    expect(catalog.listJobsForWorkspace("workspace-1").map((job) => job.id)).toEqual(["proxy-1", "analysis-1"]);
     catalog.close();
     rmSync(root, { recursive: true, force: true });
   });
@@ -130,7 +130,7 @@ describe("SqliteCatalog", () => {
   it("clears the lease when a running analysis job is cancelled", () => {
     const root = mkdtempSync(join(tmpdir(), "creator-copilot-job-cancel-"));
     const catalog = new SqliteCatalog(join(root, "catalog.sqlite"));
-    const now = new Date("2026-08-14T00:00:00.000Z");
+    const now = new Date();
     catalog.insertJob(fixtureJob({ id: "cancel-job", idempotencyKey: "cancel-key", kind: "media.analysis" }));
     const leaseToken = catalog.claimJob("cancel-job", "analysis-main", now, 60_000);
     expect(leaseToken).toEqual(expect.any(String));
@@ -297,7 +297,7 @@ describe("SqliteCatalog", () => {
     `);
     legacy.close();
     const catalog = new SqliteCatalog(dbPath);
-    expect(catalog.schemaVersion()).toBe(8);
+    expect(catalog.schemaVersion()).toBe(9);
     catalog.insertJob(fixtureJob({ id: "legacy-job", idempotencyKey: "legacy-job-key" }));
     catalog.enqueueOutbox({ id: "legacy-outbox", kind: "legacy", payload: {}, idempotencyKey: "legacy-outbox-key", idempotencyScope: "workspace-1", state: "queued", attempt: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     catalog.createWorkspace({ id: "workspace-1", name: "工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -376,6 +376,49 @@ describe("SqliteCatalog", () => {
     expect(restored.searchAnalysisFacts({ workspaceId: "workspace-creation", query: "画面" })).toHaveLength(1);
     expect(restored.listResearchReports("workspace-creation")).toHaveLength(1);
     expect(restored.getTopicRadarReport("topic-radar-creation")?.status).toBe("completed");
+    restored.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("accepts a script proposal atomically and reuses its project for the capture workflow", () => {
+    const root = mkdtempSync(join(tmpdir(), "creator-copilot-script-proposal-"));
+    const dbPath = join(root, "catalog.sqlite");
+    const catalog = new SqliteCatalog(dbPath);
+    const now = "2026-08-14T00:00:00.000Z";
+    catalog.createWorkspace({ id: "workspace-script", name: "脚本工作区", rootPath: root, schemaVersion: 1, defaultLocale: "zh-CN", createdAt: now, updatedAt: now });
+    const proposal = ScriptProposalSchema.parse({
+      schemaVersion: 1,
+      id: "script-proposal-1",
+      workspaceId: "workspace-script",
+      brief: "把观点拍得更有证据。",
+      voiceProfile: "短句，先讲自己的观察，再给判断。",
+      blocks: [{ schemaVersion: 1, id: "proposal-block-1", order: 0, kind: "hook", text: "镜头多，不等于内容丰富。", emphasis: ["不等于"], evidenceIds: [], visualNeed: "none", visualSuggestion: "稳定中景，直视镜头说完。" }],
+      styleNotes: ["保留原话"],
+      warnings: [],
+      status: "previewed",
+      provider: { providerKey: "local-fallback" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    catalog.saveScriptProposal(proposal);
+    const project = { id: "project-script", workspaceId: "workspace-script", title: "镜头与内容", stage: "script", revision: 1, payload: { scriptProposalId: proposal.id }, createdAt: now, updatedAt: now };
+    const script = ScriptSchema.parse({ schemaVersion: 1, id: "script-from-proposal", projectId: project.id, revision: 1, status: "approved", blocks: [{ schemaVersion: 1, id: "proposal-block-1", order: 0, kind: "hook", text: "镜头多，不等于内容丰富。", emphasis: ["不等于"], evidenceIds: [], visualNeed: "none" }], estimatedDurationMs: 4_000, createdAt: now, updatedAt: now });
+    const accepted = catalog.acceptScriptProposal({ proposalId: proposal.id, workspaceId: "workspace-script", project, script });
+    expect(accepted.proposal.status).toBe("accepted");
+    expect(catalog.getProject(project.id)?.payload).toEqual(project.payload);
+    expect(catalog.getScript(script.id)?.blocks[0].text).toContain("镜头多");
+    expect(() => catalog.acceptScriptProposal({ proposalId: proposal.id, workspaceId: "workspace-script", project, script })).toThrow("只有待审阅");
+
+    const storyboard = createStoryboard({ id: "storyboard-from-proposal", script, createdAt: now, shots: [{ id: "shot-from-proposal", order: 0, scriptBlockIds: [script.blocks[0].id], purpose: "explain", mode: "talking_head", actionDescription: "面对镜头停顿后说出判断。", targetMs: 4_000, sourceRequirement: "shoot_task" }] });
+    const tasks = createShootTasks(storyboard, now);
+    const capturePackage = { schemaVersion: 1 as const, id: "capture-from-proposal", projectId: project.id, storyboardRevision: storyboard.revision, format: "html" as const, relativePath: "capture-packages/capture-from-proposal/index.html", taskIds: tasks.map((task) => task.id), status: "draft" as const, createdAt: now, updatedAt: now };
+    catalog.saveCaptureWorkflow({ project: { ...project, stage: "capture", payload: { ...project.payload, storyboardId: storyboard.id, capturePackageId: capturePackage.id, taskIds: tasks.map((task) => task.id) } }, script, storyboard, tasks, capturePackage });
+    expect(catalog.getProject(project.id)).toMatchObject({ stage: "capture", revision: 2 });
+    expect(catalog.getCapturePackage(capturePackage.id)?.projectId).toBe(project.id);
+    catalog.close();
+    const restored = new SqliteCatalog(dbPath);
+    expect(restored.getScriptProposal(proposal.id)?.status).toBe("accepted");
+    expect(restored.getProject(project.id)?.revision).toBe(2);
     restored.close();
     rmSync(root, { recursive: true, force: true });
   });
