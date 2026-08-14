@@ -57,7 +57,7 @@ HF_HUB_OFFLINE=1 npm run test:analysis:sidecar
 
 sidecar 只输出 JSON transcript，不写 SQLite、不写任意路径、不执行素材文本中的指令；main/utility worker 负责 Job、取消、lease、事实校验和落库。
 
-项目现在有一个不依赖模型的质量合同 smoke：`packages/analysis/fixtures/quality-smoke.json` 保存人工真值/假设输出，评测器计算文本 CER、时间码平均误差、分段召回、OCR precision/recall 和 bbox IoU。用 `npm run test:analysis:quality` 可验证评测器和 schema；这个 fixture 只证明评测逻辑，不代表任何模型准确率。
+项目现在有一个不依赖模型的质量合同 smoke：`packages/analysis/fixtures/quality-smoke.json` 保存人工真值/假设输出，评测器计算文本 CER、时间码平均误差、分段召回、OCR precision/recall 和 bbox IoU。报告同时返回 6 个机器可读 gate result 和失败诊断，便于 CI/桌面端明确指出哪一项没有达标。用 `npm run test:analysis:quality` 可验证评测器和 schema；这个 fixture 只证明评测逻辑，不代表任何模型准确率。
 
 ## 4. 已补的本地真实 fixture 观察入口
 

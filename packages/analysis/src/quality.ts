@@ -36,6 +36,15 @@ export type AnalysisQualityFixture = z.infer<typeof AnalysisQualityFixtureSchema
 
 export type QualityCue = z.infer<typeof qualityCue>;
 
+export type AnalysisQualityGate = {
+  id: string;
+  metric: string;
+  actual: number;
+  threshold: number;
+  operator: "<=" | ">=";
+  passed: boolean;
+};
+
 function normalizeQualityText(text: string) {
   return text.normalize("NFKC").toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
 }
@@ -151,11 +160,14 @@ export function evaluateAnalysisQualityFixture(input: AnalysisQualityFixture) {
   const fixture = AnalysisQualityFixtureSchema.parse(input);
   const transcript = evaluateTranscriptQuality(fixture.transcript.reference, fixture.transcript.hypothesis);
   const ocr = evaluateOcrQuality(fixture.ocr.reference, fixture.ocr.hypothesis);
-  const passed = transcript.cer <= fixture.transcript.gates.cerMax
-    && transcript.segmentRecall >= fixture.transcript.gates.segmentRecallMin
-    && transcript.timestampMaeMs <= fixture.transcript.gates.timestampMaeMaxMs
-    && ocr.precision >= fixture.ocr.gates.precisionMin
-    && ocr.recall >= fixture.ocr.gates.recallMin
-    && ocr.bboxIoUMean >= fixture.ocr.gates.bboxIoUMin;
-  return { schemaVersion: 1 as const, name: fixture.name, passed, transcript, ocr, gates: { transcript: fixture.transcript.gates, ocr: fixture.ocr.gates } };
+  const gateResults: AnalysisQualityGate[] = [
+    { id: "transcript.cer", metric: "cer", actual: transcript.cer, threshold: fixture.transcript.gates.cerMax, operator: "<=", passed: transcript.cer <= fixture.transcript.gates.cerMax },
+    { id: "transcript.segmentRecall", metric: "segmentRecall", actual: transcript.segmentRecall, threshold: fixture.transcript.gates.segmentRecallMin, operator: ">=", passed: transcript.segmentRecall >= fixture.transcript.gates.segmentRecallMin },
+    { id: "transcript.timestampMaeMs", metric: "timestampMaeMs", actual: transcript.timestampMaeMs, threshold: fixture.transcript.gates.timestampMaeMaxMs, operator: "<=", passed: transcript.timestampMaeMs <= fixture.transcript.gates.timestampMaeMaxMs },
+    { id: "ocr.precision", metric: "precision", actual: ocr.precision, threshold: fixture.ocr.gates.precisionMin, operator: ">=", passed: ocr.precision >= fixture.ocr.gates.precisionMin },
+    { id: "ocr.recall", metric: "recall", actual: ocr.recall, threshold: fixture.ocr.gates.recallMin, operator: ">=", passed: ocr.recall >= fixture.ocr.gates.recallMin },
+    { id: "ocr.bboxIoUMean", metric: "bboxIoUMean", actual: ocr.bboxIoUMean, threshold: fixture.ocr.gates.bboxIoUMin, operator: ">=", passed: ocr.bboxIoUMean >= fixture.ocr.gates.bboxIoUMin },
+  ];
+  const failures = gateResults.filter((gate) => !gate.passed).map((gate) => ({ ...gate, message: `${gate.metric}=${gate.actual} 未达到 ${gate.operator} ${gate.threshold}` }));
+  return { schemaVersion: 1 as const, name: fixture.name, passed: failures.length === 0, transcript, ocr, gates: { transcript: fixture.transcript.gates, ocr: fixture.ocr.gates }, gateResults, failures };
 }

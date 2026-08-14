@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { writeFile } from "node:fs/promises";
-import { AppleVisionOcr, evaluateOcrQuality, evaluateTranscriptQuality, FasterWhisperSidecarTranscriber, FfmpegSceneDetector, mergeOcrCues, ocrFacts, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
+import { AppleVisionOcr, evaluateAnalysisQualityFixture, evaluateOcrQuality, evaluateTranscriptQuality, FasterWhisperSidecarTranscriber, FfmpegSceneDetector, mergeOcrCues, ocrFacts, parseSceneTimestamps, parseWhisperJson, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
 
 describe("local analysis facts", () => {
   it("normalizes whisper.cpp timestamp variants into bounded transcript segments", () => {
@@ -24,6 +24,31 @@ describe("local analysis facts", () => {
     const cue = { startMs: 0, endMs: 1000, text: "重点：先讲结论", bbox: { x: 0.1, y: 0.2, width: 0.4, height: 0.1 } };
     expect(evaluateOcrQuality([cue], [{ ...cue, text: "重点 先讲结论" }])).toMatchObject({ precision: 1, recall: 1, bboxIoUMean: 1 });
     expect(evaluateOcrQuality([cue], [{ ...cue, text: "另一个词" }])).toMatchObject({ precision: 0, recall: 0 });
+  });
+
+  it("returns machine-readable quality gate failures instead of only a boolean", () => {
+    const report = evaluateAnalysisQualityFixture({
+      schemaVersion: 1,
+      name: "failed-quality-fixture",
+      transcript: { reference: [{ startMs: 0, endMs: 1000, text: "观点" }], hypothesis: [], gates: { cerMax: 0, segmentRecallMin: 1, timestampMaeMaxMs: 100 } },
+      ocr: { reference: [{ startMs: 0, endMs: 1000, text: "标题", bbox: { x: 0, y: 0, width: 0.2, height: 0.2 } }], hypothesis: [], gates: { precisionMin: 1, recallMin: 1, bboxIoUMin: 1 } },
+    });
+    expect(report.passed).toBe(false);
+    expect(report.gateResults).toHaveLength(6);
+    expect(report.failures.map((failure) => failure.id)).toEqual(expect.arrayContaining(["transcript.cer", "transcript.segmentRecall", "ocr.recall"]));
+    expect(report.failures[0]).toHaveProperty("message");
+  });
+
+  it("passes the bundled synthetic Chinese contract fixture and exposes all gates", () => {
+    const report = evaluateAnalysisQualityFixture({
+      schemaVersion: 1,
+      name: "synthetic-zh-quality",
+      transcript: { reference: [{ startMs: 0, endMs: 1000, text: "先讲结论。" }], hypothesis: [{ startMs: 0, endMs: 1000, text: "先讲结论" }], gates: { cerMax: 0, segmentRecallMin: 1, timestampMaeMaxMs: 0 } },
+      ocr: { reference: [{ startMs: 0, endMs: 1000, text: "重点：结论", bbox: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 } }], hypothesis: [{ startMs: 0, endMs: 1000, text: "重点 结论", bbox: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 } }], gates: { precisionMin: 1, recallMin: 1, bboxIoUMin: 1 } },
+    });
+    expect(report.passed).toBe(true);
+    expect(report.failures).toEqual([]);
+    expect(report.gateResults.every((gate) => gate.passed)).toBe(true);
   });
 
   it("invokes whisper.cpp through a replaceable runner and cleans temporary output", async () => {

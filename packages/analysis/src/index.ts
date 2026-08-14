@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 export { AnalysisQualityFixtureSchema, evaluateAnalysisQualityFixture, evaluateOcrQuality, evaluateTranscriptQuality } from "./quality.js";
-export type { AnalysisQualityFixture, QualityCue } from "./quality.js";
+export type { AnalysisQualityFixture, AnalysisQualityGate, QualityCue } from "./quality.js";
 
 const execFile = promisify(execFileCallback);
 const id = z.string().min(1);
