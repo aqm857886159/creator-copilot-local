@@ -24,6 +24,7 @@
     "test:creation:edit:e2e": "npm run build && node scripts/creation-edit-e2e.mjs",
     "test:render:recovery": "npm run build && node scripts/render-recovery-smoke.mjs",
     "test:analysis:sidecar": "node scripts/analysis-sidecar-smoke.mjs",
+    "test:analysis:recovery": "npm run build && node scripts/analysis-recovery-smoke.mjs",
     "test:analysis:quality": "npm run build && node scripts/analysis-quality-smoke.mjs",
     "test:analysis:quality:local": "npm run build && node scripts/analysis-quality-local-smoke.mjs",
     "test:providers:live": "node --env-file=.env scripts/provider-smoke.mjs",
