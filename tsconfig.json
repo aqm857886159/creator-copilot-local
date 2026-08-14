@@ -12,5 +12,6 @@
     ,{ "path": "./tsconfig.analysis.json" }
     ,{ "path": "./tsconfig.research.json" }
     ,{ "path": "./tsconfig.publishing.json" }
+    ,{ "path": "./tsconfig.domain.json" }
   ]
 }

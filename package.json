@@ -30,6 +30,7 @@
     "test:providers:live": "node --env-file=.env scripts/provider-smoke.mjs",
     "test:account-research:live": "npm run build && node --env-file=.env scripts/account-research-smoke.mjs",
     "test:topic-radar:live": "npm run build && node --env-file=.env scripts/topic-radar-smoke.mjs",
+    "test:topic:library": "npm run build && node scripts/topic-library-smoke.mjs",
     "test:agent:live": "npm run build && node --env-file=.env scripts/agent-proposal-smoke.mjs",
     "test:script:live": "npm run build && node --env-file=.env scripts/script-proposal-smoke.mjs",
     "typecheck": "tsc -b --pretty false"

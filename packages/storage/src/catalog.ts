@@ -41,8 +41,9 @@ import {
 import { AnalysisFactSchema, searchQueryForFts, type AnalysisFact } from "../../analysis/src/index.js";
 import { AccountResearchReportSchema, TopicRadarReportSchema, type AccountResearchReport, type TopicRadarReport } from "../../research/src/index.js";
 import { MetricSnapshotSchema, PublicationSchema, ReviewMemoryProposalSchema, type MetricSnapshot, type Publication, type ReviewMemoryProposal } from "../../publishing/src/index.js";
+import { TopicSchema, type Topic } from "../../domain/src/index.js";
 
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 
 const RenderRunRecordSchema = z.object({
   schemaVersion: z.literal(1),
@@ -446,6 +447,18 @@ const migrations: Record<number, string> = {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS script_proposals_workspace_idx ON script_proposals(workspace_id, updated_at);
+  `,
+  10: `
+    CREATE TABLE IF NOT EXISTS topics (
+      id TEXT PRIMARY KEY NOT NULL,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK (status IN ('candidate', 'selected', 'in_progress', 'used', 'archived')),
+      revision INTEGER NOT NULL CHECK (revision > 0),
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS topics_workspace_idx ON topics(workspace_id, status, updated_at);
   `,
 };
 
@@ -886,6 +899,33 @@ export class SqliteCatalog {
     return rows.flatMap((row) => {
       const report = this.getTopicRadarReport(row.id);
       return report ? [report] : [];
+    });
+  }
+
+  saveTopic(raw: Topic) {
+    const topic = TopicSchema.parse(raw);
+    if (!this.getWorkspace(topic.workspaceId)) throw new Error("选题所属工作区不存在");
+    const existing = this.db.prepare("SELECT workspace_id AS workspaceId FROM topics WHERE id = ?").get(topic.id) as { workspaceId?: string } | undefined;
+    if (existing?.workspaceId && existing.workspaceId !== topic.workspaceId) throw new Error("选题不能跨工作区覆盖");
+    this.db.prepare(`INSERT INTO topics(id, workspace_id, status, revision, payload_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET status = excluded.status, revision = excluded.revision, payload_json = excluded.payload_json, updated_at = excluded.updated_at`)
+      .run(topic.id, topic.workspaceId, topic.status, topic.revision, JSON.stringify(topic), topic.createdAt, topic.updatedAt);
+    return topic;
+  }
+
+  getTopic(id: string): Topic | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM topics WHERE id = ?").get(id) as { payload_json: string } | undefined;
+    return row ? TopicSchema.parse(parseJson(row.payload_json, "topic")) : undefined;
+  }
+
+  listTopics(workspaceId: string, status?: Topic["status"]) {
+    const rows = status
+      ? this.db.prepare("SELECT id FROM topics WHERE workspace_id = ? AND status = ? ORDER BY updated_at DESC, id").all(workspaceId, status) as Array<{ id: string }>
+      : this.db.prepare("SELECT id FROM topics WHERE workspace_id = ? ORDER BY updated_at DESC, id").all(workspaceId) as Array<{ id: string }>;
+    return rows.flatMap((row) => {
+      const topic = this.getTopic(row.id);
+      return topic && topic.workspaceId === workspaceId ? [topic] : [];
     });
   }
 

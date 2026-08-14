@@ -20,6 +20,7 @@
     "packages/analysis/src/index.ts",
     "packages/analysis/src/quality.ts",
     "packages/research/src/index.ts",
-    "packages/publishing/src/index.ts"
+    "packages/publishing/src/index.ts",
+    "packages/domain/src/index.ts"
   ]
 }

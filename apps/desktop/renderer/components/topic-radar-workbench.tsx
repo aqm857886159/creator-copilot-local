@@ -31,6 +31,8 @@ export function TopicRadarWorkbench({ workspacePath }: { workspacePath: string |
   const [quote, setQuote] = useState<TopicRadarQuoteView | null>(null);
   const [report, setReport] = useState<TopicRadarReportView | null>(null);
   const [history, setHistory] = useState<TopicRadarReportView[]>([]);
+  const [topics, setTopics] = useState<TopicView[]>([]);
+  const [topicBusyId, setTopicBusyId] = useState<string | null>(null);
   const [busy, setBusy] = useState<"quote" | "run" | null>(null);
   const [message, setMessage] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
   const [, setClock] = useState(() => Date.now());
@@ -41,6 +43,7 @@ export function TopicRadarWorkbench({ workspacePath }: { workspacePath: string |
   useEffect(() => {
     if (!workspaceReady || !window.desktop) return;
     void window.desktop.listTopicRadarReports().then((result) => { if (result.reports) setHistory(result.reports); });
+    void window.desktop.listTopics().then((result) => { if (result.topics) setTopics(result.topics); });
   }, [workspacePath, workspaceReady]);
 
   useEffect(() => {
@@ -91,9 +94,31 @@ export function TopicRadarWorkbench({ workspacePath }: { workspacePath: string |
     }
   }
 
+  async function saveOpportunity(opportunityId: string) {
+    if (!window.desktop || !report || topicBusyId) return;
+    setTopicBusyId(opportunityId);
+    setMessage(null);
+    try {
+      const response = await window.desktop.saveTopicOpportunity({ source: "topic_radar", reportId: report.id, opportunityId });
+      if (!response.ok || !response.topic) {
+        setMessage({ kind: "error", text: response.message ?? "加入选题库失败" });
+        return;
+      }
+      setTopics((current) => current.some((topic) => topic.id === response.topic!.id) ? current : [response.topic!, ...current]);
+      setMessage({ kind: "success", text: response.created ? "已加入本地选题库；下一步由你确认是否值得写成自己的观点。" : "这个机会已经在本地选题库中，仍需你确认后再进入脚本。" });
+    } finally {
+      setTopicBusyId(null);
+    }
+  }
+
   if (!workspaceReady) return <section className="topic-radar-workbench topic-radar-empty"><div className="empty-icon"><Lightbulb size={24} /></div><div className="eyebrow">TOPIC RADAR</div><h1>先连接一个本地工作区</h1><p>报价、调用记录、候选选题和证据都会保存在本地。</p></section>;
 
+  const opportunityActions = report && report.opportunities.length > 0 ? <section className="topic-opportunity-actions"><div className="topic-radar-config-heading"><div><div className="eyebrow">TOPIC LIBRARY · HUMAN CONFIRMATION</div><h2>把候选信号保存为选题</h2></div><span>{report.opportunities.length} 条机会</span></div><p>保存后会进入本地选题库；它仍是候选方向，不会自动生成脚本或覆盖已有项目。</p><div className="topic-opportunity-save-list">{report.opportunities.map((opportunity) => { const saved = topics.some((topic) => topic.source.opportunityId === opportunity.id && topic.source.reportId === report.id); return <div className="topic-opportunity-save-row" key={opportunity.id}><div><strong>{opportunity.title}</strong><span>{opportunity.evidenceIds.length} 条证据 · {opportunity.angle}</span></div><button className="secondary-button" onClick={() => void saveOpportunity(opportunity.id)} disabled={topicBusyId !== null}>{saved ? <><Check size={14} />已在选题库</> : topicBusyId === opportunity.id ? "保存中…" : "加入选题库"}</button></div>; })}</div></section> : null;
+  const topicLibrary = topics.length > 0 ? <section className="topic-library-panel"><div className="topic-radar-config-heading"><div><div className="eyebrow">LOCAL TOPIC LIBRARY</div><h2>已保存的选题</h2></div><span>{topics.length} 条</span></div><div className="topic-library-list">{topics.slice(0, 8).map((topic) => <article className="topic-library-row" key={topic.id}><div><strong>{topic.title}</strong><p>{topic.angle}</p><small>{topic.source.kind === "topic_radar" ? "来自选题雷达" : "来自账号研究"} · {topic.evidenceIds.length} 条证据 · {topic.status === "candidate" ? "待确认" : topic.status}</small></div></article>)}</div></section> : null;
+
   return <section className="topic-radar-workbench">
+    {opportunityActions}
+    {topicLibrary}
     <div className="creation-heading"><div><div className="eyebrow">TOPIC RADAR · QUOTE BEFORE CALL</div><h1>先知道为什么现在值得做。</h1><p>把平台信号当作研究入口，不把榜单直接当答案。每次调用前先看动态价格，结果只会成为带证据的候选选题。</p></div><div className="workspace-state ready"><span />本地证据优先</div></div>
     <section className="topic-radar-config">
       <div className="topic-radar-config-heading"><div><div className="eyebrow">01 · RESEARCH SCOPE</div><h2>选择你想验证的信号</h2></div><span>一次最多 3 个来源</span></div>

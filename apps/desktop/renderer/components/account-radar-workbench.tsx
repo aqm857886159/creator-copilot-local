@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BarChart3, Check, ChevronDown, CircleAlert, Clock3, Download, ExternalLink, Search, ShieldCheck } from "lucide-react";
 
 function duration(milliseconds?: number) {
@@ -57,6 +57,15 @@ export function AccountRadarWorkbench({ workspaceReady }: { workspaceReady: bool
   const [accountAnalysisQuote, setAccountAnalysisQuote] = useState<AccountWorkAnalysisQuoteView | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [expandedVideoId, setExpandedVideoId] = useState<string | null>(null);
+  const [savedTopicIds, setSavedTopicIds] = useState<Set<string>>(new Set());
+  const [topicBusyId, setTopicBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspaceReady || !window.desktop) return;
+    void window.desktop.listTopics().then((response) => {
+      if (response.topics) setSavedTopicIds(new Set(response.topics.filter((topic) => topic.source.kind === "account_research").map((topic) => topic.source.opportunityId)));
+    });
+  }, [workspaceReady]);
 
   async function research() {
     if (!window.desktop || !workspaceReady || loading || !sourceInput.trim()) return;
@@ -160,11 +169,30 @@ export function AccountRadarWorkbench({ workspaceReady }: { workspaceReady: bool
     }
   }
 
+  async function saveOpportunity(opportunityId: string) {
+    if (!window.desktop || !report || topicBusyId) return;
+    setTopicBusyId(opportunityId);
+    setActionMessage(null);
+    try {
+      const response = await window.desktop.saveTopicOpportunity({ source: "account_research", reportId: report.id, opportunityId });
+      if (!response.ok || !response.topic) {
+        setActionMessage(response.message ?? "加入选题库失败");
+        return;
+      }
+      setSavedTopicIds((current) => new Set(current).add(opportunityId));
+      setActionMessage(response.created ? "已加入本地选题库；下一步由你确认是否值得写成自己的观点。" : "这个机会已经在本地选题库中，仍需你确认后再进入脚本。");
+    } finally {
+      setTopicBusyId(null);
+    }
+  }
+
   if (!workspaceReady) return <section className="radar-workbench empty-edit-workbench"><div className="empty-icon"><BarChart3 size={24} /></div><div className="eyebrow">ACCOUNT RADAR</div><h1>先连接一个工作区</h1><p>账号快照、作品元数据和证据包会保存在本地，不会把临时 Provider URL 当成素材。</p></section>;
 
   const report = result?.report;
   const selectedCount = selectedIds.length;
+  const opportunityActions = report && report.opportunities.length > 0 ? <section className="radar-opportunity-actions"><div className="edit-section-heading"><div><div className="eyebrow">TOPIC LIBRARY · HUMAN CONFIRMATION</div><h3>把切入假设保存为选题</h3></div><span>{report.opportunities.length} 条机会</span></div><p>保存后会进入本地选题库；它仍是候选方向，不会自动生成脚本或覆盖已有项目。</p><div className="radar-opportunity-save-list">{report.opportunities.map((opportunity) => <div className="radar-opportunity-save-row" key={opportunity.id}><div><strong>{opportunity.title}</strong><span>{opportunity.evidenceIds.length} 条证据 · {opportunity.sourceVideoIds.join("、")}</span></div><button className="secondary-button" onClick={() => void saveOpportunity(opportunity.id)} disabled={topicBusyId !== null}>{savedTopicIds.has(opportunity.id) ? <><Check size={14} />已在选题库</> : topicBusyId === opportunity.id ? "保存中…" : "加入选题库"}</button></div>)}</div></section> : null;
   return <section className="radar-workbench">
+    {opportunityActions}
     <div className="creation-heading"><div><div className="eyebrow">ACCOUNT RADAR · EVIDENCE FIRST</div><h1>先看对标账号的事实。</h1><p>首轮只拉公开账号资料和最多 20 条作品元数据；只有你选中的作品才进入下载、ASR、OCR 和镜头分析。</p></div><div className="workspace-state ready"><span />metadata-first</div></div>
     <div className="radar-query"><div className="radar-query-input"><Search size={17} /><input aria-label="抖音主页链接或 sec_user_id" value={sourceInput} onChange={(event) => setSourceInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void research(); }} placeholder="粘贴抖音主页链接或 sec_user_id" /></div><label><span>首轮作品</span><select value={count} onChange={(event) => setCount(Number(event.target.value))}><option value={10}>10 条</option><option value={20}>20 条</option></select></label><button className="primary-button" onClick={research} disabled={loading || !sourceInput.trim()}>{loading ? "分析中…" : "开始分析"}</button></div>
     <div className="radar-safety"><ShieldCheck size={15} /><span>公开元数据 · 本轮最多 {count} 条 · 不自动下载视频</span></div>

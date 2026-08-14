@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld("desktop", {
   quoteTopicRadar: (input) => ipcRenderer.invoke("desktop:quote-topic-radar", input),
   runTopicRadar: (quoteId) => ipcRenderer.invoke("desktop:run-topic-radar", quoteId),
   listTopicRadarReports: () => ipcRenderer.invoke("desktop:list-topic-radar-reports"),
+  saveTopicOpportunity: (input) => ipcRenderer.invoke("desktop:save-topic-opportunity", input),
+  listTopics: () => ipcRenderer.invoke("desktop:list-topics"),
   createCaptureWorkflow: (input) => ipcRenderer.invoke("desktop:create-capture-workflow", input),
   importTake: (shootTaskId) => ipcRenderer.invoke("desktop:import-take", shootTaskId),
   selectTake: (input) => ipcRenderer.invoke("desktop:select-take", input),

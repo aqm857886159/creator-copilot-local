@@ -214,6 +214,28 @@ interface TopicRadarReportView {
 interface TopicRadarQuoteResult { ok: boolean; errorCode?: string; message?: string; quote?: TopicRadarQuoteView }
 interface TopicRadarRunResult { ok: boolean; errorCode?: string; message?: string; report?: TopicRadarReportView; reports?: TopicRadarReportView[] }
 
+interface TopicView {
+  schemaVersion: 1;
+  id: string;
+  workspaceId: string;
+  title: string;
+  audienceProblem: string;
+  thesis: string;
+  angle: string;
+  evidenceIds: string[];
+  benchmarkVideoIds: string[];
+  visualOpportunities: string[];
+  riskNotes: string[];
+  source: { kind: "account_research" | "topic_radar"; reportId: string; opportunityId: string };
+  status: "candidate" | "selected" | "in_progress" | "used" | "archived";
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface SaveTopicOpportunityResult { ok: boolean; created?: boolean; errorCode?: string; message?: string; topic?: TopicView }
+interface ListTopicsResult { ok: boolean; errorCode?: string; message?: string; topics?: TopicView[] }
+
 interface CaptureWorkflowInput {
   projectTitle: string;
   existingProjectId?: string;
@@ -442,6 +464,8 @@ interface Window {
     quoteTopicRadar: (input: TopicRadarQueryView) => Promise<TopicRadarQuoteResult>;
     runTopicRadar: (quoteId: string) => Promise<TopicRadarRunResult>;
     listTopicRadarReports: () => Promise<TopicRadarRunResult>;
+    saveTopicOpportunity: (input: { source: "account_research" | "topic_radar"; reportId: string; opportunityId: string }) => Promise<SaveTopicOpportunityResult>;
+    listTopics: () => Promise<ListTopicsResult>;
     createCaptureWorkflow: (input: CaptureWorkflowInput) => Promise<CaptureWorkflowResult>;
     importTake: (shootTaskId: string) => Promise<ImportTakeResult>;
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;

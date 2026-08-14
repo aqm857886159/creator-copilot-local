@@ -29,7 +29,8 @@ async function getDesktopRuntime() {
       import(pathToFileURL(path.join(runtimeRoot, "agent-runtime", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "research", "src", "index.js")).href),
       import(pathToFileURL(path.join(runtimeRoot, "publishing", "src", "index.js")).href),
-    ]).then(([media, analysis, creation, exchange, storage, providers, agentRuntime, research, publishing]) => ({ media, analysis, creation, exchange, storage, providers, agentRuntime, research, publishing, mediaImporter: new media.LocalMediaImporter() }));
+      import(pathToFileURL(path.join(runtimeRoot, "domain", "src", "index.js")).href),
+    ]).then(([media, analysis, creation, exchange, storage, providers, agentRuntime, research, publishing, domain]) => ({ media, analysis, creation, exchange, storage, providers, agentRuntime, research, publishing, domain, mediaImporter: new media.LocalMediaImporter() }));
   }
   return desktopRuntimePromise;
 }
@@ -97,6 +98,60 @@ function buildAssetCandidateSuggestions({ workspace, runtime, script, storyboard
     return { shotId: shot.id, instruction: task?.instruction ?? shot.actionDescription, scriptText, mode: shot.mode, framing: shot.framing, targetMs: shot.targetMs };
   });
   return runtime.analysis.rankAssetCandidates({ queries, assets: sourceAssets, limitPerShot: 5 });
+}
+
+function topicIdForOpportunity(source, reportId, opportunityId) {
+  return `topic-${createHash("sha256").update(`${source}:${reportId}:${opportunityId}`).digest("hex").slice(0, 24)}`;
+}
+
+function buildTopicFromOpportunity({ workspace, runtime, source, reportId, opportunityId }) {
+  const now = new Date().toISOString();
+  const id = topicIdForOpportunity(source, reportId, opportunityId);
+  if (source === "account_research") {
+    const report = workspace.catalog.getResearchReport(reportId);
+    if (!report || report.workspaceId !== workspace.workspaceId) throw new Error("账号研究报告不存在或不属于当前工作区");
+    const opportunity = report.opportunities.find((candidate) => candidate.id === opportunityId);
+    if (!opportunity) throw new Error("账号研究机会不存在");
+    const evidenceIds = opportunity.evidenceIds.filter((evidenceId) => report.evidence.some((evidence) => evidence.id === evidenceId));
+    if (evidenceIds.length !== opportunity.evidenceIds.length) throw new Error("账号研究机会引用了不存在的证据");
+    return runtime.domain.createTopic({
+      id,
+      workspaceId: workspace.workspaceId,
+      title: opportunity.title,
+      audienceProblem: "对标样本暴露了一个值得验证的观众问题；需要结合你的受众重新确认。",
+      thesis: opportunity.angle,
+      angle: opportunity.angle,
+      evidenceIds,
+      benchmarkVideoIds: opportunity.sourceVideoIds,
+      visualOpportunities: ["参考已拆解作品的镜头事实，再用自己的素材证明观点。"],
+      riskNotes: [opportunity.whyNow],
+      source: { kind: source, reportId, opportunityId },
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  const report = workspace.catalog.getTopicRadarReport(reportId);
+  if (!report || report.workspaceId !== workspace.workspaceId) throw new Error("选题雷达报告不存在或不属于当前工作区");
+  const opportunity = report.opportunities.find((candidate) => candidate.id === opportunityId);
+  if (!opportunity) throw new Error("选题雷达机会不存在");
+  const signalIds = new Set(report.signals.map((signal) => signal.id));
+  const evidenceIds = opportunity.evidenceIds.filter((evidenceId) => signalIds.has(evidenceId));
+  if (evidenceIds.length !== opportunity.evidenceIds.length) throw new Error("选题雷达机会引用了不存在的信号");
+  return runtime.domain.createTopic({
+    id,
+    workspaceId: workspace.workspaceId,
+    title: opportunity.title,
+    audienceProblem: `平台信号显示用户正在关注“${opportunity.title.replace(/^搜索机会：/, "")}”，但是否适合你的账号仍需验证。`,
+    thesis: opportunity.angle,
+    angle: opportunity.angle,
+    evidenceIds,
+    benchmarkVideoIds: [],
+    visualOpportunities: ["先把热词转成你有真实经验的具体场景，再决定是否需要补拍。"],
+    riskNotes: [opportunity.whyNow],
+    source: { kind: source, reportId, opportunityId },
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 function getEditAgent(runtime) {
@@ -644,6 +699,31 @@ ipcMain.handle("desktop:list-topic-radar-reports", async () => {
     return { ok: true, reports: workspace.catalog.listTopicRadarReports(workspace.workspaceId) };
   } catch (error) {
     return { ok: false, errorCode: "topic_radar_history_failed", message: error instanceof Error ? error.message : "无法读取选题雷达历史" };
+  }
+});
+
+ipcMain.handle("desktop:save-topic-opportunity", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || (raw.source !== "account_research" && raw.source !== "topic_radar") || typeof raw.reportId !== "string" || !raw.reportId || typeof raw.opportunityId !== "string" || !raw.opportunityId) throw new Error("选题机会参数无效");
+    const runtime = await getDesktopRuntime();
+    const topic = buildTopicFromOpportunity({ workspace, runtime, source: raw.source, reportId: raw.reportId, opportunityId: raw.opportunityId });
+    const existing = workspace.catalog.getTopic(topic.id);
+    if (existing && existing.workspaceId !== workspace.workspaceId) throw new Error("选题不能跨工作区读取");
+    if (existing) return { ok: true, created: false, topic: existing };
+    workspace.catalog.saveTopic(topic);
+    return { ok: true, created: true, topic };
+  } catch (error) {
+    return { ok: false, errorCode: "topic_save_failed", message: error instanceof Error ? error.message : "加入选题库失败" };
+  }
+});
+
+ipcMain.handle("desktop:list-topics", async () => {
+  try {
+    const workspace = requireWorkspace();
+    return { ok: true, topics: workspace.catalog.listTopics(workspace.workspaceId) };
+  } catch (error) {
+    return { ok: false, errorCode: "topic_list_failed", message: error instanceof Error ? error.message : "无法读取本地选题库" };
   }
 });
 
@@ -1540,7 +1620,7 @@ ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
 
 app.whenReady().then(() => {
   const start = async () => {
-    if (process.argv.includes("--ui-smoke")) {
+    if (process.argv.includes("--ui-smoke") || process.argv.includes("--topic-library-smoke")) {
       const smokeWorkspace = process.env.UI_SMOKE_WORKSPACE;
       if (!smokeWorkspace) throw new Error("UI_SMOKE_WORKSPACE 未配置");
       await initializeWorkspace(smokeWorkspace);
@@ -1561,6 +1641,38 @@ app.whenReady().then(() => {
         app.exit(0);
       } catch (error) {
         console.error(JSON.stringify({ ok: false, smoke: "preload-ipc", message: error instanceof Error ? error.message : "preload IPC smoke 失败" }));
+        app.exit(1);
+      }
+    });
+  }
+  if (process.argv.includes("--topic-library-smoke")) {
+    window.webContents.once("did-finish-load", async () => {
+      try {
+        const runtime = await getDesktopRuntime();
+        const workspace = requireWorkspace();
+        const now = new Date().toISOString();
+        const report = runtime.research.TopicRadarReportSchema.parse({
+          schemaVersion: 1,
+          id: "topic-radar-smoke-report",
+          workspaceId: workspace.workspaceId,
+          providerKey: "tikhub",
+          query: { schemaVersion: 1, sources: ["search_hot"], keyword: "表达", dateWindow: 24, pageSize: 1 },
+          quote: { schemaVersion: 1, id: "topic-radar-smoke-quote", workspaceId: workspace.workspaceId, query: { schemaVersion: 1, sources: ["search_hot"], keyword: "表达", dateWindow: 24, pageSize: 1 }, lines: [{ source: "search_hot", endpoint: "/fixture", costUsd: 0 }], totalCostUsd: 0, currency: "USD", quotedAt: now, expiresAt: new Date(Date.parse(now) + 600_000).toISOString() },
+          status: "completed",
+          signals: [{ schemaVersion: 1, id: "topic-signal-smoke", source: "search_hot", kind: "search_term", label: "表达结构", detail: "fixture signal", metrics: { searchScore: 1 }, sourceId: "表达结构", capturedAt: now }],
+          opportunities: [{ schemaVersion: 1, id: "topic-opportunity-smoke", source: "search_hot", title: "搜索机会：表达结构", angle: "把热词改写成自己的真实案例。", whyNow: "fixture signal", evidenceIds: ["topic-signal-smoke"], status: "candidate" }],
+          runs: [{ schemaVersion: 1, source: "search_hot", endpoint: "/fixture", jobId: "topic-job-smoke", quotedCostUsd: 0, status: "succeeded", itemCount: 1 }],
+          createdAt: now,
+        });
+        workspace.catalog.saveTopicRadarReport(report);
+        const first = await window.webContents.executeJavaScript("window.desktop.saveTopicOpportunity({source:'topic_radar',reportId:'topic-radar-smoke-report',opportunityId:'topic-opportunity-smoke'})");
+        const second = await window.webContents.executeJavaScript("window.desktop.saveTopicOpportunity({source:'topic_radar',reportId:'topic-radar-smoke-report',opportunityId:'topic-opportunity-smoke'})");
+        const topics = workspace.catalog.listTopics(workspace.workspaceId);
+        if (!first?.ok || !first.created || !second?.ok || second.created || topics.length !== 1) throw new Error("Topic IPC smoke 没有保持创建与重复点击幂等");
+        console.log(JSON.stringify({ ok: true, smoke: "topic-library-ipc-idempotency", firstCreated: first.created, secondCreated: second.created, topicCount: topics.length, schemaVersion: workspace.catalog.schemaVersion() }));
+        app.exit(0);
+      } catch (error) {
+        console.error(JSON.stringify({ ok: false, smoke: "topic-library-ipc-idempotency", message: error instanceof Error ? error.message : "Topic IPC smoke 失败" }));
         app.exit(1);
       }
     });
