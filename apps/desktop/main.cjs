@@ -780,7 +780,7 @@ ipcMain.handle("desktop:accept-script-proposal", async (_event, raw) => {
     const now = new Date().toISOString();
     const projectId = `project-${randomUUID()}`;
     const script = runtime.creation.ScriptSchema.parse({ schemaVersion: 1, id: `script-${randomUUID()}`, projectId, revision: 1, status: "approved", blocks: proposal.blocks.map((block) => ({ schemaVersion: 1, id: block.id, order: block.order, kind: block.kind, text: block.text, emphasis: block.emphasis, evidenceIds: block.evidenceIds, visualNeed: block.visualNeed })), estimatedDurationMs: proposal.blocks.reduce((total, block) => total + Math.max(1_500, Math.round(block.text.length * 260)), 0), createdAt: now, updatedAt: now });
-    const project = { id: projectId, workspaceId: workspace.workspaceId, title: raw.projectTitle.trim(), stage: "script", revision: 1, payload: { scriptId: script.id, scriptProposalId: proposal.id, visualSuggestions: Object.fromEntries(proposal.blocks.map((block) => [block.id, block.visualSuggestion])) }, createdAt: now, updatedAt: now };
+    const project = { id: projectId, workspaceId: workspace.workspaceId, title: raw.projectTitle.trim(), stage: "script", revision: 1, payload: { scriptId: script.id, scriptProposalId: proposal.id, visualSuggestions: Object.fromEntries(proposal.blocks.map((block) => [block.id, block.visualSuggestion])), shotPlans: Object.fromEntries(proposal.blocks.filter((block) => block.shotPlan).map((block) => [block.id, block.shotPlan])) }, createdAt: now, updatedAt: now };
     const accepted = workspace.catalog.acceptScriptProposal({ proposalId: proposal.id, workspaceId: workspace.workspaceId, project, script });
     return { ok: true, proposal: accepted.proposal, project: accepted.project, script: accepted.script };
   } catch (error) {
@@ -831,6 +831,9 @@ ipcMain.handle("desktop:create-capture-workflow", async (_event, raw) => {
         mode: shot.mode,
         framing: shot.framing || undefined,
         cameraDirection: String(shot.cameraDirection ?? "").trim() || undefined,
+        deviceHint: shot.deviceHint,
+        orientation: shot.orientation,
+        checklist: Array.isArray(shot.checklist) ? shot.checklist : undefined,
         actionDescription: String(shot.actionDescription ?? "").trim(),
         targetMs: Number(shot.targetMs),
         sourceRequirement: shot.sourceRequirement,
@@ -1529,11 +1532,13 @@ app.whenReady().then(() => {
           if (!document.querySelector("h1")?.textContent?.includes("脚本、分镜与拍摄包")) throw new Error("没有进入创作项目页面");
           clickText("生成脚本提案");
           await waitFor(() => document.querySelector(".script-proposal-review"), "脚本提案预览");
+          if (!document.querySelector(".script-proposal-shot-plan")) throw new Error("脚本提案没有生成结构化拍摄计划");
           clickText("确认并保存脚本");
           await waitFor(() => document.querySelector(".script-proposal-review")?.textContent?.includes("脚本已确认"), "脚本提案确认");
           clickText("生成并导出拍摄包");
           await wait(900);
           if (!document.querySelector(".capture-result")) throw new Error("拍摄包没有出现在创作页面；body=" + (document.body?.innerText ?? "").slice(-1800));
+          if (!document.querySelector(".capture-task-checklist")) throw new Error("拍摄包没有展示拍摄检查清单");
           for (let index = 0; index < 3; index += 1) {
             await waitFor(() => buttons().some((button) => !button.disabled && button.textContent?.includes("导入 Take")), "Take 导入按钮可用");
             clickText("导入 Take", index);

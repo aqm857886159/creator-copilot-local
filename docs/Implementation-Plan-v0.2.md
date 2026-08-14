@@ -293,7 +293,7 @@ interface AgentRuntimePort {
 
 **验收门：** 同一业务命令切换 mock/真实 Provider 不改 Domain；批准前不写事实；Agent 不能直接写 DB/JSON；断线恢复、重复批准和取消有 fixture。若 Mastra adapter 失败，AI SDK mock 仍可完成业务测试。
 
-**当前增量（2026-08-14）：** 已先落地“脚本 AI 提案”这一条用户可见闭环：保留用户原始表达和可选 voice profile，生成带 `visualSuggestion` 的结构化段落；来源证据必须经过本地白名单校验；用户确认后脚本提案、项目和脚本在同一事务写入，并可复用项目直接进入分镜/拍摄包。无 APIMart key 时使用离线 local fallback，配置 `AI_EDIT_PROVIDER=apimart` 才走云端 AI SDK；不启用后台生成、自动覆盖或自动重试。施工记录见 [`V5b 脚本 AI 提案与拍摄包衔接`](./plan/2026-08-14-v5-script-proposal.md)。
+**当前增量（2026-08-14）：** 已先落地“脚本 AI 提案”这一条用户可见闭环：保留用户原始表达和可选 voice profile，生成带 `visualSuggestion` 与结构化 `shotPlan`（拍什么、拍几秒、景别、动作、设备、横竖屏、检查清单）的段落；来源证据必须经过本地白名单校验；用户确认后脚本提案、项目和脚本在同一事务写入，并可复用项目直接进入分镜/拍摄包，Shot/拍摄任务会继承这些拍摄意图。无 APIMart key 时使用离线 local fallback，配置 `AI_EDIT_PROVIDER=apimart` 才走云端 AI SDK；不启用后台生成、自动覆盖或自动重试。施工记录见 [`V5b 脚本 AI 提案与拍摄包衔接`](./plan/2026-08-14-v5-script-proposal.md)。
 
 ### V6：本地分析和素材检索
 

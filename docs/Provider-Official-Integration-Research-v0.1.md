@@ -201,6 +201,8 @@ ProviderRequestReceipt → Job → Evidence/Artifact → CostReport
 
 ## 4. 本次真实 smoke（小额、可复现）
 
+真实联调的密钥边界、默认请求/费用上限、停止条件和证据留存规则见 [`Provider-Live-Test-Policy-v0.1.md`](./Provider-Live-Test-Policy-v0.1.md)。该政策是以后执行真实测试的门，不把用户在聊天中提供的 key 写入本文件。
+
 运行入口：
 
 ```bash

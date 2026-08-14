@@ -32,6 +32,22 @@ export const ScriptSchema = z.object({
 
 export type Script = z.infer<typeof ScriptSchema>;
 
+export const ScriptProposalShotPlanSchema = z.object({
+  schemaVersion: z.literal(1),
+  purpose: z.enum(["explain", "prove", "transition", "emotion", "reset", "brand"]),
+  mode: z.enum(["talking_head", "broll", "screen_recording", "graphic", "generated", "still"]),
+  framing: z.enum(["wide", "medium", "close", "detail", "screen"]).optional(),
+  actionDescription: z.string().min(1).max(500),
+  cameraDirection: z.string().min(1).max(500),
+  targetMs: z.number().int().positive().max(60_000),
+  sourceRequirement: z.enum(["existing_asset", "shoot_task", "generated_asset", "any"]),
+  deviceHint: z.enum(["phone", "camera", "screen", "any"]),
+  orientation: z.enum(["portrait", "landscape", "any"]),
+  checklist: z.array(z.string().min(1).max(160)).min(1).max(8),
+  referencePrompt: z.string().min(1).max(500).optional(),
+}).strict();
+export type ScriptProposalShotPlan = z.infer<typeof ScriptProposalShotPlanSchema>;
+
 export const ScriptProposalBlockSchema = z.object({
   schemaVersion: z.literal(1),
   id,
@@ -42,6 +58,7 @@ export const ScriptProposalBlockSchema = z.object({
   evidenceIds: z.array(id).max(20),
   visualNeed: ScriptBlockSchema.shape.visualNeed,
   visualSuggestion: z.string().min(1).max(500),
+  shotPlan: ScriptProposalShotPlanSchema.optional(),
 }).strict();
 export type ScriptProposalBlock = z.infer<typeof ScriptProposalBlockSchema>;
 
@@ -71,11 +88,14 @@ export const ShotSchema = z.object({
   mode: z.enum(["talking_head", "broll", "screen_recording", "graphic", "generated", "still"]),
   framing: z.enum(["wide", "medium", "close", "detail", "screen"]).optional(),
   cameraDirection: z.string().optional(),
+  deviceHint: z.enum(["phone", "camera", "screen", "any"]).optional(),
+  orientation: z.enum(["portrait", "landscape", "any"]).optional(),
   actionDescription: z.string().min(1),
   targetMs: z.number().int().positive(),
   minMs: z.number().int().positive().optional(),
   maxMs: z.number().int().positive().optional(),
   sourceRequirement: z.enum(["existing_asset", "shoot_task", "generated_asset", "any"]),
+  checklist: z.array(z.string().min(1).max(160)).max(8).optional(),
   selectedTakeId: id.optional(),
   status: z.enum(["planned", "needs_material", "ready", "covered", "rejected"]),
 }).strict().superRefine((shot, context) => {
@@ -189,9 +209,9 @@ export function createShootTasks(storyboard: Storyboard, createdAt: string) {
     targetMs: shot.targetMs,
     minMs: shot.minMs,
     maxMs: shot.maxMs,
-    deviceHint: shot.mode === "screen_recording" ? "screen" : "phone",
-    orientation: "portrait",
-    checklist: ["画面稳定，主体完整", "按目标时长多拍 2 秒余量", "保留一条自然开头和结尾"],
+    deviceHint: shot.deviceHint ?? (shot.mode === "screen_recording" ? "screen" : "phone"),
+    orientation: shot.orientation ?? "portrait",
+    checklist: shot.checklist ?? ["画面稳定，主体完整", "按目标时长多拍 2 秒余量", "保留一条自然开头和结尾"],
     status: "todo",
     takeIds: [],
     createdAt,

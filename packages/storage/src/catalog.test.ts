@@ -392,7 +392,7 @@ describe("SqliteCatalog", () => {
       workspaceId: "workspace-script",
       brief: "把观点拍得更有证据。",
       voiceProfile: "短句，先讲自己的观察，再给判断。",
-      blocks: [{ schemaVersion: 1, id: "proposal-block-1", order: 0, kind: "hook", text: "镜头多，不等于内容丰富。", emphasis: ["不等于"], evidenceIds: [], visualNeed: "none", visualSuggestion: "稳定中景，直视镜头说完。" }],
+      blocks: [{ schemaVersion: 1, id: "proposal-block-1", order: 0, kind: "hook", text: "镜头多，不等于内容丰富。", emphasis: ["不等于"], evidenceIds: [], visualNeed: "none", visualSuggestion: "稳定中景，直视镜头说完。", shotPlan: { schemaVersion: 1, purpose: "emotion", mode: "talking_head", framing: "medium", actionDescription: "面对镜头自然说出判断。", cameraDirection: "手机竖拍固定中景。", targetMs: 4000, sourceRequirement: "shoot_task", deviceHint: "phone", orientation: "portrait", checklist: ["画面稳定", "自然说完"] } }],
       styleNotes: ["保留原话"],
       warnings: [],
       status: "previewed",

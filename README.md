@@ -34,6 +34,7 @@ npm run dev:desktop
 - [Agent 技术栈 CTO 评审](docs/Agent-Stack-CTO-Review-v0.1.md)
 - [数据库选型 ADR](docs/Database-Decision-ADR-v0.1.md)
 - [Provider 官方接入与小额联调记录](docs/Provider-Official-Integration-Research-v0.1.md)
+- [Provider 小额真实联调规则（以后测试按此执行）](docs/Provider-Live-Test-Policy-v0.1.md)
 - [脚本 AI 提案与拍摄包衔接施工记录](docs/plan/2026-08-14-v5-script-proposal.md)
 - [选题雷达垂直切片施工记录](docs/plan/2026-08-14-v7-topic-radar.md)
 

@@ -23,11 +23,12 @@ const script = ScriptSchema.parse({
 describe("creation workflow contracts", () => {
   it("builds shots, executable shoot tasks, and an offline capture package", async () => {
     const storyboard = createStoryboard({ id: "storyboard-1", script, createdAt: now, shots: [
-      { id: "shot-1", order: 0, scriptBlockIds: ["block-1"], purpose: "emotion", mode: "talking_head", framing: "medium", cameraDirection: "正面固定，中途停顿半秒", actionDescription: "看镜头，先说出问题，再停顿。", targetMs: 4_000, sourceRequirement: "shoot_task" },
+      { id: "shot-1", order: 0, scriptBlockIds: ["block-1"], purpose: "emotion", mode: "talking_head", framing: "medium", cameraDirection: "正面固定，中途停顿半秒", deviceHint: "camera", orientation: "portrait", checklist: ["眼睛在上三分之一", "多拍一条备用"], actionDescription: "看镜头，先说出问题，再停顿。", targetMs: 4_000, sourceRequirement: "shoot_task" },
       { id: "shot-2", order: 1, scriptBlockIds: ["block-2"], purpose: "explain", mode: "broll", actionDescription: "拍一张桌面上写满修改痕迹的纸。", targetMs: 3_000, sourceRequirement: "shoot_task" },
     ] });
     const tasks = createShootTasks(storyboard, now);
     expect(tasks).toHaveLength(2);
+    expect(tasks[0]).toMatchObject({ deviceHint: "camera", orientation: "portrait", checklist: ["眼睛在上三分之一", "多拍一条备用"] });
     const root = mkdtempSync(join(tmpdir(), "creator-copilot-capture-"));
     const capturePackage = await exportCapturePackage({ workspaceRoot: root, projectTitle: "表达结构", capturePackage: { schemaVersion: 1, id: "capture-1", projectId: "project-1", storyboardRevision: 1, format: "html", relativePath: "capture-packages/capture-1/index.html", taskIds: tasks.map((task) => task.id), status: "draft", createdAt: now, updatedAt: now }, storyboard, tasks });
     expect(capturePackage.status).toBe("ready");

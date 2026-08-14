@@ -79,12 +79,12 @@ describe("agent edit proposal runtime", () => {
   it("keeps a script proposal voice-first and warns when evidence is missing", async () => {
     const runtime = new LocalScriptAgentRuntime();
     const result = await runtime.proposeScript({ workspaceId: "workspace-1", brief: "我以前以为只要多拍几个镜头就会更丰富。\n后来发现问题不在镜头数量，而在每个画面有没有证明观点。", now });
-    expect(result).toMatchObject({ status: "ready", proposal: { status: "previewed", provider: { providerKey: "local-fallback" }, blocks: [{ kind: "hook" }, { kind: "example" }] } });
+    expect(result).toMatchObject({ status: "ready", proposal: { status: "previewed", provider: { providerKey: "local-fallback" }, blocks: [{ kind: "hook", shotPlan: { mode: "talking_head", targetMs: expect.any(Number), deviceHint: "phone" } }, { kind: "example", shotPlan: { mode: "broll", sourceRequirement: "shoot_task" } }] } });
     expect(result.proposal.warnings).toContain("当前没有附加来源证据；涉及事实的句子需要创作者自行核验。");
   });
 
   it("rejects script evidence invented by a model", async () => {
-    const draft = { schemaVersion: 1 as const, blocks: [{ kind: "hook" as const, text: "一个问题", emphasis: [], evidenceIds: ["not-confirmed"], visualNeed: "none" as const, visualSuggestion: "看镜头说" }], styleNotes: [], warnings: [] };
+    const draft = { schemaVersion: 1 as const, blocks: [{ kind: "hook" as const, text: "一个问题", emphasis: [], evidenceIds: ["not-confirmed"], visualNeed: "none" as const, visualSuggestion: "看镜头说", shotPlan: { schemaVersion: 1 as const, purpose: "emotion" as const, mode: "talking_head" as const, framing: "medium" as const, actionDescription: "面对镜头说出问题。", cameraDirection: "手机竖拍固定中景。", targetMs: 3000, sourceRequirement: "shoot_task" as const, deviceHint: "phone" as const, orientation: "portrait" as const, checklist: ["画面稳定"] } }], styleNotes: [], warnings: [] };
     expect(() => materializeScriptProposal({ workspaceId: "workspace-1", brief: "一个主题", sourceEvidence: [{ id: "fact-1", text: "已核验事实" }], now }, draft, { providerKey: "test" })).toThrow("未提供的证据");
   });
 });

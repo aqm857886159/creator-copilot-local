@@ -74,7 +74,7 @@ interface ScriptProposalView {
   workspaceId: string;
   brief: string;
   voiceProfile?: string;
-  blocks: Array<{ schemaVersion: 1; id: string; order: number; kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; emphasis: string[]; evidenceIds: string[]; visualNeed: "none" | "support" | "must_show"; visualSuggestion: string }>;
+  blocks: Array<{ schemaVersion: 1; id: string; order: number; kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; emphasis: string[]; evidenceIds: string[]; visualNeed: "none" | "support" | "must_show"; visualSuggestion: string; shotPlan?: { schemaVersion: 1; purpose: "explain" | "prove" | "transition" | "emotion" | "reset" | "brand"; mode: "talking_head" | "broll" | "screen_recording" | "graphic" | "generated" | "still"; framing?: "wide" | "medium" | "close" | "detail" | "screen"; actionDescription: string; cameraDirection: string; targetMs: number; sourceRequirement: "existing_asset" | "shoot_task" | "generated_asset" | "any"; deviceHint: "phone" | "camera" | "screen" | "any"; orientation: "portrait" | "landscape" | "any"; checklist: string[]; referencePrompt?: string } }>;
   styleNotes: string[];
   warnings: string[];
   status: "previewed" | "accepted" | "rejected" | "expired";
@@ -218,7 +218,7 @@ interface CaptureWorkflowInput {
   existingProjectId?: string;
   existingScriptId?: string;
   blocks: Array<{ kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; visualNeed: "none" | "support" | "must_show" }>;
-  shots: Array<{ scriptBlockIndex: number; purpose: "explain" | "prove" | "transition" | "emotion" | "reset" | "brand"; mode: "talking_head" | "broll" | "screen_recording" | "graphic" | "generated" | "still"; framing?: "wide" | "medium" | "close" | "detail" | "screen"; cameraDirection?: string; actionDescription: string; targetMs: number; sourceRequirement: "existing_asset" | "shoot_task" | "generated_asset" | "any" }>;
+  shots: Array<{ scriptBlockIndex: number; purpose: "explain" | "prove" | "transition" | "emotion" | "reset" | "brand"; mode: "talking_head" | "broll" | "screen_recording" | "graphic" | "generated" | "still"; framing?: "wide" | "medium" | "close" | "detail" | "screen"; cameraDirection?: string; deviceHint?: "phone" | "camera" | "screen" | "any"; orientation?: "portrait" | "landscape" | "any"; checklist?: string[]; actionDescription: string; targetMs: number; sourceRequirement: "existing_asset" | "shoot_task" | "generated_asset" | "any" }>;
 }
 
 interface CaptureShootTask {
@@ -227,6 +227,11 @@ interface CaptureShootTask {
   title: string;
   instruction: string;
   targetMs: number;
+  minMs?: number;
+  maxMs?: number;
+  deviceHint: "phone" | "camera" | "screen" | "any";
+  orientation: "portrait" | "landscape" | "any";
+  checklist: string[];
   status: "todo" | "recorded" | "imported" | "accepted" | "skipped";
   takeIds: string[];
 }

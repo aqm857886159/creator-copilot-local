@@ -11,6 +11,7 @@
 - 保留或强调的词；
 - 是否需要画面补足；
 - 可以用手机或相机拍到的具体画面建议；
+- 结构化 `shotPlan`：画面目的、模式、景别、动作、机位/设备、目标时长、横竖屏、素材来源和拍摄检查清单；
 - 证据 ID 和待核验警告。
 
 用户确认后，脚本、项目和提案在同一 SQLite 事务中保存；随后可以直接进入分镜和拍摄包，不需要重新复制脚本，也不会重复创建项目。
@@ -21,7 +22,7 @@
 
 | 层 | 实现 | 约束 |
 | --- | --- | --- |
-| 领域合同 | `packages/creation/src/index.ts` | `ScriptProposalSchema` 保存 brief、voiceProfile、blocks、visualSuggestion、provider 和状态 |
+| 领域合同 | `packages/creation/src/index.ts` | `ScriptProposalSchema` 保存 brief、voiceProfile、blocks、visualSuggestion、`shotPlan`、provider 和状态；Shot/Task 会继承拍摄意图 |
 | Agent 运行时 | `packages/agent-runtime/src/index.ts` | `LocalScriptAgentRuntime` 离线可用；`AiSdkScriptAgentRuntime` 只生成结构化草稿；所有输出都经过本地 materializer |
 | Provider | `apps/desktop/main.cjs` | 仅 main process 持有 APIMart key；`AI_EDIT_PROVIDER=apimart` 才启用云端脚本模型，否则走 local fallback |
 | 持久化 | `packages/storage/src/catalog.ts` | migration 9 新增 `script_proposals`；确认提案、创建项目、保存脚本在一个事务中完成 |
@@ -35,7 +36,7 @@
 2. 检查 `evidenceIds` 是否都来自用户提供的来源，模型编造的 ID 直接拒绝；
 3. 为段落补稳定的 proposal/block ID 和顺序；
 4. 生成 `previewed` 状态，等待用户确认；
-5. 把 `visualSuggestion` 放进项目 payload，供后续分镜和拍摄包使用。
+5. 把 `visualSuggestion` 和 `shotPlan` 放进项目 payload，供后续分镜和拍摄包使用。
 
 因此“写得顺”不等于“已经成为事实”。原始 brief、来源证据、模型版本、响应 hash 和警告都能追溯；用户拒绝、过期或重新生成不会静默改写已确认脚本。
 
@@ -97,4 +98,4 @@ node scripts/render-recovery-smoke.mjs
 - 不把模型生成的段落自动晋升为创作记忆；
 - 不承诺已经解决完整的 ASR/OCR/VLM 质量问题。
 
-下一步应该把 `visualSuggestion` 与 Storyboard/Shot 的“拍什么、拍几秒、景别、动作、设备”字段进一步对齐，再让 AI 粗剪把已选 Take 和这些拍摄意图作为可审阅输入。
+下一步是让 AI 粗剪把已选 Take、`shotPlan` 和拍摄检查结果作为可审阅输入；更复杂的 VLM 选材和自动补拍建议仍然后置。
