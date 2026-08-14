@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "datasetRole": "rubric_calibration",
+  "formalAcceptance": false,
+  "generatedAt": "2026-08-14T03:11:09.770Z",
+  "source": {
+    "sha256": "sha256:1852de88aca7f96f44f997692e562db142781fde28f03ea0dc19ee84efa6f448",
+    "sha256Matched": true,
+    "mediaPath": "redacted-local-fixture",
+    "referencePath": "redacted-local-reference"
+  },
+  "execution": {
+    "asr": false,
+    "ocr": true,
+    "providerCostUsd": 0
+  },
+  "observed": {
+    "ok": true,
+    "mode": "observational",
+    "input": "local-user-fixture",
+    "reference": "provided-shot-reference",
+    "transcriptReferenceSegments": 0,
+    "transcriptHypothesisSegments": 0,
+    "ocrReferenceCues": 10,
+    "ocrHypothesisCues": 10,
+    "report": {
+      "schemaVersion": 1,
+      "name": "local-aligned-reference",
+      "passed": true,
+      "transcript": {
+        "referenceSegments": 0,
+        "hypothesisSegments": 0,
+        "matchedSegments": 0,
+        "segmentPrecision": 1,
+        "segmentRecall": 1,
+        "cer": 0,
+        "timestampMaeMs": 0,
+        "maxTimestampDriftMs": 0
+      },
+      "ocr": {
+        "referenceCues": 10,
+        "hypothesisCues": 10,
+        "matchedCues": 10,
+        "precision": 1,
+        "recall": 1,
+        "bboxIoUMean": 0,
+        "bboxMatchedCues": 0
+      },
+      "gates": {
+        "transcript": {
+          "cerMax": 1,
+          "segmentRecallMin": 0,
+          "timestampMaeMaxMs": 60000
+        },
+        "ocr": {
+          "precisionMin": 0,
+          "recallMin": 0,
+          "bboxIoUMin": 0
+        }
+      },
+      "gateResults": [
+        {
+          "id": "transcript.cer",
+          "metric": "cer",
+          "actual": 0,
+          "threshold": 1,
+          "operator": "<=",
+          "passed": true
+        },
+        {
+          "id": "transcript.segmentRecall",
+          "metric": "segmentRecall",
+          "actual": 1,
+          "threshold": 0,
+          "operator": ">=",
+          "passed": true
+        },
+        {
+          "id": "transcript.timestampMaeMs",
+          "metric": "timestampMaeMs",
+          "actual": 0,
+          "threshold": 60000,
+          "operator": "<=",
+          "passed": true
+        },
+        {
+          "id": "ocr.precision",
+          "metric": "precision",
+          "actual": 1,
+          "threshold": 0,
+          "operator": ">=",
+          "passed": true
+        },
+        {
+          "id": "ocr.recall",
+          "metric": "recall",
+          "actual": 1,
+          "threshold": 0,
+          "operator": ">=",
+          "passed": true
+        },
+        {
+          "id": "ocr.bboxIoUMean",
+          "metric": "bboxIoUMean",
+          "actual": 0,
+          "threshold": 0,
+          "operator": ">=",
+          "passed": true
+        }
+      ],
+      "failures": []
+    }
+  },
+  "interpretation": "这是用户拥有的本地校准样本，用于检查 adapter、时间码和评测器链路；它不能代表正式 Gold corpus、产品准确率或跨平台质量承诺。"
+}

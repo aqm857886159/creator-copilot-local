@@ -81,6 +81,53 @@ interface CancelAnalysisResult {
   message?: string;
 }
 
+interface LocalAnalysisEngineView {
+  engine: "disabled" | "whisper.cpp" | "faster-whisper" | "apple-vision";
+  configured: boolean;
+  ready: boolean;
+  label: string;
+  pathLabel?: string;
+  errors: string[];
+}
+
+interface LocalAnalysisSettingsView {
+  schemaVersion: 1;
+  asr: {
+    engine: "disabled" | "whisper.cpp" | "faster-whisper";
+    modelPath?: string;
+    binaryPath?: string;
+    pythonPath?: string;
+    scriptPath?: string;
+    language: string;
+    device: "auto" | "cpu" | "cuda";
+    computeType: string;
+  };
+  ocr: {
+    engine: "disabled" | "apple-vision";
+    scriptPath?: string;
+    binaryPath?: string;
+    sampleIntervalMs: number;
+  };
+  updatedAt: string;
+}
+
+interface LocalAnalysisSettingsResult {
+  ok: boolean;
+  source?: "saved" | "environment";
+  errorCode?: string;
+  message?: string;
+  settings?: LocalAnalysisSettingsView;
+  capabilities?: { asr: LocalAnalysisEngineView; ocr: LocalAnalysisEngineView; sceneDetection: { ready: boolean; label: string } };
+}
+
+interface ChooseAnalysisPathResult {
+  ok: boolean;
+  canceled?: boolean;
+  errorCode?: string;
+  message?: string;
+  path?: string;
+}
+
 interface AccountResearchResult {
   ok: boolean;
   errorCode?: string;
@@ -494,6 +541,9 @@ interface Window {
     importMedia: () => Promise<ImportMediaResult>;
     analyzeAsset: (input: { artifactId: string }) => Promise<AnalyzeAssetResult>;
     cancelAnalysis: (input: { artifactId: string }) => Promise<CancelAnalysisResult>;
+    getLocalAnalysisSettings: () => Promise<LocalAnalysisSettingsResult>;
+    saveLocalAnalysisSettings: (input: LocalAnalysisSettingsView) => Promise<LocalAnalysisSettingsResult>;
+    chooseAnalysisPath: (input: { kind: "asr-model" | "asr-binary" | "asr-python" | "asr-script" | "ocr-script" | "ocr-binary"; engine?: "whisper.cpp" | "faster-whisper" | "apple-vision" }) => Promise<ChooseAnalysisPathResult>;
     searchAssets: (query: string) => Promise<AssetSearchResult>;
     researchAccount: (input: { sourceInput: string; count?: number }) => Promise<AccountResearchResult>;
     quoteAccountMetrics: (input: { reportId: string; awemeIds: string[] }) => Promise<AccountMetricsQuoteResult>;

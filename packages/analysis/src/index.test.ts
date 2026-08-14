@@ -3,6 +3,14 @@ import { writeFile } from "node:fs/promises";
 import { AppleVisionOcr, evaluateAnalysisQualityFixture, evaluateOcrQuality, evaluateTranscriptQuality, FasterWhisperSidecarTranscriber, FfmpegSceneDetector, mergeOcrCues, ocrFacts, parseSceneTimestamps, parseWhisperJson, rankAssetCandidates, searchQueryForFts, shotFacts, transcriptFacts, WhisperCppTranscriber } from "./index";
 
 describe("local analysis facts", () => {
+  it("prepares every whisper.cpp input as 16 kHz mono PCM WAV", async () => {
+    const calls: Array<{ binary: string; args: string[] }> = [];
+    const analysis = await import("./index");
+    const prepared = await analysis.prepareWhisperAudio("/tmp/video.mp4", { runner: async (binary, args) => { calls.push({ binary, args }); return { stdout: "", stderr: "" }; } });
+    expect(calls[0]).toMatchObject({ binary: "ffmpeg", args: expect.arrayContaining(["-i", "/tmp/video.mp4", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le"]) });
+    await prepared.cleanup();
+  });
+
   it("normalizes whisper.cpp timestamp variants into bounded transcript segments", () => {
     const segments = parseWhisperJson({ transcription: [{ timestamps: { from: "00:00:00.120", to: "00:00:01.500" }, text: "先把观点讲清楚。" }, { offsets: { from: 1500, to: 2500 }, text: "再让画面补证据。" }] });
     expect(segments).toMatchObject([{ startMs: 120, endMs: 1500 }, { startMs: 1500, endMs: 2500 }]);

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "round": "round-01",
+  "reviewer": "root",
+  "decision": "pass_with_followups",
+  "evidence": {
+    "typecheck": "passed",
+    "unitTests": { "files": 13, "tests": 81, "status": "passed" },
+    "build": "passed",
+    "desktopSettingsSmoke": "passed",
+    "desktopCreationUiSmoke": "passed",
+    "calibration": { "datasetRole": "rubric_calibration", "formalAcceptance": false, "providerCostUsd": 0, "ocrMatchedCues": 10, "ocrReferenceCues": 10 }
+  },
+  "hardFailChecks": {
+    "unknownSettingsRejected": true,
+    "relativePathRejected": true,
+    "rendererSecretBoundaryPreserved": true,
+    "settingsPersistAcrossReopen": true,
+    "analysisWithoutModelStillDegradesToFacts": true,
+    "calibrationNotClaimedAsGold": true,
+    "analysisRunFactsAreSeparated": true,
+    "workerOfflineEnvAndVideoAudioPreparationCovered": true
+  },
+  "followUps": [
+    "ASR 中文 segment/timestamp 需要正式 Gold fixture，不以本轮 OCR calibration 代替",
+    "Windows/Linux OCR adapter 与原生打包矩阵后置",
+    "模型下载、许可证、hash、内存峰值进入发行清单",
+    "设置页与 worker 的更多故障注入可在跨平台阶段补齐",
+    "utility worker 取消/超时的 sidecar 子进程组回收仍需跨平台验证",
+    "环境变量中的非规范 device/language 组合仍应在 fallback 层做更严格的有限化"
+  ]
+}

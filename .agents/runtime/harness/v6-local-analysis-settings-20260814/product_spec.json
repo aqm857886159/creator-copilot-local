@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "title": "本地智能设置与质量校准",
+  "problem": "中文深度口播创作者需要知道本地 ASR/OCR 是否可用，并在没有云端服务或密钥的情况下把素材分析结果沉淀进可搜索素材库。",
+  "primaryUser": "使用手机/相机拍摄、希望用本地优先方式整理口播与补充镜头的抖音创作者",
+  "userOutcomes": [
+    "能在设置页看见镜头检测、ASR、OCR 的真实能力状态，而不是看到空壳开关",
+    "能通过桌面文件选择器配置本地模型/运行时，重启后配置仍然存在",
+    "素材分析会使用已保存设置，并在未配置时安全降级为镜头检测与搜索",
+    "校准报告能区分事实、观察性样本与正式质量验收"
+  ],
+  "scope": {
+    "mustHave": [
+      "schema 校验的本地分析设置",
+      "Electron main/preload/renderer 设置闭环",
+      "设置持久化与重启读取",
+      "分析 worker 使用保存设置并保留 CI 环境变量 fallback",
+      "官方 ASR/OCR 接入研究文档",
+      "机器可读的 observational calibration 报告"
+    ],
+    "shouldHave": ["macOS Apple Vision ready 状态", "错误路径可观察反馈"],
+    "outOfScope": ["自动下载模型", "Windows/Linux OCR 正式支持", "正式 Gold 质量门", "TikHub/APIMart 真实调用", "批量云端生成"]
+  },
+  "constraints": [
+    "密钥不能出现在代码、日志、fixture 或 UI 返回值",
+    "renderer 不得直接读文件系统或启动进程",
+    "本地模型路径不是业务事实，必须可迁移、可清除",
+    "不能用 calibration 样本宣称 V6 质量正式通过"
+  ],
+  "acceptanceThemes": ["可观察", "可恢复", "安全边界", "离线降级", "证据可追溯"],
+  "risks": [
+    "本地模型版本和路径差异导致 ready 误判",
+    "文本准确但时间戳/分段不适合剪辑",
+    "设置页与 worker payload 漂移",
+    "用户选择的路径失效或指向恶意符号链接"
+  ]
+}

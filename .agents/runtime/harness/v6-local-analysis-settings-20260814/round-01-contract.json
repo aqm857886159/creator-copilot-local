@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "round": "round-01",
+  "goal": "把本地分析能力从环境变量实验入口提升为可配置、可恢复、可观察的桌面闭环，同时保留无模型降级。",
+  "ownedTasks": [
+    "packages/analysis 本地设置合同与测试",
+    "Electron main/preload 本地设置 IPC、校验和原子持久化",
+    "设置页展示能力状态与用户主动选择路径",
+    "分析 worker payload 从保存设置解析，环境变量仅作 fallback",
+    "官方文档调研与 observational calibration 记录"
+  ],
+  "deliverables": [
+    "LocalAnalysisSettingsSchema",
+    "settings IPC + settings-workbench",
+    "保存设置后分析任务可读到 engine/provider 状态",
+    "官方接入研究文档",
+    "calibration report（明确 datasetRole=calibration，不得写 formal_acceptance）"
+  ],
+  "verificationPlan": {
+    "hardFail": [
+      "settings schema 未拒绝 unknown field、相对路径或无效抽帧间隔",
+      "renderer 能获得 API key 或直接访问 fs/child_process",
+      "保存设置后重启读取不到同一配置",
+      "分析任务忽略保存设置，或保存文件损坏时阻塞素材导入",
+      "校准报告把观察性样本标成正式 Gold 通过",
+      "测试或日志出现任何用户密钥"
+    ],
+    "tests": [
+      "npm run typecheck",
+      "npm test -- --run",
+      "npm run build",
+      "npm run test:desktop:ui",
+      "settings schema unit tests",
+      "calibration report source hash/status inspection"
+    ]
+  },
+  "nonGoals": ["自动模型下载", "VLM", "多平台 OCR", "真实 TikHub/APIMart 联调", "正式质量 Gold corpus"]
+}

@@ -8,6 +8,8 @@ export { AnalysisQualityFixtureSchema, evaluateAnalysisQualityFixture, evaluateO
 export type { AnalysisQualityFixture, AnalysisQualityGate, QualityCue } from "./quality.js";
 export { AssetCandidateQuerySchema, AssetCandidateSchema, AssetCandidateSetSchema, AssetCandidateSourceSchema, rankAssetCandidates } from "./candidates.js";
 export type { AssetCandidate, AssetCandidateQuery, AssetCandidateSearchInput, AssetCandidateSet, AssetCandidateSource } from "./candidates.js";
+export { DEFAULT_LOCAL_ANALYSIS_SETTINGS, LocalAnalysisEngineSchema, LocalAnalysisSettingsPatchSchema, LocalAnalysisSettingsSchema, mergeLocalAnalysisSettings, parseLocalAnalysisSettings, workerAnalysisSettings } from "./settings.js";
+export type { LocalAnalysisEngine, LocalAnalysisSettings } from "./settings.js";
 
 const execFile = promisify(execFileCallback);
 const id = z.string().min(1);
@@ -63,6 +65,7 @@ export const AnalysisFactSchema = z.object({
   providerKey: id,
   modelKey: id.optional(),
   contentHash: id,
+  analysisRunId: id.optional(),
   createdAt: z.string().datetime({ offset: true }),
 }).strict().superRefine((fact, context) => {
   if (fact.endMs <= fact.startMs) context.addIssue({ code: z.ZodIssueCode.custom, path: ["endMs"], message: "分析事实结束时间必须大于开始时间" });
@@ -75,6 +78,20 @@ const defaultRunner: AnalysisCommandRunner = async (binary, args, signal) => {
   const result = await execFile(binary, args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, signal });
   return { stdout: result.stdout, stderr: result.stderr };
 };
+
+export async function prepareWhisperAudio(inputPath: string, options: { runner?: AnalysisCommandRunner; ffmpegPath?: string; signal?: AbortSignal } = {}) {
+  const runner = options.runner ?? defaultRunner;
+  const outputDirectory = join(tmpdir(), `creator-copilot-whisper-audio-${process.pid}-${Date.now()}`);
+  await mkdir(outputDirectory, { recursive: true });
+  const outputPath = join(outputDirectory, "audio.wav");
+  try {
+    await runner(options.ffmpegPath ?? "ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", inputPath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", outputPath], options.signal);
+    return { path: outputPath, cleanup: () => rm(outputDirectory, { recursive: true, force: true }) };
+  } catch (error) {
+    await rm(outputDirectory, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+}
 
 function parseTimestamp(value: unknown, numericUnit: "seconds" | "milliseconds" = "seconds") {
   if (typeof value === "number" && Number.isFinite(value)) return numericUnit === "milliseconds" ? Math.round(value) : Math.round(value * 1000);
@@ -263,16 +280,20 @@ export function mergeOcrCues(cues: OcrCue[], maxGapMs = 1_500) {
   return groups.sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
 }
 
-export function transcriptFacts(input: { workspaceId: string; artifactId: string; segments: TranscriptSegment[]; providerKey: string; modelKey?: string; contentHash: string; createdAt: string }) {
-  return input.segments.map((segment) => AnalysisFactSchema.parse({ schemaVersion: 1, id: `${input.artifactId}-${segment.id}`, workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "transcript", startMs: segment.startMs, endMs: segment.endMs, text: segment.text, labels: [], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, createdAt: input.createdAt }));
+function factId(artifactId: string, segmentId: string, analysisRunId?: string) {
+  return analysisRunId ? `${artifactId}-${analysisRunId}-${segmentId}` : `${artifactId}-${segmentId}`;
 }
 
-export function shotFacts(input: { workspaceId: string; artifactId: string; shots: ShotFact[]; providerKey: string; modelKey?: string; contentHash: string; createdAt: string }) {
-  return input.shots.map((shot) => AnalysisFactSchema.parse({ schemaVersion: 1, id: `${input.artifactId}-${shot.id}`, workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "shot", startMs: shot.startMs, endMs: shot.endMs, text: `镜头 ${shot.transition}`, labels: [shot.transition, shot.detector], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, createdAt: input.createdAt }));
+export function transcriptFacts(input: { workspaceId: string; artifactId: string; segments: TranscriptSegment[]; providerKey: string; modelKey?: string; contentHash: string; analysisRunId?: string; createdAt: string }) {
+  return input.segments.map((segment) => AnalysisFactSchema.parse({ schemaVersion: 1, id: factId(input.artifactId, segment.id, input.analysisRunId), workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "transcript", startMs: segment.startMs, endMs: segment.endMs, text: segment.text, labels: [], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, analysisRunId: input.analysisRunId, createdAt: input.createdAt }));
 }
 
-export function ocrFacts(input: { workspaceId: string; artifactId: string; cues: OcrCue[]; providerKey: string; modelKey?: string; contentHash: string; createdAt: string }) {
-  return input.cues.map((cue) => AnalysisFactSchema.parse({ schemaVersion: 1, id: `${input.artifactId}-${cue.id}`, workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "ocr", startMs: cue.startMs, endMs: cue.endMs, text: cue.text, labels: ["ocr"], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, createdAt: input.createdAt }));
+export function shotFacts(input: { workspaceId: string; artifactId: string; shots: ShotFact[]; providerKey: string; modelKey?: string; contentHash: string; analysisRunId?: string; createdAt: string }) {
+  return input.shots.map((shot) => AnalysisFactSchema.parse({ schemaVersion: 1, id: factId(input.artifactId, shot.id, input.analysisRunId), workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "shot", startMs: shot.startMs, endMs: shot.endMs, text: `镜头 ${shot.transition}`, labels: [shot.transition, shot.detector], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, analysisRunId: input.analysisRunId, createdAt: input.createdAt }));
+}
+
+export function ocrFacts(input: { workspaceId: string; artifactId: string; cues: OcrCue[]; providerKey: string; modelKey?: string; contentHash: string; analysisRunId?: string; createdAt: string }) {
+  return input.cues.map((cue) => AnalysisFactSchema.parse({ schemaVersion: 1, id: factId(input.artifactId, cue.id, input.analysisRunId), workspaceId: input.workspaceId, artifactId: input.artifactId, kind: "ocr", startMs: cue.startMs, endMs: cue.endMs, text: cue.text, labels: ["ocr"], providerKey: input.providerKey, modelKey: input.modelKey, contentHash: input.contentHash, analysisRunId: input.analysisRunId, createdAt: input.createdAt }));
 }
 
 export function searchQueryForFts(query: string) {

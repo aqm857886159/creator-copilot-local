@@ -35,6 +35,8 @@ npm run dev:desktop
 - [数据库选型 ADR](docs/Database-Decision-ADR-v0.1.md)
 - [Provider 官方接入与小额联调记录](docs/Provider-Official-Integration-Research-v0.1.md)
 - [Provider 小额真实联调规则（以后测试按此执行）](docs/Provider-Live-Test-Policy-v0.1.md)
+- [本地 ASR/OCR 官方接入调研](docs/Local-Analysis-Official-Integration-Research-v0.1.md)
+- [本地分析事实与素材检索施工记录](docs/plan/2026-08-14-v6-local-analysis-search.md)
 - [脚本 AI 提案与拍摄包衔接施工记录](docs/plan/2026-08-14-v5-script-proposal.md)
 - [选题雷达垂直切片施工记录](docs/plan/2026-08-14-v7-topic-radar.md)
 
@@ -50,6 +52,16 @@ npm run test:desktop:package
 
 # 打包应用真实用户旅途：创作项目 → 拍摄包 → 三个 Take → 本地分析 → AI 剪辑提案 → 导出
 npm run test:desktop:ui
+
+# 设置页、原生路径校验和本地分析配置重启恢复 smoke
+npm run test:desktop:settings
+
+# 只对明确提供的本地素材做 observational calibration；不调用云端、不写绝对路径
+ANALYSIS_QUALITY_INPUT=/path/to/source.mp4 \
+ANALYSIS_QUALITY_REFERENCE=/path/to/aligned.json \
+ANALYSIS_QUALITY_EXPECTED_SHA256=... \
+ANALYSIS_QUALITY_RUN_ASR=0 ANALYSIS_QUALITY_RUN_OCR=1 \
+npm run test:analysis:quality:calibration
 
 # 默认跳过；显式打开时只执行 1 条 APIMart 脚本结构化请求
 AGENT_SCRIPT_LIVE=1 npm run test:script:live

@@ -317,9 +317,13 @@ interface AgentRuntimePort {
 - `VectorIndex` 只做可选 rerank，失败时 FTS5 仍可用；
 - 后续再加入 VLM 和第二 ASR/OCR adapter。
 
+当前增量（2026-08-14）：本地分析设置已从环境变量实验入口提升为桌面设置闭环。设置页显示 FFmpeg、ASR、OCR 的路径可用/configured/error 状态（不把路径存在误称为模型质量 ready）；用户可通过 Electron 原生文件选择器配置 whisper.cpp 或 faster-whisper 的模型/运行时，以及 macOS Apple Vision sidecar。配置以 schema 校验后原子写入应用 userData，重启可读；renderer 不接触 fs、进程或密钥。分析 worker 优先消费保存设置，没有设置文件时才使用 CI/本机环境变量 fallback；无模型仍可导入、镜头检测和 FTS 搜索。每次分析的事实按 `analysisRunId` 隔离，当前素材检索只选择最新成功运行；faster-whisper worker 强制离线模型加载。官方依据见 [`Local-Analysis-Official-Integration-Research-v0.1.md`](./Local-Analysis-Official-Integration-Research-v0.1.md)，设置 IPC/打包 smoke 见 `npm run test:desktop:settings`。
+
 当前 AI 粗剪页的候选素材已经支持人工采用：用户预览后点击“作为 Take”，候选素材才会进入对应拍摄任务的 Take 选择；这一步是显式用户动作，不等同于自动选材，也不会绕过后续提案审阅。
 
-**验收门：** 时间戳不越界、不重叠、不漏边界；模型失败不阻塞导入；素材搜索可解释、可重现；有内存峰值、耗时和大库 FTS 基准。
+本机已有一条获授权素材的 OCR observational calibration：输入 SHA-256 已核对，10 条参考画面文字命中 10 条；报告保存在 `.agents/runtime/harness/v6-local-analysis-settings-20260814/calibration-report.json`，明确 `datasetRole=rubric_calibration`、`formalAcceptance=false`，不代表正式 Gold 质量或产品准确率。ASR 的真实中文分段/时间码仍需单独 Gold fixture。分析 Job 的 input hash、幂等键和 Job ID 会包含 effective worker settings fingerprint，避免切换模型后错误复用旧事实。
+
+**验收门：** 时间戳不越界、不重叠、不漏边界；模型失败不阻塞导入；设置损坏、路径失效和重启有明确状态；素材搜索可解释、可重现；有内存峰值、耗时和大库 FTS 基准。校准样本不能直接升级为正式 Gold gate。
 
 ### V7：对标账号研究
 
@@ -508,6 +512,8 @@ V5-02 AgentRuntimePort + one proposal + approval/reject/undo
 V5-03 Mastra adapter contract (Memory/MCP disabled initially)
 V6-01 ASR/shot/OCR baseline + FTS5 index
 V6-02 asset candidate search + evidence
+V6-03 local analysis settings IPC + packaged persistence smoke
+V6-04 observational calibration report + official adapter research
 V7-01 TikHub mock connector + one scoped real account
 V7-02 account analysis aggregation + TopicOpportunity
 V7b-01 topic radar quote/confirm/report + local history

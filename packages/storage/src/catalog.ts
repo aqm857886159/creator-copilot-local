@@ -43,7 +43,7 @@ import { AccountResearchReportSchema, TopicRadarReportSchema, type AccountResear
 import { MetricSnapshotSchema, PublicationSchema, ReviewMemoryProposalSchema, type MetricSnapshot, type Publication, type ReviewMemoryProposal } from "../../publishing/src/index.js";
 import { TopicSchema, type Topic } from "../../domain/src/index.js";
 
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 11;
 
 const RenderRunRecordSchema = z.object({
   schemaVersion: z.literal(1),
@@ -460,6 +460,10 @@ const migrations: Record<number, string> = {
     );
     CREATE INDEX IF NOT EXISTS topics_workspace_idx ON topics(workspace_id, status, updated_at);
   `,
+  11: `
+    ALTER TABLE media_analysis_facts ADD COLUMN analysis_run_id TEXT;
+    CREATE INDEX IF NOT EXISTS media_analysis_facts_run_idx ON media_analysis_facts(artifact_id, analysis_run_id, start_ms, end_ms);
+  `,
 };
 
 function parseJson<T>(value: string, label: string): T {
@@ -817,10 +821,10 @@ export class SqliteCatalog {
         const artifact = this.getArtifact(fact.artifactId);
         if (!workspace || !artifact || artifact.workspaceId !== fact.workspaceId) throw new Error(`分析事实引用了不存在或跨工作区素材：${fact.id}`);
         this.db.prepare("DELETE FROM media_analysis_fts WHERE fact_id = ?").run(fact.id);
-        this.db.prepare(`INSERT INTO media_analysis_facts(id, workspace_id, artifact_id, kind, start_ms, end_ms, text, labels_json, provider_key, model_key, content_hash, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, artifact_id = excluded.artifact_id, kind = excluded.kind, start_ms = excluded.start_ms, end_ms = excluded.end_ms, text = excluded.text, labels_json = excluded.labels_json, provider_key = excluded.provider_key, model_key = excluded.model_key, content_hash = excluded.content_hash, created_at = excluded.created_at`)
-          .run(fact.id, fact.workspaceId, fact.artifactId, fact.kind, fact.startMs, fact.endMs, fact.text, JSON.stringify(fact.labels), fact.providerKey, fact.modelKey ?? null, fact.contentHash, fact.createdAt);
+        this.db.prepare(`INSERT INTO media_analysis_facts(id, workspace_id, artifact_id, kind, start_ms, end_ms, text, labels_json, provider_key, model_key, content_hash, analysis_run_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, artifact_id = excluded.artifact_id, kind = excluded.kind, start_ms = excluded.start_ms, end_ms = excluded.end_ms, text = excluded.text, labels_json = excluded.labels_json, provider_key = excluded.provider_key, model_key = excluded.model_key, content_hash = excluded.content_hash, analysis_run_id = excluded.analysis_run_id, created_at = excluded.created_at`)
+          .run(fact.id, fact.workspaceId, fact.artifactId, fact.kind, fact.startMs, fact.endMs, fact.text, JSON.stringify(fact.labels), fact.providerKey, fact.modelKey ?? null, fact.contentHash, fact.analysisRunId ?? null, fact.createdAt);
         this.db.prepare("INSERT INTO media_analysis_fts(fact_id, workspace_id, artifact_id, kind, text, labels) VALUES (?, ?, ?, ?, ?, ?)")
           .run(fact.id, fact.workspaceId, fact.artifactId, fact.kind, fact.text, fact.labels.join(" "));
       }
@@ -830,17 +834,21 @@ export class SqliteCatalog {
   }
 
   getAnalysisFact(id: string): AnalysisFact | undefined {
-    const row = this.db.prepare(`SELECT id, workspace_id AS workspaceId, artifact_id AS artifactId, kind, start_ms AS startMs, end_ms AS endMs, text, labels_json AS labelsJson, provider_key AS providerKey, model_key AS modelKey, content_hash AS contentHash, created_at AS createdAt FROM media_analysis_facts WHERE id = ?`).get(id) as (Omit<AnalysisFact, "labels"> & { labelsJson: string }) | undefined;
+    const row = this.db.prepare(`SELECT id, workspace_id AS workspaceId, artifact_id AS artifactId, kind, start_ms AS startMs, end_ms AS endMs, text, labels_json AS labelsJson, provider_key AS providerKey, model_key AS modelKey, content_hash AS contentHash, analysis_run_id AS analysisRunId, created_at AS createdAt FROM media_analysis_facts WHERE id = ?`).get(id) as (Omit<AnalysisFact, "labels"> & { labelsJson: string }) | undefined;
     if (!row) return undefined;
-    return AnalysisFactSchema.parse({ schemaVersion: 1, id: row.id, workspaceId: row.workspaceId, artifactId: row.artifactId, kind: row.kind, startMs: row.startMs, endMs: row.endMs, text: row.text, labels: parseJson<string[]>(row.labelsJson, "analysis labels"), providerKey: row.providerKey, modelKey: row.modelKey ?? undefined, contentHash: row.contentHash, createdAt: row.createdAt });
+    return AnalysisFactSchema.parse({ schemaVersion: 1, id: row.id, workspaceId: row.workspaceId, artifactId: row.artifactId, kind: row.kind, startMs: row.startMs, endMs: row.endMs, text: row.text, labels: parseJson<string[]>(row.labelsJson, "analysis labels"), providerKey: row.providerKey, modelKey: row.modelKey ?? undefined, contentHash: row.contentHash, analysisRunId: row.analysisRunId ?? undefined, createdAt: row.createdAt });
   }
 
-  searchAnalysisFacts(input: { workspaceId: string; artifactId?: string; query?: string; kind?: AnalysisFact["kind"]; limit?: number }) {
+  searchAnalysisFacts(input: { workspaceId: string; artifactId?: string; analysisRunId?: string; query?: string; kind?: AnalysisFact["kind"]; limit?: number }) {
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
     const normalizedQuery = input.query?.trim() ?? "";
     const rows = normalizedQuery
-      ? this.db.prepare(`SELECT fact_id AS factId FROM media_analysis_fts WHERE media_analysis_fts MATCH ? AND workspace_id = ? LIMIT ?`).all(searchQueryForFts(normalizedQuery), input.workspaceId, limit * 4) as Array<{ factId: string }>
-      : this.db.prepare("SELECT id AS factId FROM media_analysis_facts WHERE workspace_id = ? ORDER BY created_at DESC, id LIMIT ?").all(input.workspaceId, limit * 4) as Array<{ factId: string }>;
+      ? input.analysisRunId
+        ? this.db.prepare(`SELECT media_analysis_fts.fact_id AS factId FROM media_analysis_fts JOIN media_analysis_facts AS facts ON facts.id = media_analysis_fts.fact_id WHERE media_analysis_fts MATCH ? AND media_analysis_fts.workspace_id = ? AND facts.analysis_run_id = ? LIMIT ?`).all(searchQueryForFts(normalizedQuery), input.workspaceId, input.analysisRunId, limit * 4) as Array<{ factId: string }>
+        : this.db.prepare(`SELECT fact_id AS factId FROM media_analysis_fts WHERE media_analysis_fts MATCH ? AND workspace_id = ? LIMIT ?`).all(searchQueryForFts(normalizedQuery), input.workspaceId, limit * 4) as Array<{ factId: string }>
+      : input.analysisRunId
+        ? this.db.prepare("SELECT id AS factId FROM media_analysis_facts WHERE workspace_id = ? AND analysis_run_id = ? ORDER BY created_at DESC, id LIMIT ?").all(input.workspaceId, input.analysisRunId, limit * 4) as Array<{ factId: string }>
+        : this.db.prepare("SELECT id AS factId FROM media_analysis_facts WHERE workspace_id = ? ORDER BY created_at DESC, id LIMIT ?").all(input.workspaceId, limit * 4) as Array<{ factId: string }>;
     const results: AnalysisFact[] = [];
     for (const row of rows) {
       const fact = this.getAnalysisFact(row.factId);
@@ -850,7 +858,9 @@ export class SqliteCatalog {
     }
     if (results.length === 0 && normalizedQuery) {
       const like = `%${normalizedQuery.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-      const fallbackRows = this.db.prepare("SELECT id AS factId FROM media_analysis_facts WHERE workspace_id = ? AND text LIKE ? ESCAPE '\\' ORDER BY start_ms, id LIMIT ?").all(input.workspaceId, like, limit) as Array<{ factId: string }>;
+      const fallbackRows = input.analysisRunId
+        ? this.db.prepare("SELECT id AS factId FROM media_analysis_facts WHERE workspace_id = ? AND analysis_run_id = ? AND text LIKE ? ESCAPE '\\' ORDER BY start_ms, id LIMIT ?").all(input.workspaceId, input.analysisRunId, like, limit) as Array<{ factId: string }>
+        : this.db.prepare("SELECT id AS factId FROM media_analysis_facts WHERE workspace_id = ? AND text LIKE ? ESCAPE '\\' ORDER BY start_ms, id LIMIT ?").all(input.workspaceId, like, limit) as Array<{ factId: string }>;
       for (const row of fallbackRows) {
         const fact = this.getAnalysisFact(row.factId);
         if (fact && (!input.artifactId || fact.artifactId === input.artifactId) && (!input.kind || fact.kind === input.kind)) results.push(fact);

@@ -1,7 +1,7 @@
 # V6 本地分析事实与素材检索
 
 日期：2026-08-14  
-状态：分析合同、whisper.cpp adapter、可选 faster-whisper Python sidecar、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作、本地分析 Job、分镜级候选召回、打包 utility worker 回写和质量评测合同 smoke 已完成；已补用户显式路径的真实 fixture 观察入口，产品质量门仍待人工 Gold
+状态：分析合同、whisper.cpp adapter、可选 faster-whisper Python sidecar、FFmpeg scene baseline、Apple Vision OCR adapter、SQLite FTS5、素材库显式分析动作、本地分析 Job、分镜级候选召回、打包 utility worker 回写、本地分析设置 IPC/设置页和质量评测合同 smoke 已完成；已补用户显式路径的真实 fixture 观察入口，产品质量门仍待人工 Gold
 
 ## 1. 选型决策
 
@@ -22,12 +22,12 @@
 - `TranscriptSegment`：有界的开始/结束时间、文本、语言和置信度；
 - `OcrCue`：时间码、文本、归一化 bbox 和置信度；
 - `ShotFact`：切点、转场类型、检测器和置信度；
-- `AnalysisFact`：workspace/artifact、事实种类、时间码、标签、provider/model、内容 hash 和创建时间；
+- `AnalysisFact`：workspace/artifact、事实种类、时间码、标签、provider/model、内容 hash、分析运行 ID 和创建时间；
 - `parseWhisperJson`：兼容 whisper.cpp 常见 `transcription / segments / offsets / timestamps` 变体；
 - `WhisperCppTranscriber`：通过 runner 执行 `whisper-cli`，解析 stdout 或 JSON 文件，失败后清理临时目录；
 - `transcriptFacts`：将 ASR 片段转成可持久化事实。
 
-SQLite schema v5 增加：
+SQLite schema v5 增加事实表；schema v11 增加 `analysis_run_id` 和按运行查询索引：
 
 - `media_analysis_facts`：事实唯一 ID、时间码和来源；
 - `media_analysis_fts`：FTS5 文本/标签索引；
@@ -53,14 +53,14 @@ npm run start:desktop       # packaged/dist 启动 smoke，手动终止
 npm run test:analysis:recovery # worker 崩溃、重启恢复、stale lease、重试和取消
 ```
 
-当前测试覆盖（本次变更后 11 files / 71 tests）：
+当前测试覆盖（本次变更后 13 files / 81 tests）：
 
 - whisper.cpp timestamp 字符串、秒和毫秒变体；
 - transcript → AnalysisFact；
 - ffmpeg `showinfo` 时间点 → bounded `ShotFact` → searchable `AnalysisFact`；
 - macOS Vision OCR cue → searchable `AnalysisFact`，不改写 OCR 原文；
 - runner 可替换、临时目录清理；
-- schema v5 迁移；
+- schema v5/v11 迁移、运行 ID 隔离和按运行过滤；
 - FTS5 写入、查询、kind 过滤、重启后查询；
 - 合成中文质量夹具的 6 项 gate 通过与失败诊断；
 - 分镜级素材候选召回：中文事实匹配、时间码 evidence、稳定排序和未分析素材排除；
@@ -71,6 +71,12 @@ npm run test:analysis:recovery # worker 崩溃、重启恢复、stale lease、�
 - `npm run test:analysis:recovery` 已覆盖 worker 崩溃后重启回收、旧 token 拒绝、失败重试 attempt 递增、成功终态清理 lease，以及用户取消；该 smoke 不调用模型、不产生 Provider 费用。
 - `rankAssetCandidates` 已将每个分镜的动作/脚本文本与本地事实做可解释的词面召回，按事实命中、偏好事实类型和时长适配排序；AI 粗剪页展示候选路径、置信度、时间码证据和“打开预览”。用户明确点击“作为 Take”后，桌面端会校验素材仍在当前工作区、创建或复用 Take、记录候选理由/证据和建议片段，并调用现有选择逻辑；候选不会自动替换 Take 或冻结时间线。
 
+本轮还增加了 `LocalAnalysisSettingsSchema`：引擎、模型/运行时路径、语言、设备、计算类型和 OCR 抽帧间隔均拒绝未知字段与无效值；`workerAnalysisSettings` 只启用用户选择的 adapter，避免设置页把两个 ASR 同时送入 worker。
+
+Electron 设置页通过 typed preload 提供读取、保存和原生文件选择器；保存采用 userData 临时文件 + 原子 rename，损坏设置会回退到环境变量/默认配置并返回 warning，不阻塞素材导入。打包 settings smoke 已验证设置页渲染、保存、重新读取以及 FFmpeg 基础能力状态。
+
+分析 Job 的 `inputHash`、幂等键和 Job ID 都包含 effective worker settings fingerprint（包括配置路径的 best-effort 文件 stat）；每次成功运行把 `job.id + attempt` 组成的 `analysisRunId` 写入事实 ID、Job checkpoint 和当前素材检索过滤，因此重试、切换 ASR/OCR 配置后不会错误复用或混入旧事实。旧运行仍保留在 catalog，可按 `analysisRunId` 追溯；旧版没有运行 ID 的事实只作为兼容 fallback。取消动作会定位当前素材最新的运行中 Job。
+
 质量评测报告现在返回 6 个机器可读的 gate result 和失败诊断，不再只有 `passed: boolean`；这让 CI、桌面状态和人工 Gold 评审可以指出具体是 CER、分段召回、时间码、OCR precision/recall 还是 bbox IoU 未达标。
 
 本机真实 smoke（2026-08-14）：
@@ -78,12 +84,13 @@ npm run test:analysis:recovery # worker 崩溃、重启恢复、stale lease、�
 - `/opt/homebrew/bin/ffmpeg` 抽取 1 秒视频帧；
 - `swift apps/desktop/sidecars/apple-vision-ocr.swift` 返回测试画面文字、置信度和 bbox；
 - 这只证明 macOS runtime/脚本边界可运行，不代表中文口播字幕的识别率、花字去重或跨平台可用性已验收。
+- OCR calibration wrapper 会记录 source SHA、运行模态、费用为 0 和 `formalAcceptance=false`，输出脱敏后的机器可读报告；不会把用户本地绝对路径或密钥写进报告。
 - `scripts/analysis-quality-local-smoke.mjs` 已把 e-cut 内部获授权的 `source.mp4 + aligned.json` 接入本项目质量合同；默认 observational，不把内部对齐标注冒充盲法 Gold，也不把本次结果写成产品准确率。
 - OCR 事实在写入素材库前会按标准化文本和相邻时间窗合并持续花字；否则每秒抽帧会制造重复标签，破坏搜索和账号拆解统计。
 
 ## 4. 仍未声称完成的能力
 
-- 本机已有 faster-whisper small 缓存并通过离线 sidecar smoke，但没有真值字幕和质量报告前，不声称中文 ASR 已达标；
+- 本机已有 faster-whisper small 缓存并通过离线 sidecar smoke；桌面 worker 强制 `HF_HUB_OFFLINE=1`，但没有真值字幕和质量报告前，不声称中文 ASR 已达标；
 - Vision OCR adapter 可运行不等于中文 OCR 质量已验收；需要真实画面 fixture、准确率、重复文本合并和内存峰值评测；
 - FFmpeg scene baseline 只代表粗切时间事实，不声称已经完成语义镜头拆解或视觉理解；
 - FTS5 不是语义向量检索，素材量超过约 300 个镜头后再评估向量 adapter；

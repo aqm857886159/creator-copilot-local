@@ -1,7 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, shell, utilityProcess } = require("electron");
 const { createHash, randomUUID } = require("node:crypto");
 const { existsSync, mkdirSync, mkdtempSync, realpathSync } = require("node:fs");
-const { mkdir: makeDirectory, readFile, rm: removeFile, stat: statFile, writeFile } = require("node:fs/promises");
+const { mkdir: makeDirectory, readFile, rename, rm: removeFile, stat: statFile, writeFile } = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -15,6 +15,155 @@ const pendingTopicRadarQuotes = new Map();
 const pendingAccountMetricsQuotes = new Map();
 const pendingAccountAnalysisQuotes = new Map();
 const activeAnalysisWorkers = new Map();
+
+function localAnalysisSettingsPath() {
+  return path.join(app.getPath("userData"), "local-analysis-settings.json");
+}
+
+function desktopSidecarPath(fileName) {
+  const candidates = [
+    path.join(process.resourcesPath, "app.asar.unpacked", "apps", "desktop", "sidecars", fileName),
+    path.join(__dirname, "sidecars", fileName),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
+function portableAbsolutePath(value) {
+  return typeof value === "string" && (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\")) ? value : undefined;
+}
+
+function boundedAnalysisInterval(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 250 && parsed <= 30_000 ? parsed : 1_000;
+}
+
+function defaultEnvironmentAnalysisSettings(runtime) {
+  const whisperModelPath = portableAbsolutePath(process.env.WHISPER_MODEL_PATH);
+  const fasterWhisperModelPath = portableAbsolutePath(process.env.FASTER_WHISPER_MODEL);
+  const fasterWhisperPythonPath = portableAbsolutePath(process.env.FASTER_WHISPER_PYTHON);
+  const fasterWhisperScriptPath = portableAbsolutePath(process.env.FASTER_WHISPER_SCRIPT) ?? desktopSidecarPath("faster-whisper-sidecar.py");
+  const visionScriptPath = process.env.APPLE_VISION_OCR_SCRIPT === "" ? undefined : portableAbsolutePath(process.env.APPLE_VISION_OCR_SCRIPT) ?? desktopSidecarPath("apple-vision-ocr.swift");
+  const asr = whisperModelPath
+    ? { engine: "whisper.cpp", modelPath: whisperModelPath, binaryPath: portableAbsolutePath(process.env.WHISPER_BINARY_PATH), language: process.env.ASR_LANGUAGE ?? "zh", device: "cpu", computeType: "int8" }
+    : fasterWhisperModelPath && fasterWhisperPythonPath
+      ? { engine: "faster-whisper", modelPath: fasterWhisperModelPath, pythonPath: fasterWhisperPythonPath, scriptPath: fasterWhisperScriptPath, language: process.env.ASR_LANGUAGE ?? "zh", device: process.env.FASTER_WHISPER_DEVICE ?? "cpu", computeType: process.env.FASTER_WHISPER_COMPUTE_TYPE ?? "int8" }
+      : { engine: "disabled", language: process.env.ASR_LANGUAGE ?? "zh", device: "cpu", computeType: "int8" };
+  const ocr = process.platform === "darwin" && visionScriptPath
+    ? { engine: "apple-vision", scriptPath: visionScriptPath, binaryPath: portableAbsolutePath(process.env.APPLE_VISION_OCR_BINARY), sampleIntervalMs: boundedAnalysisInterval(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1_000) }
+    : { engine: "disabled", sampleIntervalMs: 1_000 };
+  return runtime.analysis.LocalAnalysisSettingsSchema.parse({ schemaVersion: 1, asr, ocr, updatedAt: new Date().toISOString() });
+}
+
+function validateLocalAnalysisPaths(settings) {
+  const paths = [
+    ["ASR 模型", settings.asr.modelPath],
+    ["ASR 二进制", settings.asr.binaryPath],
+    ["ASR Python", settings.asr.pythonPath],
+    ["ASR sidecar", settings.asr.scriptPath],
+    ["OCR sidecar", settings.ocr.scriptPath],
+    ["OCR 二进制", settings.ocr.binaryPath],
+  ];
+  for (const [label, value] of paths) {
+    if (value === undefined) continue;
+    if (!path.isAbsolute(value) || value.includes("\0")) throw new Error(`${label}必须是绝对路径`);
+  }
+}
+
+async function readLocalAnalysisSettings(runtime) {
+  const filePath = localAnalysisSettingsPath();
+  if (!existsSync(filePath)) return { settings: defaultEnvironmentAnalysisSettings(runtime), source: "environment" };
+  try {
+    const parsed = runtime.analysis.parseLocalAnalysisSettings(JSON.parse(await readFile(filePath, "utf8")));
+    validateLocalAnalysisPaths(parsed);
+    return { settings: parsed, source: "saved" };
+  } catch (error) {
+    return { settings: defaultEnvironmentAnalysisSettings(runtime), source: "environment", warning: error instanceof Error ? `已忽略损坏的本地分析设置：${error.message}` : "已忽略损坏的本地分析设置" };
+  }
+}
+
+async function saveLocalAnalysisSettings(runtime, input) {
+  const settings = runtime.analysis.parseLocalAnalysisSettings(input);
+  validateLocalAnalysisPaths(settings);
+  const filePath = localAnalysisSettingsPath();
+  const directory = path.dirname(filePath);
+  await makeDirectory(directory, { recursive: true });
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(temporaryPath, filePath);
+  } finally {
+    await removeFile(temporaryPath, { force: true }).catch(() => undefined);
+  }
+  return settings;
+}
+
+function pathState(label, value, options = {}) {
+  const errors = [];
+  if (!value) errors.push(`${label}未配置`);
+  else if (!existsSync(value)) errors.push(`${label}不存在`);
+  else {
+    try {
+      const info = require("node:fs").statSync(value);
+      if (options.directory && !info.isDirectory()) errors.push(`${label}不是目录`);
+      if (!options.directory && !info.isFile()) errors.push(`${label}不是文件`);
+    } catch (error) {
+      errors.push(`${label}不可读取`);
+    }
+  }
+  return errors;
+}
+
+function localAnalysisCapabilities(runtime, settings) {
+  const asrErrors = settings.asr.engine === "disabled" ? [] : settings.asr.engine === "whisper.cpp"
+    ? [...pathState("ASR 模型", settings.asr.modelPath), ...(settings.asr.binaryPath ? pathState("ASR 二进制", settings.asr.binaryPath) : [])]
+    : [...pathState("ASR 模型目录", settings.asr.modelPath, { directory: true }), ...pathState("Python", settings.asr.pythonPath), ...pathState("ASR sidecar", settings.asr.scriptPath)];
+  const ocrErrors = settings.ocr.engine === "disabled" ? [] : process.platform !== "darwin"
+    ? ["Apple Vision OCR 仅支持 macOS"]
+    : [...pathState("OCR sidecar", settings.ocr.scriptPath), ...(settings.ocr.binaryPath ? pathState("OCR 二进制", settings.ocr.binaryPath) : [])];
+  return {
+    asr: { engine: settings.asr.engine, configured: settings.asr.engine !== "disabled", ready: settings.asr.engine !== "disabled" && asrErrors.length === 0, label: settings.asr.engine === "disabled" ? "未启用" : settings.asr.engine === "whisper.cpp" ? "whisper.cpp" : "faster-whisper", pathLabel: settings.asr.modelPath ? path.basename(settings.asr.modelPath) : undefined, errors: asrErrors },
+    ocr: { engine: settings.ocr.engine, configured: settings.ocr.engine !== "disabled", ready: settings.ocr.engine !== "disabled" && ocrErrors.length === 0, label: settings.ocr.engine === "disabled" ? "未启用" : "Apple Vision", pathLabel: settings.ocr.scriptPath ? path.basename(settings.ocr.scriptPath) : undefined, errors: ocrErrors },
+    sceneDetection: { ready: true, label: "FFmpeg 镜头检测" },
+  };
+}
+
+async function activeAnalysisWorkerSettings(runtime) {
+  const loaded = await readLocalAnalysisSettings(runtime);
+  return { ...runtime.analysis.workerAnalysisSettings(loaded.settings), source: loaded.source, warning: loaded.warning };
+}
+
+function analysisConfigFingerprint(config) {
+  const { source: _source, warning: _warning, ...workerConfig } = config;
+  const runtimeSnapshot = Object.fromEntries(Object.entries(workerConfig).map(([key, value]) => {
+    if (typeof value !== "string" || !/(Path|Script|Binary|Model|Python)/i.test(key)) return [key, value];
+    try {
+      const stat = require("node:fs").statSync(value);
+      return [key, { value, size: stat.size, mtimeMs: stat.mtimeMs, isDirectory: stat.isDirectory() }];
+    } catch {
+      return [key, { value, missing: true }];
+    }
+  }));
+  return createHash("sha256").update(JSON.stringify({ pipeline: "analysis-v2", runtimeSnapshot })).digest("hex").slice(0, 16);
+}
+
+function latestAnalysisRunId(workspace, artifactId) {
+  const job = workspace.catalog.listJobsForWorkspace(workspace.workspaceId, "media.analysis")
+    .filter((job) => job.state === "succeeded" && job.artifactIds.includes(artifactId))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id))[0];
+  if (!job) return undefined;
+  return job.checkpoint && typeof job.checkpoint === "object" && typeof job.checkpoint.analysisRunId === "string" ? job.checkpoint.analysisRunId : job.id;
+}
+
+function searchCurrentAnalysisFacts(workspace, input) {
+  const runId = input.artifactId ? latestAnalysisRunId(workspace, input.artifactId) : undefined;
+  if (runId) {
+    const current = workspace.catalog.searchAnalysisFacts({ ...input, analysisRunId: runId });
+    if (current.length > 0) return current;
+    const hasCurrentFacts = workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, artifactId: input.artifactId, analysisRunId: runId, limit: 1 }).length > 0;
+    if (hasCurrentFacts) return [];
+  }
+  return workspace.catalog.searchAnalysisFacts(input);
+}
 
 async function getDesktopRuntime() {
   if (!desktopRuntimePromise) {
@@ -90,7 +239,7 @@ function buildAssetCandidateSuggestions({ workspace, runtime, script, storyboard
       relativePath: artifact.relativePath,
       contentHash: artifact.contentHash,
       durationMs: durationByAssetId.get(artifact.artifactId),
-      facts: workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, limit: 100 }).map((fact) => ({ id: fact.id, kind: fact.kind, startMs: fact.startMs, endMs: fact.endMs, text: fact.text, labels: fact.labels })),
+      facts: searchCurrentAnalysisFacts(workspace, { workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, limit: 100 }).map((fact) => ({ id: fact.id, kind: fact.kind, startMs: fact.startMs, endMs: fact.endMs, text: fact.text, labels: fact.labels })),
     }));
   const queries = storyboard.shots.map((shot) => {
     const task = taskByShot.get(shot.id);
@@ -274,10 +423,11 @@ function analysisWorkerScriptPath() {
 function runAnalysisWorker(payload) {
   if (!utilityProcess || typeof utilityProcess.fork !== "function") throw new Error("当前 Electron 不支持 utility process");
   const workerPath = analysisWorkerScriptPath();
+  const workerEnv = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)/i.test(key))), HF_HUB_OFFLINE: "1" };
   return new Promise((resolve, reject) => {
     const requestId = randomUUID();
     const workerKey = typeof payload?.jobId === "string" && payload.jobId ? payload.jobId : requestId;
-    const worker = utilityProcess.fork(workerPath);
+    const worker = utilityProcess.fork(workerPath, [], { env: workerEnv, serviceName: "creator-copilot-analysis" });
     let settled = false;
     const timeout = setTimeout(() => {
       if (settled) return;
@@ -322,17 +472,19 @@ function cancelAnalysisWorker(jobId) {
 }
 
 async function analyzeLocalArtifact({ workspace, runtime, artifact }) {
-  const inputHash = `sha256:${createHash("sha256").update(JSON.stringify({ artifactId: artifact.artifactId, contentHash: artifact.contentHash, pipeline: "analysis-v1" })).digest("hex")}`;
-  const jobId = `analysis-${artifact.artifactId}`;
+  const analysisConfig = await activeAnalysisWorkerSettings(runtime);
+  const settingsFingerprint = analysisConfigFingerprint(analysisConfig);
+  const inputHash = `sha256:${createHash("sha256").update(JSON.stringify({ artifactId: artifact.artifactId, contentHash: artifact.contentHash, pipeline: "analysis-v2", settingsFingerprint })).digest("hex")}`;
+  const jobId = `analysis-${artifact.artifactId}-${settingsFingerprint}`;
   const now = new Date();
   workspace.catalog.recoverExpiredLeases(now);
   let job = workspace.catalog.getJob(jobId);
   if (!job) {
     const timestamp = now.toISOString();
-    workspace.catalog.insertJob({ schemaVersion: 1, id: jobId, kind: "media.analysis", inputHash, state: "queued", attempt: 0, idempotencyKey: `analysis-${artifact.artifactId}-${artifact.contentHash}`, idempotencyScope: workspace.workspaceId, providerKey: "local", artifactIds: [artifact.artifactId], correlationId: `analysis-run-${randomUUID()}`, createdAt: timestamp, updatedAt: timestamp });
+    workspace.catalog.insertJob({ schemaVersion: 1, id: jobId, kind: "media.analysis", inputHash, state: "queued", attempt: 0, idempotencyKey: `analysis-${artifact.artifactId}-${artifact.contentHash}-${settingsFingerprint}`, idempotencyScope: workspace.workspaceId, providerKey: "local", artifactIds: [artifact.artifactId], correlationId: `analysis-run-${randomUUID()}`, createdAt: timestamp, updatedAt: timestamp });
     job = workspace.catalog.getJob(jobId);
   } else if (job.state === "succeeded") {
-    return { ok: true, status: "succeeded", reused: true, job, facts: workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, limit: 100 }) };
+    return { ok: true, status: "succeeded", reused: true, job, facts: searchCurrentAnalysisFacts(workspace, { workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, analysisRunId: job.id, limit: 100 }) };
   } else if (["claimed", "running"].includes(job.state)) {
     return { ok: false, status: "running", job, message: "这段素材正在分析，请等待当前任务完成。" };
   } else if (["failed", "timed_out"].includes(job.state)) {
@@ -349,6 +501,8 @@ async function analyzeLocalArtifact({ workspace, runtime, artifact }) {
   if (!leaseToken) return { ok: false, status: "running", job: workspace.catalog.getJob(job.id), message: "分析任务正在运行或暂时无法取得租约。" };
   if (!workspace.catalog.heartbeatJob(job.id, "analysis-main", leaseToken, new Date(), 120_000)) return { ok: false, status: "needs_attention", job: workspace.catalog.getJob(job.id), message: "分析任务租约已失效，请稍后重试。" };
   try {
+    const claimedJob = workspace.catalog.getJob(job.id) ?? job;
+    const analysisRunId = `${job.id}-attempt-${claimedJob.attempt}`;
     const absolutePath = path.resolve(workspace.workspacePath, artifact.relativePath);
     const root = realpathSync(workspace.workspacePath);
     if (!existsSync(absolutePath)) throw new Error("本地素材文件不存在");
@@ -358,9 +512,9 @@ async function analyzeLocalArtifact({ workspace, runtime, artifact }) {
     const durationMs = probe.durationMs;
     if (!durationMs || durationMs <= 0) throw new Error("素材没有可用时长");
     const createdAt = new Date().toISOString();
-    const workerResult = await runAnalysisWorker({ jobId: job.id, sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, whisperModelPath: process.env.WHISPER_MODEL_PATH, whisperBinaryPath: process.env.WHISPER_BINARY_PATH, fasterWhisperModelPath: process.env.FASTER_WHISPER_MODEL, fasterWhisperPythonPath: process.env.FASTER_WHISPER_PYTHON, fasterWhisperScriptPath: process.env.FASTER_WHISPER_SCRIPT ?? path.join(__dirname, "sidecars", "faster-whisper-sidecar.py"), fasterWhisperDevice: process.env.FASTER_WHISPER_DEVICE, fasterWhisperComputeType: process.env.FASTER_WHISPER_COMPUTE_TYPE, visionScriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(__dirname, "sidecars", "apple-vision-ocr.swift"), visionBinaryPath: process.env.APPLE_VISION_OCR_BINARY, visionSampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) });
+    const workerResult = await runAnalysisWorker({ jobId: job.id, analysisRunId, sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, ...analysisConfig });
     workspace.catalog.saveAnalysisFacts(workerResult.facts);
-    if (!workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: workerResult.shotCount, factIds: workerResult.facts.map((fact) => fact.id), asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus } })) throw new Error("分析任务完成状态未能持久化");
+    if (!workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { analysisRunId, settingsFingerprint, shotCount: workerResult.shotCount, factIds: workerResult.facts.map((fact) => fact.id), asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus } })) throw new Error("分析任务完成状态未能持久化");
     return { ok: true, status: "succeeded", reused: false, job: workspace.catalog.getJob(job.id), facts: workerResult.facts, summary: workerResult.summary, asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus };
   } catch (error) {
     const message = error instanceof Error ? error.message : "本地媒体分析失败";
@@ -535,6 +689,45 @@ ipcMain.handle("desktop:get-info", () => ({
   workspacePath: selectedWorkspacePath,
 }));
 
+ipcMain.handle("desktop:get-local-analysis-settings", async () => {
+  try {
+    const runtime = await getDesktopRuntime();
+    const loaded = await readLocalAnalysisSettings(runtime);
+    return { ok: true, source: loaded.source, settings: loaded.settings, capabilities: localAnalysisCapabilities(runtime, loaded.settings), message: loaded.warning };
+  } catch (error) {
+    return { ok: false, errorCode: "local_analysis_settings_read_failed", message: error instanceof Error ? error.message : "无法读取本地分析设置" };
+  }
+});
+
+ipcMain.handle("desktop:save-local-analysis-settings", async (_event, raw) => {
+  try {
+    const runtime = await getDesktopRuntime();
+    const settings = await saveLocalAnalysisSettings(runtime, raw);
+    return { ok: true, source: "saved", settings, capabilities: localAnalysisCapabilities(runtime, settings) };
+  } catch (error) {
+    return { ok: false, errorCode: "local_analysis_settings_save_failed", message: error instanceof Error ? error.message : "无法保存本地分析设置" };
+  }
+});
+
+ipcMain.handle("desktop:choose-analysis-path", async (_event, raw) => {
+  try {
+    const kind = typeof raw?.kind === "string" ? raw.kind : "";
+    const engine = typeof raw?.engine === "string" ? raw.engine : undefined;
+    const supportedKinds = new Set(["asr-model", "asr-binary", "asr-python", "asr-script", "ocr-script", "ocr-binary"]);
+    if (!supportedKinds.has(kind)) throw new Error("本地分析路径类型无效");
+    const directoryKinds = new Set(["asr-model"]);
+    const properties = directoryKinds.has(kind) && engine === "faster-whisper" ? ["openDirectory"] : ["openFile"];
+    const filters = kind.includes("model") ? [{ name: "模型文件", extensions: ["bin", "gguf", "ggml", "safetensors"] }] : undefined;
+    const result = await dialog.showOpenDialog({ properties, filters, title: "选择本地分析文件或目录" });
+    if (result.canceled || result.filePaths.length === 0) return { ok: true, canceled: true };
+    const selected = result.filePaths[0];
+    validateLocalAnalysisPaths({ asr: { modelPath: kind.startsWith("asr-") ? selected : undefined, binaryPath: undefined, pythonPath: undefined, scriptPath: undefined }, ocr: { scriptPath: kind.startsWith("ocr-") ? selected : undefined, binaryPath: undefined } });
+    return { ok: true, canceled: false, path: selected };
+  } catch (error) {
+    return { ok: false, errorCode: "local_analysis_path_choose_failed", message: error instanceof Error ? error.message : "无法选择本地分析路径" };
+  }
+});
+
 ipcMain.handle("desktop:choose-workspace", async () => {
   const result = await dialog.showOpenDialog({
     properties: ["openDirectory", "createDirectory"],
@@ -630,8 +823,10 @@ ipcMain.handle("desktop:cancel-analysis", async (_event, raw) => {
     if (!raw || typeof raw.artifactId !== "string" || !raw.artifactId.trim()) throw new Error("取消分析参数无效");
     const artifact = workspace.catalog.getArtifact(raw.artifactId.trim());
     if (!artifact || artifact.workspaceId !== workspace.workspaceId) throw new Error("素材不存在或不属于当前工作区");
-    const jobId = `analysis-${artifact.artifactId}`;
-    const job = workspace.catalog.getJob(jobId);
+    const job = workspace.catalog.listJobsForWorkspace(workspace.workspaceId, "media.analysis")
+      .filter((candidate) => candidate.artifactIds.includes(artifact.artifactId))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    const jobId = job?.id;
     if (!job || !["claimed", "running"].includes(job.state)) return { ok: false, status: job?.state ?? "not_found", message: "这段素材当前没有正在运行的分析任务。" };
     const cancelled = cancelAnalysisWorker(jobId);
     return { ok: cancelled, status: cancelled ? "cancelling" : job.state, message: cancelled ? "已请求取消分析，正在清理 worker。" : "分析 worker 已结束或不属于当前窗口。" };
@@ -645,7 +840,7 @@ ipcMain.handle("desktop:search-assets", async (_event, rawQuery) => {
     const workspace = requireWorkspace();
     const query = typeof rawQuery === "string" ? rawQuery.trim() : "";
     const artifacts = workspace.catalog.listArtifacts(workspace.workspaceId);
-    const facts = workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, query, limit: 50 });
+    const facts = artifacts.flatMap((artifact) => searchCurrentAnalysisFacts(workspace, { workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, query, limit: 50 })).slice(0, 50);
     const matchingArtifactIds = new Set(facts.map((fact) => fact.artifactId));
     const visibleArtifacts = query ? artifacts.filter((artifact) => matchingArtifactIds.has(artifact.artifactId) || `${artifact.relativePath} ${artifact.kind} ${artifact.mimeType}`.toLowerCase().includes(query.toLowerCase())) : artifacts;
     const visibleArtifactIds = new Set(visibleArtifacts.map((artifact) => artifact.artifactId));
@@ -820,6 +1015,8 @@ ipcMain.handle("desktop:run-topic-radar", async (_event, rawQuoteId) => {
         continue;
       }
       try {
+        const claimedJob = workspace.catalog.getJob(job.id) ?? job;
+        const analysisRunId = `${job.id}-attempt-${claimedJob.attempt}`;
         let result;
         if (source === "search_hot") result = { search: await connector.fetchSearchHotList({ page: 1, pageSize: pending.quote.query.pageSize, dateWindow: pending.quote.query.dateWindow, keyword: pending.quote.query.keyword }) };
         else result = { billboard: await connector.fetchBillboardPosts({ kind: source, page: 1, pageSize: pending.quote.query.pageSize, dateWindow: pending.quote.query.dateWindow, keyword: pending.quote.query.keyword }) };
@@ -947,6 +1144,8 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
     const selected = report.videos.filter((video) => awemeIds.includes(video.awemeId));
     if (selected.length !== awemeIds.length) throw new Error("选择的作品不在当前研究报告中");
     const runtime = await getDesktopRuntime();
+    const analysisConfig = await activeAnalysisWorkerSettings(runtime);
+    const settingsFingerprint = analysisConfigFingerprint(analysisConfig);
     const updates = [];
     const factSummaries = [];
     const failed = [];
@@ -958,16 +1157,16 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         failed.push({ awemeId: video.awemeId, message: "作品尚未本地化，无法开始分析" });
         continue;
       }
-      const inputHash = `sha256:${createHash("sha256").update(JSON.stringify({ artifactId: artifact.artifactId, contentHash: artifact.contentHash, pipeline: "analysis-v1" })).digest("hex")}`;
-      const jobId = `analysis-${artifact.artifactId}`;
+      const inputHash = `sha256:${createHash("sha256").update(JSON.stringify({ artifactId: artifact.artifactId, contentHash: artifact.contentHash, pipeline: "analysis-v2", settingsFingerprint })).digest("hex")}`;
+      const jobId = `analysis-${artifact.artifactId}-${settingsFingerprint}`;
       const now = new Date();
       let job = workspace.catalog.getJob(jobId);
       if (!job) {
         const timestamp = now.toISOString();
-        workspace.catalog.insertJob({ schemaVersion: 1, id: jobId, kind: "media.analysis", inputHash, state: "queued", attempt: 0, idempotencyKey: `analysis-${artifact.artifactId}-${artifact.contentHash}`, idempotencyScope: workspace.workspaceId, providerKey: "local", artifactIds: [artifact.artifactId], correlationId: randomUUID(), createdAt: timestamp, updatedAt: timestamp });
+        workspace.catalog.insertJob({ schemaVersion: 1, id: jobId, kind: "media.analysis", inputHash, state: "queued", attempt: 0, idempotencyKey: `analysis-${artifact.artifactId}-${artifact.contentHash}-${settingsFingerprint}`, idempotencyScope: workspace.workspaceId, providerKey: "local", artifactIds: [artifact.artifactId], correlationId: randomUUID(), createdAt: timestamp, updatedAt: timestamp });
         job = workspace.catalog.getJob(jobId);
       } else if (job.state === "succeeded") {
-        const reusedFacts = workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, limit: 100 });
+        const reusedFacts = searchCurrentAnalysisFacts(workspace, { workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, analysisRunId: job.id, limit: 100 });
         updates.push({ awemeId: video.awemeId, status: video.mediaAnalysisStatus === "completed" ? "completed" : "partial", factIds: reusedFacts.map((fact) => fact.id), facts: reusedFacts, summary: "已复用已完成的本地分析任务。", analyzedAt: now.toISOString() });
         factSummaries.push({ awemeId: video.awemeId, artifactIds: video.artifactIds, facts: reusedFacts, analyzedAt: now.toISOString() });
         jobs.push({ id: job.id, state: job.state, reused: true });
@@ -999,9 +1198,9 @@ ipcMain.handle("desktop:analyze-research-media", async (_event, raw) => {
         const durationMs = probe.durationMs ?? video.durationMs;
         if (!durationMs || durationMs <= 0) throw new Error("素材没有可用时长");
         const createdAt = new Date().toISOString();
-        const workerResult = await runAnalysisWorker({ jobId: job.id, sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, whisperModelPath: process.env.WHISPER_MODEL_PATH, whisperBinaryPath: process.env.WHISPER_BINARY_PATH, fasterWhisperModelPath: process.env.FASTER_WHISPER_MODEL, fasterWhisperPythonPath: process.env.FASTER_WHISPER_PYTHON, fasterWhisperScriptPath: process.env.FASTER_WHISPER_SCRIPT ?? path.join(__dirname, "sidecars", "faster-whisper-sidecar.py"), fasterWhisperDevice: process.env.FASTER_WHISPER_DEVICE, fasterWhisperComputeType: process.env.FASTER_WHISPER_COMPUTE_TYPE, visionScriptPath: process.env.APPLE_VISION_OCR_SCRIPT ?? path.join(__dirname, "sidecars", "apple-vision-ocr.swift"), visionBinaryPath: process.env.APPLE_VISION_OCR_BINARY, visionSampleIntervalMs: Number(process.env.APPLE_VISION_OCR_INTERVAL_MS ?? 1000) });
+        const workerResult = await runAnalysisWorker({ jobId: job.id, analysisRunId, sourcePath: canonicalPath, durationMs, workspaceId: workspace.workspaceId, artifactId: artifact.artifactId, contentHash: artifact.contentHash, createdAt, ...analysisConfig });
         workspace.catalog.saveAnalysisFacts(workerResult.facts);
-        workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { shotCount: workerResult.shotCount, factIds: workerResult.facts.map((fact) => fact.id), asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus } });
+        workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: [artifact.artifactId], checkpoint: { analysisRunId, settingsFingerprint, shotCount: workerResult.shotCount, factIds: workerResult.facts.map((fact) => fact.id), asrStatus: workerResult.asrStatus, ocrStatus: workerResult.ocrStatus } });
         updates.push({ awemeId: video.awemeId, status: workerResult.asrReady && workerResult.ocrReady ? "completed" : "partial", factIds: workerResult.facts.map((fact) => fact.id), facts: workerResult.facts, summary: workerResult.summary, analyzedAt: createdAt });
         factSummaries.push({ awemeId: video.awemeId, artifactIds: video.artifactIds, facts: workerResult.facts, analyzedAt: createdAt });
         jobs.push({ id: job.id, state: "succeeded", factCount: workerResult.facts.length });
@@ -1154,7 +1353,7 @@ ipcMain.handle("desktop:propose-edit", async (_event, request) => {
         const artifact = workspace.catalog.getArtifact(take.assetId);
         if (artifact) {
           assetFacts[take.assetId] = { contentHash: artifact.contentHash, durationMs: take.durationMs };
-          analysisFactsByAsset[take.assetId] = workspace.catalog.searchAnalysisFacts({ workspaceId: workspace.workspaceId, artifactId: take.assetId, limit: 100 });
+          analysisFactsByAsset[take.assetId] = searchCurrentAnalysisFacts(workspace, { workspaceId: workspace.workspaceId, artifactId: take.assetId, limit: 100 });
         }
       }
     }
@@ -1798,6 +1997,11 @@ ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
 
 app.whenReady().then(() => {
   const start = async () => {
+    if (process.argv.includes("--settings-smoke")) {
+      const smokeUserData = process.env.SETTINGS_SMOKE_USER_DATA;
+      if (!smokeUserData) throw new Error("SETTINGS_SMOKE_USER_DATA 未配置");
+      app.setPath("userData", smokeUserData);
+    }
     if (process.argv.includes("--ui-smoke") || process.argv.includes("--topic-library-smoke") || process.argv.includes("--media-import-smoke")) {
       const smokeWorkspace = process.env.UI_SMOKE_WORKSPACE ?? process.env.MEDIA_IMPORT_SMOKE_WORKSPACE;
       if (!smokeWorkspace) throw new Error("UI_SMOKE_WORKSPACE 未配置");
@@ -1881,6 +2085,37 @@ app.whenReady().then(() => {
         app.exit(0);
       } catch (error) {
         console.error(JSON.stringify({ ok: false, smoke: "media-import-job-idempotency", message: error instanceof Error ? error.message : "媒体导入 Job smoke 失败" }));
+        app.exit(1);
+      }
+    });
+  }
+  if (process.argv.includes("--settings-smoke")) {
+    window.webContents.once("did-finish-load", async () => {
+      try {
+        const result = await window.webContents.executeJavaScript(`(async () => {
+          const buttons = [...document.querySelectorAll("button")];
+          const settingsButton = buttons.find((button) => button.textContent?.includes("设置"));
+          if (!settingsButton) throw new Error("设置 smoke 找不到设置入口");
+          settingsButton.click();
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          if (!document.querySelector(".settings-workbench")) throw new Error("设置 smoke 没有渲染设置工作台");
+          const first = await window.desktop.getLocalAnalysisSettings();
+          if (!first?.ok || !first.settings) throw new Error("设置 smoke 无法读取本地分析设置");
+          const next = { ...first.settings, asr: { ...first.settings.asr, engine: "disabled" }, ocr: { ...first.settings.ocr, engine: "disabled", sampleIntervalMs: 1250 }, updatedAt: new Date().toISOString() };
+          const invalid = await window.desktop.saveLocalAnalysisSettings({ ...next, asr: { ...next.asr, modelPath: "relative/model.bin" } });
+          if (invalid?.ok !== false) throw new Error("设置 smoke 没有拒绝相对模型路径");
+          const saved = await window.desktop.saveLocalAnalysisSettings(next);
+          if (!saved?.ok || saved.settings?.ocr?.sampleIntervalMs !== 1250) throw new Error("设置 smoke 保存结果不正确");
+          const reopened = await window.desktop.getLocalAnalysisSettings();
+          if (!reopened?.ok || reopened.settings?.ocr?.sampleIntervalMs !== 1250 || reopened.settings?.asr?.engine !== "disabled" || reopened.settings?.ocr?.engine !== "disabled") throw new Error("设置 smoke 重读结果不正确");
+          if (first.source !== "environment") throw new Error("设置 smoke 来源不正确：" + (first.source ?? "unknown"));
+          return { ok: true, source: first.source, reopenedSource: reopened.source, persistedIntervalMs: reopened.settings.ocr.sampleIntervalMs, asrEngine: reopened.settings.asr.engine, ocrEngine: reopened.settings.ocr.engine, sceneDetectionReady: reopened.capabilities?.sceneDetection.ready };
+        })()`);
+        if (!result?.ok || result.persistedIntervalMs !== 1250 || result.sceneDetectionReady !== true) throw new Error("设置 smoke 没有验证持久化和基础能力状态");
+        console.log(JSON.stringify({ ok: true, smoke: "local-analysis-settings-ipc-persistence", settings: result }));
+        app.exit(0);
+      } catch (error) {
+        console.error(JSON.stringify({ ok: false, smoke: "local-analysis-settings-ipc-persistence", message: error instanceof Error ? error.message : "设置 smoke 失败" }));
         app.exit(1);
       }
     });

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "harnessRunId": "v6-local-analysis-settings-20260814",
+  "status": "completed",
+  "decision": "ship_increment_to_main",
+  "summary": "本地智能设置、worker 接入、设置页和校准证据已形成可验证增量；未把未完成的 ASR/OCR 质量或跨平台支持写成完成。",
+  "verificationCommands": [
+    "npm run typecheck",
+    "npm test -- --run",
+    "npm run build",
+    "npm run test:desktop:settings",
+    "npm run test:desktop:ui",
+    "npm run test:render:layered",
+    "npm run test:analysis:quality",
+    "node --check apps/desktop/main.cjs",
+    "node --check apps/desktop/analysis-worker.cjs",
+    "git diff --check"
+  ],
+  "knownRisks": [
+    "npm audit 仍有 2 个 low severity advisories",
+    "当前实际打包验证为 macOS arm64，Windows x64、签名、公证尚未验证",
+    "ASR 和 OCR 的正式准确率、资源峰值、跨平台质量门仍未完成",
+    "utility worker 取消/超时的 sidecar 子进程组回收仍需跨平台验证",
+    "环境变量中的非规范 device/language 组合仍应在 fallback 层做更严格的有限化"
+  ],
+  "nextSlice": "V6 formal Chinese ASR/OCR Gold fixture and cross-platform adapter evaluation"
+}
