@@ -6,6 +6,14 @@
 
 ## 1. 结论先行
 
+### 1.1 2026-08-14 官方页面复核补充
+
+- TikHub 官方抖音产品页继续建议优先使用 Douyin App V3；标准作品接口不保证播放量，播放量需单独调用统计端点。专门 Search API 是独立产品线，官方页面标注 `$0.01/请求`，不能误用 Web/App V3 的搜索路径。
+- TikHub 官方文档说明中国大陆可使用 `https://api.tikhub.dev`，其他地区使用 `https://api.tikhub.io`，路径和参数保持一致；认证仍是 `Authorization: Bearer <token>`。正式调用前仍必须读取动态端点报价。
+- APIMart 官方 Quick Start 说明统一根地址为 `https://api.apimart.ai/v1`，Chat Completions 使用 OpenAI-compatible body；图片/视频生成返回异步 `task_id`，通过 `GET /v1/tasks/{task_id}` 轮询。Whisper-1 转写文档标注最大文件 25MB，并支持 json/text/srt/vtt 等输出。
+
+来源：[TikHub 官方文档索引](https://docs.tikhub.io/)、[TikHub Douyin API](https://tikhub.io/douyin-api)、[APIMart Quick Start](https://docs.apimart.ai/en/quickstart)、[APIMart Whisper-1](https://docs.apimart.ai/en/api-reference/audios/whisper-1)。文档会变动；以上事实不能替代真实调用前的报价、能力和余额检查。
+
 我们不是把两个供应商直接散落到页面里，而是做一个统一的 `ProviderPort`：
 
 ```text

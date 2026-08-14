@@ -362,6 +362,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .topic-opportunity-save-row strong, .topic-library-row strong { display: block; color: #4d5e49; font-size: 12px; }
 .topic-opportunity-save-row span, .topic-library-row small { display: block; margin-top: 5px; color: #879583; font-size: 9px; line-height: 1.45; }
 .topic-library-row p { margin: 5px 0 0; color: #687563; font-size: 11px; line-height: 1.45; }
+.topic-selected-badge { display: inline-flex !important; align-items: center; gap: 4px; margin-top: 0 !important; padding: 5px 8px; border: 1px solid #cfe0ca; border-radius: 999px; color: #50714d !important; background: #f1f8ee; white-space: nowrap; }
+.script-topic-context { display: grid; gap: 7px; margin: 12px 0; padding: 11px 12px; border: 1px solid #dfe7db; border-radius: 9px; background: rgba(247, 251, 244, .8); }
+.script-topic-context label { display: grid; grid-template-columns: minmax(150px, .35fr) minmax(0, 1fr); align-items: center; gap: 10px; color: #52634e; font-size: 11px; }
+.script-topic-context select { min-width: 0; }
+.script-topic-context small { color: #879583; font-size: 9px; line-height: 1.45; }
 .topic-history-row { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 14px; margin-top: 11px; padding: 12px 0 0; border: 0; border-top: 1px solid #ebe5db; background: transparent; color: #736b60; text-align: left; }
 .topic-history-row:hover strong { color: #55734e; }
 .topic-history-row strong, .topic-history-row small { display: block; }

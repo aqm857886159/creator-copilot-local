@@ -929,6 +929,28 @@ export class SqliteCatalog {
     });
   }
 
+  /**
+   * Human confirmation boundary for a candidate topic. The update is a
+   * compare-and-swap on the topic revision so a stale UI cannot silently
+   * confirm a topic that another session has already changed.
+   */
+  selectTopic(id: string, workspaceId: string, expectedRevision?: number, updatedAt = nowIso()) {
+    const current = this.getTopic(id);
+    if (!current) return undefined;
+    if (current.workspaceId !== workspaceId) throw new Error("选题不属于当前工作区");
+    if (current.status === "selected") {
+      if (expectedRevision !== undefined && expectedRevision !== current.revision) return undefined;
+      return current;
+    }
+    if (current.status !== "candidate") throw new Error(`当前选题状态不能确认：${current.status}`);
+    const expected = expectedRevision ?? current.revision;
+    if (!Number.isInteger(expected) || expected < 1 || current.revision !== expected) return undefined;
+    const next = TopicSchema.parse({ ...current, status: "selected", revision: current.revision + 1, updatedAt });
+    const result = this.db.prepare(`UPDATE topics SET status = ?, revision = ?, payload_json = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND status = 'candidate' AND revision = ?`)
+      .run(next.status, next.revision, JSON.stringify(next), next.updatedAt, next.id, workspaceId, expected);
+    return result.changes === 1 ? next : undefined;
+  }
+
   savePublication(raw: Publication) {
     const publication = PublicationSchema.parse(raw);
     if (!this.getProject(publication.projectId)) throw new Error("发布记录所属项目不存在");

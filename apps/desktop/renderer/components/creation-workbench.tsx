@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Camera, Check, ExternalLink, FileText, Plus, Upload } from "lucide-react";
 
 const initialBlocks: CaptureWorkflowInput["blocks"] = [
@@ -20,6 +20,8 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
   const [workflow, setWorkflow] = useState<CaptureWorkflowResult | null>(null);
   const [scriptBrief, setScriptBrief] = useState("我以前以为只要多拍几个镜头，口播就会更丰富。\n后来我发现，问题不在镜头数量，而在每个画面有没有真正证明观点。\n所以真正需要补的不是泛化 B-roll，而是能让观众看见证据的画面。")
   const [voiceProfile, setVoiceProfile] = useState("像平时聊天一样，有判断但不端着；保留具体经历，不用万能金句。")
+  const [topics, setTopics] = useState<TopicView[]>([])
+  const [selectedTopicId, setSelectedTopicId] = useState("")
   const [scriptProposal, setScriptProposal] = useState<ScriptProposalView | null>(null);
   const [acceptedScript, setAcceptedScript] = useState<ScriptAcceptResult["script"] | null>(null);
   const [acceptedProjectId, setAcceptedProjectId] = useState<string | undefined>();
@@ -27,6 +29,19 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
   const [takesByTask, setTakesByTask] = useState<Record<string, CaptureTake[]>>({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspaceReady || !window.desktop) {
+      setTopics([]);
+      setSelectedTopicId("");
+      return;
+    }
+    void window.desktop.listTopics().then((result) => {
+      const selected = (result.topics ?? []).filter((topic) => topic.status === "selected");
+      setTopics(selected);
+      setSelectedTopicId((current) => current && selected.some((topic) => topic.id === current) ? current : selected[0]?.id ?? "");
+    });
+  }, [workspaceReady]);
 
   function updateBlock(index: number, patch: Partial<CaptureWorkflowInput["blocks"][number]>) {
     setBlocks((current) => current.map((block, blockIndex) => blockIndex === index ? { ...block, ...patch } : block));
@@ -62,7 +77,7 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
     setScriptBusy(true);
     setMessage(null);
     try {
-      const result = await window.desktop.proposeScript({ brief: scriptBrief, voiceProfile });
+      const result = await window.desktop.proposeScript({ brief: scriptBrief, voiceProfile, topicId: selectedTopicId || undefined });
       if (result.proposal) setScriptProposal(result.proposal);
       if (!result.ok) setMessage(result.message ?? "脚本提案失败");
     } finally {
@@ -139,6 +154,8 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
       {!workspaceReady && <div className="workspace-gate"><FileText size={19} /><div><strong>先选择一个本地工作区</strong><p>脚本、SQLite、拍摄包和导入的 Take 都会保存在这个目录。</p></div><button className="primary-button" onClick={chooseWorkspace}>选择工作区</button></div>}
 
       <label className="project-title-field"><span>项目标题</span><input value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} /></label>
+
+      {topics.length > 0 && <section className="script-topic-context"><label><span>可选：使用已确认选题</span><select value={selectedTopicId} onChange={(event) => { setSelectedTopicId(event.target.value); setScriptProposal(null); }}><option value="">不绑定选题，按原始思路整理</option>{topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.title}</option>)}</select></label><small>只有选题库中已确认的方向才能进入这里；来源证据会随脚本提案保存。</small></section>}
 
       <section className="script-ai-panel"><div className="script-ai-heading"><div><div className="eyebrow">SCRIPT EDITOR · VOICE FIRST</div><h2>先把你真正想说的写下来</h2><p>AI 只整理表达，不替你发明经历、事实或“金句”。确认前不会覆盖脚本。</p></div><button className="secondary-button" onClick={() => void proposeScript()} disabled={!workspaceReady || scriptBusy || !scriptBrief.trim()}>{scriptBusy ? "整理中…" : "生成脚本提案"}</button></div><textarea className="script-brief-input" value={scriptBrief} onChange={(event) => setScriptBrief(event.target.value)} placeholder="写下你的原始想法，允许不完整、口语化、带犹豫。" /><input className="script-voice-input" value={voiceProfile} onChange={(event) => setVoiceProfile(event.target.value)} placeholder="表达偏好：例如像平时聊天、不用万能金句、保留具体经历" />{scriptProposal && <div className="script-proposal-review"><div className="script-proposal-review-top"><div><strong>{scriptProposal.status === "accepted" ? "脚本已确认" : "一份待审阅的脚本提案"}</strong><span>{scriptProposal.provider.providerKey} · {scriptProposal.blocks.length} 段 · 原稿不会被覆盖</span></div>{scriptProposal.status === "previewed" && <button className="primary-button" onClick={() => void acceptScript()} disabled={scriptBusy}>确认并保存脚本</button>}</div><div className="script-proposal-blocks">{scriptProposal.blocks.map((block) => <article key={block.id}><div className="eyebrow">{block.kind}</div><p>{block.text}</p><small>画面：{block.visualSuggestion}</small>{block.shotPlan && <div className="script-proposal-shot-plan"><small>拍什么：{block.shotPlan.actionDescription}</small><small>拍法：{block.shotPlan.cameraDirection} · {Math.round(block.shotPlan.targetMs / 100) / 10} 秒 · {block.shotPlan.deviceHint} · {block.shotPlan.orientation}</small><small>检查：{block.shotPlan.checklist.join(" · ")}</small></div>}</article>)}</div>{scriptProposal.styleNotes.length > 0 && <p className="script-proposal-note">表达提醒：{scriptProposal.styleNotes.join(" · ")}</p>}{scriptProposal.warnings.length > 0 && <p className="script-proposal-warning">需要你核验：{scriptProposal.warnings.join(" · ")}</p>}</div>}</section>
 

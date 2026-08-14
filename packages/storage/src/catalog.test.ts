@@ -366,6 +366,11 @@ describe("SqliteCatalog", () => {
     const topic = TopicSchema.parse({ schemaVersion: 1, id: "topic-creation", workspaceId: "workspace-creation", title: "把观点讲成案例", audienceProblem: "观众缺少具体证据", thesis: "用一个案例解释抽象判断", angle: "先讲改变想法的瞬间，再展开判断", evidenceIds: ["signal-1"], benchmarkVideoIds: [], visualOpportunities: ["展示原始材料"], riskNotes: ["需要用自己的经验重写"], source: { kind: "topic_radar", reportId: topicReport.id, opportunityId: "opportunity-1" }, status: "candidate", revision: 1, createdAt: now, updatedAt: now });
     catalog.saveTopic(topic);
     expect(catalog.listTopics("workspace-creation")).toHaveLength(1);
+    const selectedTopic = catalog.selectTopic(topic.id, topic.workspaceId, 1, "2026-08-14T00:00:01.000Z");
+    expect(selectedTopic).toMatchObject({ status: "selected", revision: 2, evidenceIds: topic.evidenceIds });
+    expect(catalog.selectTopic(topic.id, topic.workspaceId, 1, "2026-08-14T00:00:02.000Z")).toBeUndefined();
+    expect(catalog.selectTopic(topic.id, topic.workspaceId, 2)?.status).toBe("selected");
+    expect(() => catalog.selectTopic(topic.id, "workspace-other", 2)).toThrow("不属于当前工作区");
     catalog.close();
     const restored = new SqliteCatalog(dbPath);
     expect(restored.getScript(script.id)?.blocks[0].text).toContain("画面变化");

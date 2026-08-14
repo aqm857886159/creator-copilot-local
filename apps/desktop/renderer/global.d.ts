@@ -73,6 +73,8 @@ interface ScriptProposalView {
   schemaVersion: 1;
   id: string;
   workspaceId: string;
+  topicId?: string;
+  topicRevision?: number;
   brief: string;
   voiceProfile?: string;
   blocks: Array<{ schemaVersion: 1; id: string; order: number; kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; emphasis: string[]; evidenceIds: string[]; visualNeed: "none" | "support" | "must_show"; visualSuggestion: string; shotPlan?: { schemaVersion: 1; purpose: "explain" | "prove" | "transition" | "emotion" | "reset" | "brand"; mode: "talking_head" | "broll" | "screen_recording" | "graphic" | "generated" | "still"; framing?: "wide" | "medium" | "close" | "detail" | "screen"; actionDescription: string; cameraDirection: string; targetMs: number; sourceRequirement: "existing_asset" | "shoot_task" | "generated_asset" | "any"; deviceHint: "phone" | "camera" | "screen" | "any"; orientation: "portrait" | "landscape" | "any"; checklist: string[]; referencePrompt?: string } }>;
@@ -98,7 +100,7 @@ interface ScriptAcceptResult {
   message?: string;
   proposal?: ScriptProposalView;
   project?: { id: string; workspaceId: string; title: string; stage: string; revision: number; payload: Record<string, unknown>; createdAt: string; updatedAt: string };
-  script?: { id: string; projectId: string; revision: number; blocks: Array<{ id: string; order: number; kind: string; text: string; emphasis: string[]; evidenceIds: string[]; visualNeed: "none" | "support" | "must_show" }>; estimatedDurationMs: number };
+  script?: { id: string; projectId: string; topicId?: string; topicRevision?: number; revision: number; blocks: Array<{ id: string; order: number; kind: string; text: string; emphasis: string[]; evidenceIds: string[]; visualNeed: "none" | "support" | "must_show" }>; estimatedDurationMs: number };
 }
 
 interface AccountMetricsQuoteView {
@@ -235,6 +237,7 @@ interface TopicView {
 
 interface SaveTopicOpportunityResult { ok: boolean; created?: boolean; errorCode?: string; message?: string; topic?: TopicView }
 interface ListTopicsResult { ok: boolean; errorCode?: string; message?: string; topics?: TopicView[] }
+interface SelectTopicResult { ok: boolean; errorCode?: string; message?: string; topic?: TopicView }
 
 interface CaptureWorkflowInput {
   projectTitle: string;
@@ -459,13 +462,14 @@ interface Window {
     runAccountAnalysis: (quoteId: string) => Promise<AccountWorkAnalysisRunResult>;
     downloadResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<DownloadResearchMediaResult>;
     analyzeResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<AnalyzeResearchMediaResult>;
-    proposeScript: (input: { brief: string; voiceProfile?: string; sourceEvidence?: Array<{ id: string; text: string; source?: string }> }) => Promise<ScriptProposalResult>;
+    proposeScript: (input: { brief: string; voiceProfile?: string; topicId?: string; sourceEvidence?: Array<{ id: string; text: string; source?: string }> }) => Promise<ScriptProposalResult>;
     acceptScriptProposal: (input: { proposalId: string; projectTitle: string }) => Promise<ScriptAcceptResult>;
     quoteTopicRadar: (input: TopicRadarQueryView) => Promise<TopicRadarQuoteResult>;
     runTopicRadar: (quoteId: string) => Promise<TopicRadarRunResult>;
     listTopicRadarReports: () => Promise<TopicRadarRunResult>;
     saveTopicOpportunity: (input: { source: "account_research" | "topic_radar"; reportId: string; opportunityId: string }) => Promise<SaveTopicOpportunityResult>;
     listTopics: () => Promise<ListTopicsResult>;
+    selectTopic: (input: { topicId: string; expectedRevision?: number }) => Promise<SelectTopicResult>;
     createCaptureWorkflow: (input: CaptureWorkflowInput) => Promise<CaptureWorkflowResult>;
     importTake: (shootTaskId: string) => Promise<ImportTakeResult>;
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;

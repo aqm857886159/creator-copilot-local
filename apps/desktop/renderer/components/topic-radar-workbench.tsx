@@ -111,10 +111,28 @@ export function TopicRadarWorkbench({ workspacePath }: { workspacePath: string |
     }
   }
 
+  async function selectTopic(topic: TopicView) {
+    if (!window.desktop || topicBusyId) return;
+    setTopicBusyId(topic.id);
+    setMessage(null);
+    try {
+      const response = await window.desktop.selectTopic({ topicId: topic.id, expectedRevision: topic.revision });
+      if (!response.ok || !response.topic) {
+        setMessage({ kind: "error", text: response.message ?? "确认选题失败，请刷新后重试" });
+        if (response.topic) setTopics((current) => current.map((item) => item.id === response.topic!.id ? response.topic! : item));
+        return;
+      }
+      setTopics((current) => current.map((item) => item.id === response.topic!.id ? response.topic! : item));
+      setMessage({ kind: "success", text: "选题已确认；现在可以回到创作页生成带证据上下文的脚本提案。" });
+    } finally {
+      setTopicBusyId(null);
+    }
+  }
+
   if (!workspaceReady) return <section className="topic-radar-workbench topic-radar-empty"><div className="empty-icon"><Lightbulb size={24} /></div><div className="eyebrow">TOPIC RADAR</div><h1>先连接一个本地工作区</h1><p>报价、调用记录、候选选题和证据都会保存在本地。</p></section>;
 
   const opportunityActions = report && report.opportunities.length > 0 ? <section className="topic-opportunity-actions"><div className="topic-radar-config-heading"><div><div className="eyebrow">TOPIC LIBRARY · HUMAN CONFIRMATION</div><h2>把候选信号保存为选题</h2></div><span>{report.opportunities.length} 条机会</span></div><p>保存后会进入本地选题库；它仍是候选方向，不会自动生成脚本或覆盖已有项目。</p><div className="topic-opportunity-save-list">{report.opportunities.map((opportunity) => { const saved = topics.some((topic) => topic.source.opportunityId === opportunity.id && topic.source.reportId === report.id); return <div className="topic-opportunity-save-row" key={opportunity.id}><div><strong>{opportunity.title}</strong><span>{opportunity.evidenceIds.length} 条证据 · {opportunity.angle}</span></div><button className="secondary-button" onClick={() => void saveOpportunity(opportunity.id)} disabled={topicBusyId !== null}>{saved ? <><Check size={14} />已在选题库</> : topicBusyId === opportunity.id ? "保存中…" : "加入选题库"}</button></div>; })}</div></section> : null;
-  const topicLibrary = topics.length > 0 ? <section className="topic-library-panel"><div className="topic-radar-config-heading"><div><div className="eyebrow">LOCAL TOPIC LIBRARY</div><h2>已保存的选题</h2></div><span>{topics.length} 条</span></div><div className="topic-library-list">{topics.slice(0, 8).map((topic) => <article className="topic-library-row" key={topic.id}><div><strong>{topic.title}</strong><p>{topic.angle}</p><small>{topic.source.kind === "topic_radar" ? "来自选题雷达" : "来自账号研究"} · {topic.evidenceIds.length} 条证据 · {topic.status === "candidate" ? "待确认" : topic.status}</small></div></article>)}</div></section> : null;
+  const topicLibrary = topics.length > 0 ? <section className="topic-library-panel"><div className="topic-radar-config-heading"><div><div className="eyebrow">LOCAL TOPIC LIBRARY</div><h2>已保存的选题</h2></div><span>{topics.length} 条</span></div><div className="topic-library-list">{topics.slice(0, 8).map((topic) => <article className="topic-library-row" key={topic.id}><div><strong>{topic.title}</strong><p>{topic.angle}</p><small>{topic.source.kind === "topic_radar" ? "来自选题雷达" : "来自账号研究"} · {topic.evidenceIds.length} 条证据 · {topic.status === "candidate" ? "待确认" : topic.status === "selected" ? "已确认" : topic.status}</small></div>{topic.status === "candidate" ? <button className="secondary-button" onClick={() => void selectTopic(topic)} disabled={topicBusyId !== null}>{topicBusyId === topic.id ? "确认中…" : "确认选题"}</button> : topic.status === "selected" ? <span className="topic-selected-badge"><Check size={13} />可进入脚本</span> : null}</article>)}</div></section> : null;
 
   return <section className="topic-radar-workbench">
     {opportunityActions}

@@ -339,6 +339,10 @@ interface AgentRuntimePort {
 
 施工记录：[V7 选题雷达垂直切片](./plan/2026-08-14-v7-topic-radar.md)。后续设置页预算、更多端点、多关键词趋势和本地深度拆解必须保持显式成本门。
 
+### V7c：确认选题进入脚本提案（已完成）
+
+`Topic candidate` 现在必须经过用户点击确认才变成 `selected`；确认使用 revision CAS，过期 UI 不会覆盖新版本。创作页只展示已确认选题，脚本提案会保存 `topicId/topicRevision`，并从本地来源报告回填白名单证据。用户仍可不绑定选题直接写原始思路；脚本确认不会隐式推进选题状态。施工记录：[V7c 选题到脚本](./plan/2026-08-14-v7-topic-to-script.md)。
+
 ### V8：交换、发布和受控复盘
 
 **依赖：V4、V7。**

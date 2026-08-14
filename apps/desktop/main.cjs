@@ -154,6 +154,37 @@ function buildTopicFromOpportunity({ workspace, runtime, source, reportId, oppor
   });
 }
 
+function buildTopicScriptContext({ workspace, topic }) {
+  const report = topic.source.kind === "account_research"
+    ? workspace.catalog.getResearchReport(topic.source.reportId)
+    : workspace.catalog.getTopicRadarReport(topic.source.reportId);
+  if (!report || report.workspaceId !== workspace.workspaceId) throw new Error("选题来源报告不存在或不属于当前工作区");
+  const evidenceById = new Map(topic.source.kind === "account_research"
+    ? report.evidence.map((evidence) => [evidence.id, { id: evidence.id, text: [evidence.label, typeof evidence.payload.description === "string" ? evidence.payload.description : typeof evidence.payload.summary === "string" ? evidence.payload.summary : ""].filter(Boolean).join("："), source: `${evidence.type}:${evidence.sourceId}` }])
+    : report.signals.map((signal) => [signal.id, { id: signal.id, text: `${signal.label}：${signal.detail}`, source: `tikhub:${signal.source}` }]));
+  const sourceEvidence = topic.evidenceIds.flatMap((evidenceId) => {
+    const evidence = evidenceById.get(evidenceId);
+    return evidence && evidence.text ? [evidence] : [];
+  });
+  if (sourceEvidence.length !== topic.evidenceIds.length) throw new Error("选题引用的证据在来源报告中不存在");
+  return {
+    topicContext: {
+      topicId: topic.id,
+      topicRevision: topic.revision,
+      title: topic.title,
+      audienceProblem: topic.audienceProblem,
+      thesis: topic.thesis,
+      angle: topic.angle,
+      evidenceIds: topic.evidenceIds,
+      benchmarkVideoIds: topic.benchmarkVideoIds,
+      visualOpportunities: topic.visualOpportunities,
+      riskNotes: topic.riskNotes,
+      source: topic.source,
+    },
+    sourceEvidence,
+  };
+}
+
 function getEditAgent(runtime) {
   const providerKey = process.env.AI_EDIT_PROVIDER ?? "local-fallback";
   if (providerKey === "apimart" && process.env.APIMART_API_KEY) {
@@ -727,6 +758,19 @@ ipcMain.handle("desktop:list-topics", async () => {
   }
 });
 
+ipcMain.handle("desktop:select-topic", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.topicId !== "string" || !raw.topicId.trim()) throw new Error("选题 ID 无效");
+    if (raw.expectedRevision !== undefined && (!Number.isInteger(raw.expectedRevision) || raw.expectedRevision < 1)) throw new Error("选题版本无效");
+    const topic = workspace.catalog.selectTopic(raw.topicId.trim(), workspace.workspaceId, raw.expectedRevision, new Date().toISOString());
+    if (!topic) return { ok: false, errorCode: "topic_revision_conflict", message: "选题已被其他操作更新，请刷新后重试。", topic: workspace.catalog.getTopic(raw.topicId.trim()) };
+    return { ok: true, topic };
+  } catch (error) {
+    return { ok: false, errorCode: "topic_select_failed", message: error instanceof Error ? error.message : "确认选题失败" };
+  }
+});
+
 ipcMain.handle("desktop:download-research-media", async (_event, raw) => {
   try {
     const workspace = requireWorkspace();
@@ -866,8 +910,19 @@ ipcMain.handle("desktop:propose-script", async (_event, raw) => {
     const workspace = requireWorkspace();
     if (!raw || typeof raw.brief !== "string" || !raw.brief.trim()) throw new Error("请先写下你真正想讲的主题或原始思路");
     const runtime = await getDesktopRuntime();
-    const sourceEvidence = Array.isArray(raw.sourceEvidence) ? raw.sourceEvidence.filter((item) => item && typeof item.id === "string" && typeof item.text === "string").slice(0, 20) : [];
-    const result = await getScriptAgent(runtime).proposeScript({ workspaceId: workspace.workspaceId, brief: raw.brief.trim(), voiceProfile: typeof raw.voiceProfile === "string" ? raw.voiceProfile : undefined, sourceEvidence, now: new Date().toISOString() });
+    const manualEvidence = Array.isArray(raw.sourceEvidence) ? raw.sourceEvidence.filter((item) => item && typeof item.id === "string" && typeof item.text === "string").slice(0, 20) : [];
+    let topicContext;
+    let sourceEvidence = manualEvidence;
+    if (raw.topicId !== undefined) {
+      if (typeof raw.topicId !== "string" || !raw.topicId.trim()) throw new Error("选题 ID 无效");
+      const topic = workspace.catalog.getTopic(raw.topicId.trim());
+      if (!topic || topic.workspaceId !== workspace.workspaceId) throw new Error("选题不存在或不属于当前工作区");
+      if (topic.status !== "selected") throw new Error("请先在选题库确认这个选题，再生成脚本提案");
+      const context = buildTopicScriptContext({ workspace, topic });
+      topicContext = context.topicContext;
+      sourceEvidence = [...context.sourceEvidence, ...manualEvidence.filter((item) => !context.sourceEvidence.some((evidence) => evidence.id === item.id))].slice(0, 20);
+    }
+    const result = await getScriptAgent(runtime).proposeScript({ workspaceId: workspace.workspaceId, brief: raw.brief.trim(), voiceProfile: typeof raw.voiceProfile === "string" ? raw.voiceProfile : undefined, sourceEvidence, topicContext, now: new Date().toISOString() });
     workspace.catalog.saveScriptProposal(result.proposal);
     return { ok: true, proposal: result.proposal, provider: result.provider };
   } catch (error) {
@@ -884,8 +939,8 @@ ipcMain.handle("desktop:accept-script-proposal", async (_event, raw) => {
     const runtime = await getDesktopRuntime();
     const now = new Date().toISOString();
     const projectId = `project-${randomUUID()}`;
-    const script = runtime.creation.ScriptSchema.parse({ schemaVersion: 1, id: `script-${randomUUID()}`, projectId, revision: 1, status: "approved", blocks: proposal.blocks.map((block) => ({ schemaVersion: 1, id: block.id, order: block.order, kind: block.kind, text: block.text, emphasis: block.emphasis, evidenceIds: block.evidenceIds, visualNeed: block.visualNeed })), estimatedDurationMs: proposal.blocks.reduce((total, block) => total + Math.max(1_500, Math.round(block.text.length * 260)), 0), createdAt: now, updatedAt: now });
-    const project = { id: projectId, workspaceId: workspace.workspaceId, title: raw.projectTitle.trim(), stage: "script", revision: 1, payload: { scriptId: script.id, scriptProposalId: proposal.id, visualSuggestions: Object.fromEntries(proposal.blocks.map((block) => [block.id, block.visualSuggestion])), shotPlans: Object.fromEntries(proposal.blocks.filter((block) => block.shotPlan).map((block) => [block.id, block.shotPlan])) }, createdAt: now, updatedAt: now };
+    const script = runtime.creation.ScriptSchema.parse({ schemaVersion: 1, id: `script-${randomUUID()}`, projectId, topicId: proposal.topicId, topicRevision: proposal.topicRevision, revision: 1, status: "approved", blocks: proposal.blocks.map((block) => ({ schemaVersion: 1, id: block.id, order: block.order, kind: block.kind, text: block.text, emphasis: block.emphasis, evidenceIds: block.evidenceIds, visualNeed: block.visualNeed })), estimatedDurationMs: proposal.blocks.reduce((total, block) => total + Math.max(1_500, Math.round(block.text.length * 260)), 0), createdAt: now, updatedAt: now });
+    const project = { id: projectId, workspaceId: workspace.workspaceId, title: raw.projectTitle.trim(), stage: "script", revision: 1, payload: { scriptId: script.id, scriptProposalId: proposal.id, topicId: proposal.topicId, topicRevision: proposal.topicRevision, visualSuggestions: Object.fromEntries(proposal.blocks.map((block) => [block.id, block.visualSuggestion])), shotPlans: Object.fromEntries(proposal.blocks.filter((block) => block.shotPlan).map((block) => [block.id, block.shotPlan])) }, createdAt: now, updatedAt: now };
     const accepted = workspace.catalog.acceptScriptProposal({ proposalId: proposal.id, workspaceId: workspace.workspaceId, project, script });
     return { ok: true, proposal: accepted.proposal, project: accepted.project, script: accepted.script };
   } catch (error) {
@@ -1667,9 +1722,11 @@ app.whenReady().then(() => {
         workspace.catalog.saveTopicRadarReport(report);
         const first = await window.webContents.executeJavaScript("window.desktop.saveTopicOpportunity({source:'topic_radar',reportId:'topic-radar-smoke-report',opportunityId:'topic-opportunity-smoke'})");
         const second = await window.webContents.executeJavaScript("window.desktop.saveTopicOpportunity({source:'topic_radar',reportId:'topic-radar-smoke-report',opportunityId:'topic-opportunity-smoke'})");
+        const selected = first?.topic ? await window.webContents.executeJavaScript(`window.desktop.selectTopic({topicId:${JSON.stringify(first.topic.id)},expectedRevision:${first.topic.revision}})`) : null;
+        const proposal = selected?.topic ? await window.webContents.executeJavaScript(`window.desktop.proposeScript({brief:'我想讲一个具体案例。',topicId:${JSON.stringify(selected.topic.id)}})`) : null;
         const topics = workspace.catalog.listTopics(workspace.workspaceId);
-        if (!first?.ok || !first.created || !second?.ok || second.created || topics.length !== 1) throw new Error("Topic IPC smoke 没有保持创建与重复点击幂等");
-        console.log(JSON.stringify({ ok: true, smoke: "topic-library-ipc-idempotency", firstCreated: first.created, secondCreated: second.created, topicCount: topics.length, schemaVersion: workspace.catalog.schemaVersion() }));
+        if (!first?.ok || !first.created || !second?.ok || second.created || topics.length !== 1 || !selected?.ok || selected.topic?.status !== "selected" || !proposal?.ok || proposal.proposal?.topicId !== selected.topic.id || proposal.proposal?.topicRevision !== selected.topic.revision) throw new Error("Topic → script IPC smoke 没有保持幂等、确认和上下文追溯");
+        console.log(JSON.stringify({ ok: true, smoke: "topic-library-to-script-context", firstCreated: first.created, secondCreated: second.created, selectedStatus: selected.topic.status, proposalTopicId: proposal.proposal.topicId, proposalTopicRevision: proposal.proposal.topicRevision, topicCount: topics.length, schemaVersion: workspace.catalog.schemaVersion() }));
         app.exit(0);
       } catch (error) {
         console.error(JSON.stringify({ ok: false, smoke: "topic-library-ipc-idempotency", message: error instanceof Error ? error.message : "Topic IPC smoke 失败" }));

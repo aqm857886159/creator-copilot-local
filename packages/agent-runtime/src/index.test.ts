@@ -90,6 +90,31 @@ describe("agent edit proposal runtime", () => {
     expect(result.proposal.warnings).toContain("当前没有附加来源证据；涉及事实的句子需要创作者自行核验。");
   });
 
+  it("carries a confirmed topic revision into the script proposal", async () => {
+    const runtime = new LocalScriptAgentRuntime();
+    const result = await runtime.proposeScript({
+      workspaceId: "workspace-1",
+      brief: "我想讲一个具体案例。",
+      topicContext: {
+        topicId: "topic-1",
+        topicRevision: 2,
+        title: "把观点讲成案例",
+        audienceProblem: "观众听到了判断，却看不到证据。",
+        thesis: "用真实案例替代泛化 B-roll。",
+        angle: "先讲改变想法的瞬间，再展开判断。",
+        evidenceIds: ["evidence-1"],
+        benchmarkVideoIds: [],
+        visualOpportunities: ["展示带修改痕迹的草稿"],
+        riskNotes: ["不要把榜单信号写成因果结论"],
+        source: { kind: "topic_radar", reportId: "report-1", opportunityId: "opportunity-1" },
+      },
+      sourceEvidence: [{ id: "evidence-1", text: "搜索信号：表达结构", source: "tikhub:search_hot" }],
+      now,
+    });
+    expect(result.proposal).toMatchObject({ topicId: "topic-1", topicRevision: 2 });
+    expect(result.proposal.styleNotes.join(" ")).toContain("把观点讲成案例");
+  });
+
   it("rejects script evidence invented by a model", async () => {
     const draft = { schemaVersion: 1 as const, blocks: [{ kind: "hook" as const, text: "一个问题", emphasis: [], evidenceIds: ["not-confirmed"], visualNeed: "none" as const, visualSuggestion: "看镜头说", shotPlan: { schemaVersion: 1 as const, purpose: "emotion" as const, mode: "talking_head" as const, framing: "medium" as const, actionDescription: "面对镜头说出问题。", cameraDirection: "手机竖拍固定中景。", targetMs: 3000, sourceRequirement: "shoot_task" as const, deviceHint: "phone" as const, orientation: "portrait" as const, checklist: ["画面稳定"] } }], styleNotes: [], warnings: [] };
     expect(() => materializeScriptProposal({ workspaceId: "workspace-1", brief: "一个主题", sourceEvidence: [{ id: "fact-1", text: "已核验事实" }], now }, draft, { providerKey: "test" })).toThrow("未提供的证据");
