@@ -273,6 +273,11 @@ interface SelectTakeResult {
   takes?: CaptureTake[];
 }
 
+interface AdoptAssetCandidateResult extends SelectTakeResult {
+  reused?: boolean;
+  take?: CaptureTake;
+}
+
 interface EditProposalOperation {
   id: string;
   shotId: string;
@@ -440,6 +445,7 @@ interface Window {
     createCaptureWorkflow: (input: CaptureWorkflowInput) => Promise<CaptureWorkflowResult>;
     importTake: (shootTaskId: string) => Promise<ImportTakeResult>;
     selectTake: (input: { shootTaskId: string; takeId: string }) => Promise<SelectTakeResult>;
+    adoptAssetCandidate: (input: { shootTaskId: string; assetId: string; sourceSegment?: { startMs: number; endMs: number }; reason?: string; evidenceIds?: string[] }) => Promise<AdoptAssetCandidateResult>;
     proposeEdit: (input: { projectId: string; retryNonce?: string } | string) => Promise<EditProposalResult>;
     reconcileEditProposal: (input: { idempotencyScope: string; idempotencyKey: string; action: "user_confirmed_not_submitted" }) => Promise<ReconcileEditProposalResult>;
     listEditProposalRecoveries: (projectId: string) => Promise<EditProposalRecoveryListResult>;

@@ -1475,6 +1475,40 @@ ipcMain.handle("desktop:select-take", (_event, input) => {
   }
 });
 
+ipcMain.handle("desktop:adopt-asset-candidate", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.shootTaskId !== "string" || !raw.shootTaskId || typeof raw.assetId !== "string" || !raw.assetId) throw new Error("候选素材选择参数无效");
+    const task = workspace.catalog.getShootTask(raw.shootTaskId);
+    if (!task) throw new Error("拍摄任务不存在");
+    const artifact = workspace.catalog.getArtifact(raw.assetId);
+    if (!artifact || artifact.workspaceId !== workspace.workspaceId || artifact.kind !== "source" || !artifact.mimeType.startsWith("video/")) throw new Error("候选素材不存在、跨工作区或不是视频源素材");
+
+    const absolutePath = path.resolve(workspace.workspacePath, artifact.relativePath);
+    const root = realpathSync(workspace.workspacePath);
+    const canonicalPath = realpathSync(absolutePath);
+    if (canonicalPath !== root && !canonicalPath.startsWith(`${root}${path.sep}`)) throw new Error("候选素材路径越过工作区");
+    const fileStats = await statFile(canonicalPath);
+    if (!fileStats.isFile()) throw new Error("候选素材不是可读取的文件");
+
+    const sourceSegment = raw.sourceSegment && Number.isInteger(raw.sourceSegment.startMs) && Number.isInteger(raw.sourceSegment.endMs) && raw.sourceSegment.startMs >= 0 && raw.sourceSegment.endMs > raw.sourceSegment.startMs
+      ? { startMs: raw.sourceSegment.startMs, endMs: raw.sourceSegment.endMs }
+      : undefined;
+    const evidenceIds = Array.isArray(raw.evidenceIds) ? raw.evidenceIds.filter((value) => typeof value === "string" && value.length > 0).slice(0, 12) : [];
+    const reason = typeof raw.reason === "string" ? raw.reason.trim().slice(0, 240) : "";
+    const existingTake = workspace.catalog.listTakes(task.id).find((take) => take.assetId === artifact.artifactId && take.relativePath === artifact.relativePath);
+    const runtime = await getDesktopRuntime();
+    const now = new Date().toISOString();
+    const noteParts = ["从 AI 候选素材人工采用", sourceSegment ? `建议片段 ${sourceSegment.startMs}-${sourceSegment.endMs}ms` : "", reason, evidenceIds.length > 0 ? `证据 ${evidenceIds.join("、")}` : ""].filter(Boolean);
+    const take = existingTake ?? runtime.creation.TakeSchema.parse({ schemaVersion: 1, id: `take-${randomUUID()}`, shootTaskId: task.id, assetId: artifact.artifactId, relativePath: artifact.relativePath, capturedAt: now, status: "candidate", note: noteParts.join("；"), createdAt: now, updatedAt: now });
+    if (!existingTake) workspace.catalog.addTake(take);
+    const selection = workspace.catalog.selectTakeForTask(task.id, take.id);
+    return { ok: true, reused: Boolean(existingTake), ...selection, take: selection.takes.find((item) => item.id === take.id) ?? take };
+  } catch (error) {
+    return { ok: false, errorCode: "asset_candidate_adopt_failed", message: error instanceof Error ? error.message : "候选素材采用失败" };
+  }
+});
+
 ipcMain.handle("desktop:open-workspace-file", async (_event, relativePath) => {
   try {
     const workspace = requireWorkspace();
@@ -1588,6 +1622,9 @@ app.whenReady().then(() => {
           await wait(1_000);
           if (!document.querySelector(".proposal-list")) throw new Error("AI 提案没有出现在页面；body=" + (document.body?.innerText ?? "").slice(-1200));
           if (!document.querySelector(".proposal-intent")) throw new Error("AI 提案没有显示原拍摄意图");
+          await waitFor(() => buttons().some((button) => !button.disabled && button.textContent?.includes("作为 Take")), "候选素材采用按钮");
+          clickText("作为 Take");
+          await waitFor(() => (document.body?.innerText ?? "").includes("已复用已有 Take") || (document.body?.innerText ?? "").includes("已创建 Take"), "候选素材写入 Take");
           clickText("确认并导出");
           await wait(2_500);
           if (!document.querySelector(".render-success")) throw new Error("AI 剪辑没有成功导出");

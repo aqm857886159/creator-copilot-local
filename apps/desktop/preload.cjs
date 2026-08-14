@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld("desktop", {
   createCaptureWorkflow: (input) => ipcRenderer.invoke("desktop:create-capture-workflow", input),
   importTake: (shootTaskId) => ipcRenderer.invoke("desktop:import-take", shootTaskId),
   selectTake: (input) => ipcRenderer.invoke("desktop:select-take", input),
+  adoptAssetCandidate: (input) => ipcRenderer.invoke("desktop:adopt-asset-candidate", input),
   proposeEdit: (projectId) => ipcRenderer.invoke("desktop:propose-edit", projectId),
   reconcileEditProposal: (input) => ipcRenderer.invoke("desktop:reconcile-edit-proposal", input),
   listEditProposalRecoveries: (projectId) => ipcRenderer.invoke("desktop:list-edit-proposal-recoveries", projectId),
