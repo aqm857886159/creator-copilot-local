@@ -374,6 +374,8 @@ describe("SqliteCatalog", () => {
     catalog.close();
     const restored = new SqliteCatalog(dbPath);
     expect(restored.getScript(script.id)?.blocks[0].text).toContain("画面变化");
+    expect(restored.listProjectsForWorkspace("workspace-creation").map((project) => project.id)).toEqual(["project-creation"]);
+    expect(restored.listProjectsForWorkspace("workspace-other")).toEqual([]);
     expect(restored.getStoryboard(storyboard.id)?.shots[0].selectedTakeId).toBeUndefined();
     expect(restored.getCapturePackage("capture-creation")?.status).toBe("ready");
     expect(restored.getTake("take-2")?.status).toBe("selected");

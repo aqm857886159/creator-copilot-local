@@ -10,6 +10,35 @@ interface ChooseWorkspaceResult {
   path: string | null;
 }
 
+interface ProjectSummaryView {
+  id: string;
+  workspaceId: string;
+  title: string;
+  stage: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ListProjectsResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  projects?: ProjectSummaryView[];
+}
+
+interface LoadProjectResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  project?: { id: string; workspaceId: string; title: string; stage: string; revision: number; payload: Record<string, unknown>; createdAt: string; updatedAt: string };
+  script?: ScriptAcceptResult["script"];
+  storyboard?: { id: string; projectId: string; scriptId: string; scriptRevision: number; revision: number; status: string; shots: Array<{ id: string; order: number; scriptBlockIds: string[]; purpose: "explain" | "prove" | "transition" | "emotion" | "reset" | "brand"; mode: "talking_head" | "broll" | "screen_recording" | "graphic" | "generated" | "still"; framing?: "wide" | "medium" | "close" | "detail" | "screen"; cameraDirection?: string; deviceHint?: "phone" | "camera" | "screen" | "any"; orientation?: "portrait" | "landscape" | "any"; actionDescription: string; targetMs: number; sourceRequirement: "existing_asset" | "shoot_task" | "generated_asset" | "any"; checklist?: string[]; selectedTakeId?: string; status: string }>; createdAt: string; updatedAt: string };
+  tasks?: CaptureShootTask[];
+  capturePackage?: { id: string; projectId: string; storyboardRevision: number; format: "html"; relativePath: string; taskIds: string[]; status: string; createdAt: string; updatedAt: string };
+  takesByTask?: Record<string, CaptureTake[]>;
+}
+
 interface ImportMediaResult {
   ok: boolean;
   errorCode?: string;
@@ -279,6 +308,8 @@ interface CaptureWorkflowResult {
   errorCode?: string;
   message?: string;
   projectId?: string;
+  script?: ScriptAcceptResult["script"];
+  storyboard?: NonNullable<LoadProjectResult["storyboard"]>;
   tasks?: CaptureShootTask[];
   capturePackage?: { id: string; relativePath: string; status: string };
 }
@@ -457,6 +488,8 @@ interface Window {
   desktop?: {
     getInfo: () => Promise<DesktopInfo>;
     chooseWorkspace: () => Promise<ChooseWorkspaceResult>;
+    listProjects: () => Promise<ListProjectsResult>;
+    loadProject: (input: { projectId: string }) => Promise<LoadProjectResult>;
     importMedia: () => Promise<ImportMediaResult>;
     analyzeAsset: (input: { artifactId: string }) => Promise<AnalyzeAssetResult>;
     cancelAnalysis: (input: { artifactId: string }) => Promise<CancelAnalysisResult>;

@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("desktop", {
   getInfo: () => ipcRenderer.invoke("desktop:get-info"),
   chooseWorkspace: () => ipcRenderer.invoke("desktop:choose-workspace"),
+  listProjects: () => ipcRenderer.invoke("desktop:list-projects"),
+  loadProject: (input) => ipcRenderer.invoke("desktop:load-project", input),
   importMedia: () => ipcRenderer.invoke("desktop:import-media"),
   analyzeAsset: (input) => ipcRenderer.invoke("desktop:analyze-asset", input),
   cancelAnalysis: (input) => ipcRenderer.invoke("desktop:cancel-analysis", input),

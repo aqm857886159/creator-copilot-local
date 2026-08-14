@@ -261,6 +261,8 @@ interface AgentRuntimePort {
 
 **验收门：** 手动脚本 → 分镜 → 拍摄包 → 导入多个 Take → 用户选择；拍摄包离线可读；不控制摄像头。
 
+**当前增量（V2c）：** 已把 catalog 中的本地项目列表和完整工作流读取接入 Electron IPC。创作页在工作区连接后显示已保存项目，用户可以恢复项目标题、脚本段落、分镜/拍摄任务、Take 状态和拍摄包，不再只依赖演示数据。恢复合同和 packaged UI smoke 见 [`2026-08-14-v2c-project-resume.md`](./plan/2026-08-14-v2c-project-resume.md)。
+
 ### V4：AI 剪辑提案与可复现执行
 
 **依赖：V2、V3。**
@@ -495,6 +497,7 @@ V2-02 media.import Job + artifact manifest + idempotent reuse
 V2-03 artifact manifest + crash/cancel/restart fixtures
 V3-01 manual Script/Storyboard/Shot editor contract
 V3-02 static CapturePackage + Take import/select
+V3-03 project list + persisted workflow resume
 V4-01 RenderIR reference compiler + 9:16 golden fixture
 V4-02 FFmpeg render + MP4/SRT/manifest + reopen smoke
 V5-01 AI SDK ProviderPort + mock/one real smoke

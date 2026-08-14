@@ -547,6 +547,41 @@ ipcMain.handle("desktop:choose-workspace", async () => {
   return { canceled: false, path: workspacePath };
 });
 
+ipcMain.handle("desktop:list-projects", async () => {
+  try {
+    const workspace = requireWorkspace();
+    return {
+      ok: true,
+      projects: workspace.catalog.listProjectsForWorkspace(workspace.workspaceId).map(({ payload: _payload, ...project }) => project),
+    };
+  } catch (error) {
+    return { ok: false, errorCode: "project_list_failed", message: error instanceof Error ? error.message : "无法读取本地项目" };
+  }
+});
+
+ipcMain.handle("desktop:load-project", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.projectId !== "string" || !raw.projectId.trim()) throw new Error("项目 ID 无效");
+    const project = workspace.catalog.getProject(raw.projectId.trim());
+    if (!project || project.workspaceId !== workspace.workspaceId) throw new Error("项目不存在或不属于当前工作区");
+    const payload = project.payload;
+    const script = typeof payload.scriptId === "string" ? workspace.catalog.getScript(payload.scriptId) : undefined;
+    const storyboard = typeof payload.storyboardId === "string" ? workspace.catalog.getStoryboard(payload.storyboardId) : undefined;
+    const capturePackage = typeof payload.capturePackageId === "string" ? workspace.catalog.getCapturePackage(payload.capturePackageId) : undefined;
+    const taskIds = Array.isArray(payload.taskIds) ? payload.taskIds.filter((taskId) => typeof taskId === "string") : [];
+    const tasks = taskIds.map((taskId) => workspace.catalog.getShootTask(taskId)).filter(Boolean);
+    if (!script) throw new Error("项目已保存，但脚本引用缺失");
+    if (typeof payload.storyboardId === "string" && !storyboard) throw new Error("项目已保存，但分镜引用缺失");
+    if (typeof payload.capturePackageId === "string" && !capturePackage) throw new Error("项目已保存，但拍摄包引用缺失");
+    if (tasks.length !== taskIds.length) throw new Error("项目已保存，但部分拍摄任务引用缺失");
+    const takesByTask = Object.fromEntries(tasks.map((task) => [task.id, workspace.catalog.listTakes(task.id)]));
+    return { ok: true, project, script, storyboard, tasks, capturePackage, takesByTask };
+  } catch (error) {
+    return { ok: false, errorCode: "project_load_failed", message: error instanceof Error ? error.message : "无法载入本地项目" };
+  }
+});
+
 ipcMain.handle("desktop:import-media", async () => {
   if (!selectedWorkspacePath) return { ok: false, errorCode: "workspace_not_selected", message: "请先选择工作区" };
   const result = await dialog.showOpenDialog({
@@ -1880,6 +1915,15 @@ app.whenReady().then(() => {
           if (!document.querySelector(".script-proposal-shot-plan")) throw new Error("脚本提案没有生成结构化拍摄计划");
           clickText("确认并保存脚本");
           await waitFor(() => document.querySelector(".script-proposal-review")?.textContent?.includes("脚本已确认"), "脚本提案确认");
+          const scriptStageProjects = await window.desktop.listProjects();
+          const scriptStageProject = scriptStageProjects.projects?.[0];
+          const scriptStageLoaded = scriptStageProject ? await window.desktop.loadProject({ projectId: scriptStageProject.id }) : null;
+          if (!scriptStageProjects.ok || !scriptStageProject || !scriptStageLoaded?.ok || !scriptStageLoaded.script || scriptStageLoaded.storyboard || scriptStageLoaded.capturePackage) throw new Error("UI smoke 没有恢复仅完成脚本的项目阶段");
+          await waitFor(() => document.querySelector(".project-resume-row"), "脚本阶段项目恢复列表");
+          const scriptContinueButton = [...document.querySelectorAll(".project-resume-row button")].find((button) => !button.disabled && button.textContent?.includes("继续编辑"));
+          if (!scriptContinueButton) throw new Error("UI smoke 没有找到脚本阶段继续编辑入口");
+          scriptContinueButton.click();
+          await waitFor(() => document.querySelector(".creation-message.success")?.textContent?.includes("继续完善分镜"), "脚本阶段项目恢复反馈");
           clickText("生成并导出拍摄包");
           await wait(900);
           if (!document.querySelector(".capture-result")) throw new Error("拍摄包没有出现在创作页面；body=" + (document.body?.innerText ?? "").slice(-1800));
@@ -1912,9 +1956,21 @@ app.whenReady().then(() => {
           clickText("确认并导出");
           await wait(2_500);
           if (!document.querySelector(".render-success")) throw new Error("AI 剪辑没有成功导出");
+          const renderTitle = document.querySelector(".render-success h3")?.textContent ?? null;
+          const proposalRowCount = document.querySelectorAll(".proposal-row").length;
           const workspaceText = document.querySelector(".workspace-state")?.textContent ?? "";
           const projectId = workspaceText.match(/project-[a-z0-9-]+/i)?.[0] ?? null;
-          return { ok: true, title: document.querySelector(".render-success h3")?.textContent ?? null, proposalRows: document.querySelectorAll(".proposal-row").length, projectId, analysisFactCount: analyzedAssets.facts?.length ?? 0 };
+          const persistedProjects = await window.desktop.listProjects();
+          const loaded = projectId ? await window.desktop.loadProject({ projectId }) : null;
+          if (!persistedProjects.ok || !persistedProjects.projects?.some((project) => project.id === projectId) || !loaded?.ok || loaded.project?.id !== projectId || !loaded.script || !loaded.storyboard || !loaded.tasks?.length || !loaded.capturePackage) throw new Error("UI smoke 没有从 SQLite 恢复已保存项目的脚本、分镜和拍摄包");
+          clickText("创作项目");
+          await waitFor(() => document.querySelector(".project-resume-row"), "本地项目恢复列表");
+          const continueButton = [...document.querySelectorAll(".project-resume-row button")].find((button) => !button.disabled && button.textContent?.includes("继续编辑"));
+          if (!continueButton) throw new Error("UI smoke 没有找到继续编辑入口");
+          continueButton.click();
+          await waitFor(() => document.querySelector(".creation-message.success")?.textContent?.includes("已从本地工作区恢复"), "项目恢复成功反馈");
+          if (!document.querySelector(".capture-result") || document.querySelectorAll(".capture-task").length !== loaded.tasks.length) throw new Error("UI smoke 点击继续编辑后没有恢复拍摄任务和拍摄包");
+          return { ok: true, title: renderTitle, proposalRows: proposalRowCount, projectId, scriptStageRecovered: true, analysisFactCount: analyzedAssets.facts?.length ?? 0, persistedProjectCount: persistedProjects.projects.length, loadedTaskCount: loaded.tasks.length };
         })()`);
         if (!result?.ok) throw new Error("UI smoke 没有返回成功结果");
         const workspace = requireWorkspace();

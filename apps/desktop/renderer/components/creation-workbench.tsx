@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Camera, Check, ExternalLink, FileText, Plus, Upload } from "lucide-react";
+import { Camera, Check, ExternalLink, FileText, FolderOpen, Plus, Upload } from "lucide-react";
 
 const initialBlocks: CaptureWorkflowInput["blocks"] = [
   { kind: "hook", text: "为什么很多人越努力表达，反而越没有记忆点？", visualNeed: "must_show" },
@@ -12,6 +12,39 @@ const initialShots: CaptureWorkflowInput["shots"] = [
   { scriptBlockIndex: 1, purpose: "explain", mode: "talking_head", framing: "close", cameraDirection: "轻微推近或切近景。", actionDescription: "用更近的景别讲出核心判断。", targetMs: 5_000, sourceRequirement: "shoot_task" },
   { scriptBlockIndex: 2, purpose: "prove", mode: "broll", framing: "detail", cameraDirection: "手机俯拍，缓慢横移。", actionDescription: "拍桌面上带有圈画和修改痕迹的草稿。", targetMs: 3_000, sourceRequirement: "shoot_task" },
 ];
+
+const shotPurposes = ["explain", "prove", "transition", "emotion", "reset", "brand"] as const;
+const shotModes = ["talking_head", "broll", "screen_recording", "graphic", "generated", "still"] as const;
+const shotFramings = ["wide", "medium", "close", "detail", "screen"] as const;
+const sourceRequirements = ["existing_asset", "shoot_task", "generated_asset", "any"] as const;
+const deviceHints = ["phone", "camera", "screen", "any"] as const;
+const orientations = ["portrait", "landscape", "any"] as const;
+const projectStageLabels: Record<string, string> = { script: "脚本已确认", capture: "拍摄包已生成", editing: "剪辑中", rendered: "已导出", published: "已发布" };
+
+function savedLiteral<T extends readonly string[]>(value: unknown, allowed: T, fallback: T[number]): T[number] {
+  return typeof value === "string" && allowed.includes(value) ? value as T[number] : fallback;
+}
+
+function restoreScriptDraftShots(script: NonNullable<LoadProjectResult["script"]>, payload: Record<string, unknown>): CaptureWorkflowInput["shots"] {
+  const rawPlans = payload.shotPlans && typeof payload.shotPlans === "object" && !Array.isArray(payload.shotPlans) ? payload.shotPlans as Record<string, unknown> : {};
+  return script.blocks.map((block, index) => {
+    const rawPlan = rawPlans[block.id] && typeof rawPlans[block.id] === "object" && !Array.isArray(rawPlans[block.id]) ? rawPlans[block.id] as Record<string, unknown> : {};
+    const defaultPurpose = block.kind === "evidence" || block.kind === "example" ? "prove" : index === 0 ? "emotion" : "explain";
+    return {
+      scriptBlockIndex: index,
+      purpose: savedLiteral(rawPlan.purpose, shotPurposes, defaultPurpose),
+      mode: savedLiteral(rawPlan.mode, shotModes, "talking_head"),
+      framing: savedLiteral(rawPlan.framing, shotFramings, index === 0 ? "medium" : "close"),
+      cameraDirection: typeof rawPlan.cameraDirection === "string" ? rawPlan.cameraDirection : "保持主体清晰，完整拍一条备用版本。",
+      deviceHint: savedLiteral(rawPlan.deviceHint, deviceHints, "any"),
+      orientation: savedLiteral(rawPlan.orientation, orientations, "portrait"),
+      checklist: Array.isArray(rawPlan.checklist) ? rawPlan.checklist.filter((item): item is string => typeof item === "string") : [],
+      actionDescription: typeof rawPlan.actionDescription === "string" ? rawPlan.actionDescription : `拍摄能够支撑“${block.text}”的画面。`,
+      targetMs: typeof rawPlan.targetMs === "number" && rawPlan.targetMs > 0 ? rawPlan.targetMs : 4_000,
+      sourceRequirement: savedLiteral(rawPlan.sourceRequirement, sourceRequirements, "shoot_task"),
+    };
+  });
+}
 
 export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowReady, openEdit }: { workspaceReady: boolean; chooseWorkspace: () => Promise<void>; onWorkflowReady: (workflow: CaptureWorkflowResult) => void; openEdit: () => void }) {
   const [projectTitle, setProjectTitle] = useState("表达为什么需要画面变化");
@@ -27,8 +60,12 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
   const [acceptedProjectId, setAcceptedProjectId] = useState<string | undefined>();
   const [scriptBusy, setScriptBusy] = useState(false);
   const [takesByTask, setTakesByTask] = useState<Record<string, CaptureTake[]>>({});
+  const [projects, setProjects] = useState<ProjectSummaryView[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [loadingProjectId, setLoadingProjectId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageTone, setMessageTone] = useState<"success" | "error">("error");
 
   useEffect(() => {
     if (!workspaceReady || !window.desktop) {
@@ -42,6 +79,72 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
       setSelectedTopicId((current) => current && selected.some((topic) => topic.id === current) ? current : selected[0]?.id ?? "");
     });
   }, [workspaceReady]);
+
+  useEffect(() => {
+    if (!workspaceReady || !window.desktop) {
+      setProjects([]);
+      setProjectsLoading(false);
+      return;
+    }
+    void refreshProjects();
+  }, [workspaceReady]);
+
+  async function refreshProjects() {
+    if (!window.desktop) return;
+    setProjectsLoading(true);
+    try {
+      const result = await window.desktop.listProjects();
+      if (!result.ok) {
+        setMessageTone("error");
+        setMessage(result.message ?? "本地项目列表读取失败");
+        return;
+      }
+      setProjects(result.projects ?? []);
+    } catch (error) {
+      setMessageTone("error");
+      setMessage(error instanceof Error ? error.message : "本地项目列表读取失败");
+    } finally {
+      setProjectsLoading(false);
+    }
+  }
+
+  async function loadProject(projectId: string) {
+    if (!window.desktop || !projectId || loadingProjectId) return;
+    setLoadingProjectId(projectId);
+    setMessage(null);
+    try {
+      const result = await window.desktop.loadProject({ projectId });
+      if (!result.ok || !result.project || !result.script) {
+        setMessageTone("error");
+        setMessage(result.message ?? "项目载入失败");
+        return;
+      }
+      const loadedScript = result.script;
+      const loadedStoryboard = result.storyboard;
+      const loadedTasks = result.tasks ?? [];
+      const taskByShotId = new Map(loadedTasks.map((task) => [task.shotId, task]));
+      const blockIndexById = new Map(loadedScript.blocks.map((block, index) => [block.id, index]));
+      setProjectTitle(result.project.title);
+      setBlocks(loadedScript.blocks.map((block) => ({ kind: block.kind as CaptureWorkflowInput["blocks"][number]["kind"], text: block.text, visualNeed: block.visualNeed })));
+      setShots(loadedStoryboard ? loadedStoryboard.shots.map((shot) => {
+        const task = taskByShotId.get(shot.id);
+        const blockIndex = shot.scriptBlockIds.map((id) => blockIndexById.get(id)).find((index) => index !== undefined) ?? 0;
+        return { scriptBlockIndex: blockIndex, purpose: shot.purpose, mode: shot.mode, framing: shot.framing, cameraDirection: shot.cameraDirection, deviceHint: task?.deviceHint ?? shot.deviceHint, orientation: task?.orientation ?? shot.orientation, checklist: task?.checklist ?? shot.checklist, actionDescription: task?.instruction ?? shot.actionDescription, targetMs: task?.targetMs ?? shot.targetMs, sourceRequirement: shot.sourceRequirement };
+      }) : restoreScriptDraftShots(loadedScript, result.project.payload));
+      setAcceptedProjectId(result.project.id);
+      setAcceptedScript(loadedScript);
+      setScriptProposal(null);
+      setWorkflow(loadedStoryboard && result.capturePackage ? { ok: true, projectId: result.project.id, script: loadedScript, storyboard: loadedStoryboard, tasks: loadedTasks, capturePackage: result.capturePackage } : null);
+      setTakesByTask(result.takesByTask ?? {});
+      setMessageTone("success");
+      setMessage(loadedStoryboard && result.capturePackage ? `已从本地工作区恢复“${result.project.title}”的脚本、分镜和拍摄任务。` : `已从本地工作区恢复“${result.project.title}”的脚本，可以继续完善分镜。`);
+    } catch (error) {
+      setMessageTone("error");
+      setMessage(error instanceof Error ? error.message : "项目载入失败");
+    } finally {
+      setLoadingProjectId(null);
+    }
+  }
 
   function updateBlock(index: number, patch: Partial<CaptureWorkflowInput["blocks"][number]>) {
     setBlocks((current) => current.map((block, blockIndex) => blockIndex === index ? { ...block, ...patch } : block));
@@ -65,8 +168,12 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
     try {
       const result = await desktop.createCaptureWorkflow({ projectTitle, existingProjectId: acceptedProjectId, existingScriptId: acceptedScript?.id, blocks, shots });
       setWorkflow(result);
+      if (result.ok) void refreshProjects();
       onWorkflowReady(result);
-      if (!result.ok) setMessage(result.message ?? "拍摄包生成失败");
+      if (!result.ok) {
+        setMessageTone("error");
+        setMessage(result.message ?? "拍摄包生成失败");
+      }
     } finally {
       setBusy(false);
     }
@@ -79,7 +186,10 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
     try {
       const result = await window.desktop.proposeScript({ brief: scriptBrief, voiceProfile, topicId: selectedTopicId || undefined });
       if (result.proposal) setScriptProposal(result.proposal);
-      if (!result.ok) setMessage(result.message ?? "脚本提案失败");
+      if (!result.ok) {
+        setMessageTone("error");
+        setMessage(result.message ?? "脚本提案失败");
+      }
     } finally {
       setScriptBusy(false);
     }
@@ -92,6 +202,7 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
     try {
       const result = await window.desktop.acceptScriptProposal({ proposalId: scriptProposal.id, projectTitle });
       if (!result.ok || !result.script) {
+        setMessageTone("error");
         setMessage(result.message ?? "脚本确认失败");
         return;
       }
@@ -107,7 +218,9 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
       setShots(nextShots);
       setAcceptedScript(result.script);
       setAcceptedProjectId(result.project?.id);
+      void refreshProjects();
       setScriptProposal(result.proposal ?? { ...scriptProposal, status: "accepted" });
+      setMessageTone("success");
       setMessage("脚本已确认并保存为本地版本；现在可以继续补分镜和拍摄包。");
     } finally {
       setScriptBusy(false);
@@ -122,7 +235,10 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
     try {
       const result = await desktop.importTake(taskId);
       if (!result.ok || !result.take) {
-        if (result.errorCode !== "cancelled") setMessage(result.message ?? "Take 导入失败");
+        if (result.errorCode !== "cancelled") {
+          setMessageTone("error");
+          setMessage(result.message ?? "Take 导入失败");
+        }
         return;
       }
       setTakesByTask((current) => ({ ...current, [taskId]: [...(current[taskId] ?? []), result.take!] }));
@@ -137,6 +253,7 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
     if (!desktop) return;
     const result = await desktop.selectTake({ shootTaskId: taskId, takeId });
     if (!result.ok) {
+      setMessageTone("error");
       setMessage(result.message ?? "Take 选择失败");
       return;
     }
@@ -153,6 +270,8 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
 
       {!workspaceReady && <div className="workspace-gate"><FileText size={19} /><div><strong>先选择一个本地工作区</strong><p>脚本、SQLite、拍摄包和导入的 Take 都会保存在这个目录。</p></div><button className="primary-button" onClick={chooseWorkspace}>选择工作区</button></div>}
 
+      {workspaceReady && <section className="project-resume-panel" aria-busy={projectsLoading}><div className="project-resume-heading"><div><div className="eyebrow">LOCAL PROJECTS</div><strong>从上次停下的地方继续</strong><small>项目、脚本、分镜和拍摄任务都从本地工作区恢复。</small></div><FolderOpen size={18} /></div>{projectsLoading ? <p className="project-resume-empty" role="status">正在读取本地项目…</p> : projects.length === 0 ? <p className="project-resume-empty">还没有保存的项目，先从下面的脚本或分镜开始。</p> : <div className="project-resume-list">{projects.slice(0, 8).map((project) => <div className={`project-resume-row ${acceptedProjectId === project.id ? "active" : ""}`} key={project.id}><div><strong>{project.title}</strong><small>{projectStageLabels[project.stage] ?? project.stage} · 修订 {project.revision} · {new Date(project.updatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}</small></div><button className="secondary-button" onClick={() => void loadProject(project.id)} disabled={loadingProjectId !== null}>{loadingProjectId === project.id ? "载入中…" : "继续编辑"}</button></div>)}</div>}</section>}
+
       <label className="project-title-field"><span>项目标题</span><input value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} /></label>
 
       {topics.length > 0 && <section className="script-topic-context"><label><span>可选：使用已确认选题</span><select value={selectedTopicId} onChange={(event) => { setSelectedTopicId(event.target.value); setScriptProposal(null); }}><option value="">不绑定选题，按原始思路整理</option>{topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.title}</option>)}</select></label><small>只有选题库中已确认的方向才能进入这里；来源证据会随脚本提案保存。</small></section>}
@@ -166,7 +285,7 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
       </div>
 
       <div className="creation-actions"><button className="secondary-button" onClick={addBlockAndShot}><Plus size={16} /> 添加段落与镜头</button><button className="primary-button" disabled={!workspaceReady || busy} onClick={exportWorkflow}><Camera size={16} /> {busy ? "处理中…" : "生成并导出拍摄包"}</button></div>
-      {message && <div className="creation-message error">{message}</div>}
+      {message && <div className={`creation-message ${messageTone}`} role={messageTone === "error" ? "alert" : "status"}>{message}</div>}
 
       {workflow?.ok && workflow.tasks && <section className="capture-result" aria-live="polite"><div className="capture-result-heading"><div><div className="eyebrow">CAPTURE PACKAGE READY</div><h2>逐镜头拍摄清单</h2></div><div className="capture-result-actions">{workflow.capturePackage && <button className="secondary-button" onClick={() => window.desktop?.openWorkspaceFile(workflow.capturePackage!.relativePath)}><ExternalLink size={15} /> 手机/浏览器查看</button>}<button className="primary-button" onClick={openEdit}><Camera size={15} /> 进入 AI 剪辑</button></div></div><div className="capture-task-list">{workflow.tasks.map((task, index) => <article className="capture-task" key={task.id}><div className="task-number">{String(index + 1).padStart(2, "0")}</div><div className="capture-task-main"><div className="capture-task-title"><strong>{task.title}</strong><span>{Math.round(task.targetMs / 100) / 10} 秒 · {task.deviceHint} · {task.orientation}</span></div><p>{task.instruction}</p><small className="capture-task-checklist">检查：{task.checklist.join(" · ")}</small><div className="take-list">{(takesByTask[task.id] ?? []).map((take, takeIndex) => <button className={`take-chip ${take.status === "selected" ? "selected" : ""}`} key={take.id} onClick={() => chooseTake(task.id, take.id)} aria-pressed={take.status === "selected"}>{take.status === "selected" ? <Check size={13} /> : null}Take {takeIndex + 1}</button>)}<button className="take-import" disabled={busy} onClick={() => importTake(task.id)}><Upload size={13} /> 导入 Take</button></div></div></article>)}</div></section>}
     </section>

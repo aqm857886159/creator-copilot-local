@@ -598,6 +598,11 @@ export class SqliteCatalog {
     return { ...row, payload: parseJson(row.payload_json, "project payload") } as ProjectRecord;
   }
 
+  listProjectsForWorkspace(workspaceId: string) {
+    const rows = this.db.prepare(`SELECT id, workspace_id AS workspaceId, title, stage, revision, payload_json, created_at AS createdAt, updated_at AS updatedAt FROM projects WHERE workspace_id = ? ORDER BY updated_at DESC, id DESC`).all(workspaceId) as Array<Omit<ProjectRecord, "payload"> & { payload_json: string }>;
+    return rows.map((row) => ({ ...row, payload: parseJson(row.payload_json, "project payload") }) as ProjectRecord);
+  }
+
   updateProject(id: string, expectedRevision: number, patch: { title?: string; stage?: string; payload?: Record<string, unknown> }) {
     const current = this.getProject(id);
     if (!current || current.revision !== expectedRevision) return false;

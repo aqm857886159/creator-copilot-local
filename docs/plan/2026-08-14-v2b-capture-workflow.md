@@ -1,7 +1,7 @@
 # V2b：手动脚本、分镜、拍摄包与 Take 工作流
 
 日期：2026-08-14
-状态：已完成（本地 Electron/UI smoke 通过）；V2b 不包含 AI 提案、TikHub 或正式剪辑渲染。
+状态：V2b 手动创作闭环已完成；V2c 已补项目列表与持久化工作流恢复；V2b/V2c 不包含 TikHub 或正式剪辑渲染。
 
 ## 用户结果
 
@@ -40,7 +40,7 @@
 - 素材导入/数据库写入失败：当前会保留已生成的媒体产物，后续 V2c 增加 orphan artifact GC；
 - 工作区/拍摄包使用 workspace-relative path，主进程打开文件前做 lexical + realpath containment；
 - 离线拍摄包不依赖手机访问桌面 localhost；二维码/配对 HTTP 后置；
-- 尚未提供“重启后从项目列表恢复工作流”的 UI 查询，SQLite 持久化已有测试，V2c 补项目恢复入口；
+- 项目列表和“继续编辑”已经通过 `desktop:list-projects` / `desktop:load-project` 接入；恢复只读取本地 catalog，不自动调用 Provider；更复杂的跨窗口恢复、编辑冲突和项目归档后置；
 - 尚未连接 AI、ASR/OCR、TikHub、FrozenEditSpec、RenderIR、剪映/FCPXML。
 
 ## 回滚
