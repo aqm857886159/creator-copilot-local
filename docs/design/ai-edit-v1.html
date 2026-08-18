@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AI 剪辑 · 设计稿 v1</title>
+<style>
+:root{
+  --canvas:#f4f0e8; --rail:#eee9df; --surface:#faf8f3; --raised:#fffdf8;
+  --ink1:#26231e; --ink2:#6b645a; --ink3:#8c857a;
+  --line1:#e0d9ce; --line2:#cdc5b8;
+  --accent:#4f6b49; --accent-bg:#edf2e8; --accent-line:#b9cbb3;
+  --danger:#8a5340; --danger-bg:#f7eae5; --danger-line:#e3c6bb;
+  --cost:#8a6a2f; --cost-bg:#f5ecdc; --cost-line:#ddc79b;
+  --dark:#22211f; --dark2:#2c2b28; --dark3:#3a3835; --dark-ink:#e8e4db; --dark-ink2:#9c968b;
+  --r-sm:6px; --r-md:10px; --r-lg:14px;
+  --serif:Georgia,"Songti SC",serif;
+  --sans:Inter,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--ink1);background:var(--canvas);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+input,select{font:inherit}
+.num{font-variant-numeric:tabular-nums}
+
+/* ---------- shell ---------- */
+.app{display:flex;height:100vh;min-width:1320px;overflow:hidden}
+.rail{width:220px;flex:0 0 220px;background:var(--rail);border-right:1px solid var(--line1);display:flex;flex-direction:column;padding:18px 12px}
+.brand{display:flex;align-items:center;gap:10px;padding:0 10px 20px}
+.brand-mark{width:32px;height:32px;border-radius:9px;background:var(--ink1);color:var(--canvas);display:grid;place-items:center;font-family:var(--serif);font-size:19px}
+.brand-name{font-family:var(--serif);font-size:19px;letter-spacing:.04em}
+.ws{display:flex;align-items:center;gap:9px;margin:0 4px 18px;padding:10px 11px;border:1px solid var(--line2);border-radius:var(--r-sm);font-size:13px;color:var(--ink2);background:var(--surface)}
+.ws-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav-i{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:var(--r-sm);color:var(--ink2);font-size:14px;text-align:left;width:100%}
+.nav-i:hover{background:#e5dfd4;color:var(--ink1)}
+.nav-i[aria-current]{background:#dbd5c9;color:var(--ink1);font-weight:500}
+.nav-i .ic{width:17px;text-align:center;opacity:.75;flex:0 0 17px}
+.nav-i .ct{margin-left:auto;font-size:12px;color:var(--accent);background:var(--accent-bg);border-radius:999px;padding:1px 7px}
+.rail-foot{margin-top:auto;padding:14px 10px 0;border-top:1px solid var(--line1);font-size:12px;color:var(--ink3)}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{height:52px;flex:0 0 52px;display:flex;align-items:center;gap:14px;padding:0 20px;border-bottom:1px solid var(--line1);background:var(--surface)}
+.crumb{font-size:13px;color:var(--ink3)}
+.crumb b{color:var(--ink1);font-weight:500}
+.proj{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink2);padding-left:14px;border-left:1px solid var(--line1)}
+.rev{font-family:var(--mono);font-size:12px;color:var(--ink3);background:var(--canvas);border:1px solid var(--line1);border-radius:var(--r-sm);padding:1px 6px}
+.top-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:var(--r-sm);font-size:13px;font-weight:500;border:1px solid transparent}
+.btn-1{background:var(--ink1);color:#fbf8f1}
+.btn-1:hover{background:#35312a}
+.btn-2{background:var(--surface);border-color:var(--line2);color:var(--ink1)}
+.btn-2:hover{border-color:#a99f90}
+.btn-g{background:transparent;color:var(--ink2)}
+.btn-g:hover{background:#e9e3d8}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-sm{padding:5px 10px;font-size:12px}
+
+/* ---------- editor grid ---------- */
+.ed{flex:1;min-height:0;display:grid;grid-template-columns:minmax(400px,1fr) 400px 340px;grid-template-rows:1fr 320px;grid-template-areas:"script preview panel" "tl tl tl"}
+.script{grid-area:script;border-right:1px solid var(--line1);overflow-y:auto;background:var(--canvas)}
+.preview{grid-area:preview;background:var(--dark);display:flex;flex-direction:column;border-right:1px solid var(--dark3)}
+.panel{grid-area:panel;background:var(--surface);display:flex;flex-direction:column;overflow:hidden}
+.pn-scroll{flex:1;min-height:0;overflow-y:auto}
+.tl{grid-area:tl;background:var(--dark2);border-top:1px solid var(--dark3);display:flex;flex-direction:column}
+
+/* ---------- script / transcript ---------- */
+.sc-head{position:sticky;top:0;z-index:3;background:var(--canvas);border-bottom:1px solid var(--line1);padding:14px 20px 11px}
+.sc-title{display:flex;align-items:center;gap:10px}
+.sc-title h2{font-family:var(--serif);font-size:22px;font-weight:500}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:var(--r-sm);overflow:hidden;margin-left:auto}
+.seg button{padding:5px 11px;font-size:12px;color:var(--ink2);border-right:1px solid var(--line2)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--ink1);color:#fbf8f1}
+.sc-meta{display:flex;align-items:center;gap:14px;margin-top:9px;font-size:12px;color:var(--ink3)}
+.sc-meta .del{color:var(--danger)}
+.tog{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2);cursor:pointer}
+.tog input{accent-color:var(--accent)}
+
+.blk{padding:16px 20px;border-bottom:1px solid var(--line1)}
+.blk:hover{background:var(--raised)}
+.blk-top{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.kind{font-size:12px;color:var(--accent);background:var(--accent-bg);border:1px solid var(--accent-line);border-radius:var(--r-sm);padding:1px 8px}
+.blk-t{font-size:12px;color:var(--ink3);font-family:var(--mono)}
+.blk-body{font-size:15px;line-height:1.95;color:var(--ink1)}
+.w{border-radius:3px;padding:1px 0;cursor:pointer}
+.w:hover{background:#e7e0d2}
+.w.cut{color:var(--ink3);text-decoration:line-through;text-decoration-color:var(--danger);text-decoration-thickness:1.5px}
+.w.cut:hover{background:var(--danger-bg)}
+.gap{display:inline-flex;align-items:center;gap:4px;vertical-align:baseline;margin:0 3px;padding:0 6px;border-radius:999px;border:1px dashed var(--line2);font-size:11px;color:var(--ink3);cursor:pointer;background:var(--surface)}
+.gap:hover{border-color:var(--danger-line);color:var(--danger);background:var(--danger-bg)}
+.gap.cut{border-style:solid;border-color:var(--danger-line);background:var(--danger-bg);color:var(--danger);text-decoration:line-through}
+
+.blk-shot{display:flex;align-items:center;gap:10px;margin-top:12px;padding:9px 11px;border:1px solid var(--line1);border-radius:var(--r-sm);background:var(--surface)}
+.thumb{width:52px;height:30px;flex:0 0 52px;border-radius:4px;background:var(--dark3);display:grid;place-items:center;font-size:11px;color:var(--dark-ink2);overflow:hidden}
+.thumb.b{background:#4a5340}
+.shot-i{min-width:0;flex:1}
+.shot-i strong{display:block;font-size:13px;font-weight:500}
+.shot-i small{display:block;font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.take{font-size:12px;color:var(--accent);white-space:nowrap}
+
+.miss{margin-top:10px;border:1px solid var(--danger-line);border-radius:var(--r-sm);background:var(--danger-bg);padding:11px 12px}
+.miss-t{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:var(--danger)}
+.miss p{font-size:13px;color:#8d6a5d;margin-top:4px}
+.q{margin-top:9px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.q-chip{font-family:var(--mono);font-size:11px;color:#7d5749;background:#fbf3ef;border:1px solid var(--danger-line);border-radius:4px;padding:2px 7px}
+.miss-act{display:flex;gap:7px;margin-top:10px}
+
+/* ---------- preview ---------- */
+.pv-head{padding:11px 16px;border-bottom:1px solid var(--dark3);display:flex;align-items:center;gap:10px}
+.pv-head h2{font-size:14px;font-weight:500;color:var(--dark-ink)}
+.pv-tog{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dark-ink2);cursor:pointer}
+.pv-stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:16px;min-height:0}
+.pv-cap{flex:0 0 auto;font-size:11px;color:#6d6862;text-align:center;line-height:1.5}
+.vid{position:relative;width:auto;flex:1;min-height:0;aspect-ratio:9/16;background:#0e0d0c;border-radius:var(--r-sm);overflow:hidden;display:grid;place-items:center}
+.vid-ph{color:#54514c;font-size:13px;text-align:center;line-height:1.7}
+.safe{position:absolute;inset:9% 7% 17% 7%;border:1px dashed rgba(232,228,219,.32);border-radius:3px;pointer-events:none}
+.badge-9{position:absolute;top:8px;left:8px;font-family:var(--mono);font-size:11px;color:var(--dark-ink2);background:rgba(0,0,0,.45);border-radius:4px;padding:2px 6px}
+.pv-trans{padding:11px 16px 14px;border-top:1px solid var(--dark3)}
+.pv-row{display:flex;align-items:center;gap:12px}
+.play{width:34px;height:34px;flex:0 0 34px;border-radius:50%;background:var(--dark-ink);color:var(--dark);display:grid;place-items:center;font-size:13px}
+.tc{font-family:var(--mono);font-size:13px;color:var(--dark-ink)}
+.tc i{color:var(--dark-ink2);font-style:normal}
+.pv-ico{margin-left:auto;display:flex;gap:4px}
+.pv-ico button{width:28px;height:28px;border-radius:var(--r-sm);color:var(--dark-ink2);display:grid;place-items:center;font-size:13px}
+.pv-ico button:hover{background:var(--dark3);color:var(--dark-ink)}
+.keys{margin-top:11px;display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:#6d6862}
+.keys kbd{font-family:var(--mono);background:var(--dark3);color:var(--dark-ink2);border-radius:3px;padding:1px 5px;font-size:11px}
+
+/* ---------- proposal panel ---------- */
+.pn-head{flex:0 0 auto;background:var(--surface);border-bottom:1px solid var(--line1);padding:14px 16px 11px}
+.pn-head h2{font-family:var(--serif);font-size:19px;font-weight:500}
+.pn-sub{font-size:12px;color:var(--ink3);margin-top:4px}
+.pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:12px;border:1px solid}
+.pill-wait{color:var(--cost);background:var(--cost-bg);border-color:var(--cost-line)}
+
+.stale{margin:12px 16px 0;border:1px solid var(--cost-line);background:var(--cost-bg);border-radius:var(--r-sm);padding:11px 12px}
+.stale strong{display:block;font-size:13px;color:var(--cost)}
+.stale p{font-size:12px;color:#8a7448;margin-top:4px}
+.stale-act{display:flex;gap:7px;margin-top:10px}
+
+.pn-bar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line1);font-size:12px;color:var(--ink2)}
+.pn-bar .sel{font-weight:500;color:var(--ink1)}
+.lnk{font-size:12px;color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+
+.op{display:flex;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line1)}
+.op:hover{background:var(--raised)}
+.op input{margin-top:2px;accent-color:var(--accent);flex:0 0 auto;align-self:flex-start;width:15px;height:15px}
+.op-b{min-width:0;flex:1}
+.op-t{display:flex;align-items:baseline;gap:7px}
+.op-t strong{font-size:13px;font-weight:500}
+.op-t span{font-family:var(--mono);font-size:11px;color:var(--ink3);margin-left:auto;white-space:nowrap}
+.op-why{font-size:13px;color:var(--ink2);margin-top:4px}
+.checks{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.ck{font-size:11px;border-radius:4px;padding:1px 6px;border:1px solid}
+.ck.y{color:var(--accent);background:var(--accent-bg);border-color:var(--accent-line)}
+.ck.n{color:var(--ink3);background:var(--canvas);border-color:var(--line1)}
+.op.rej{opacity:.5}
+.op.rej .op-t strong{text-decoration:line-through}
+
+.caps{margin:14px 16px;border:1px solid var(--line1);border-radius:var(--r-sm);background:var(--canvas);padding:11px 12px}
+.caps h3{font-size:13px;font-weight:500;margin-bottom:8px}
+.cap{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;color:var(--ink2)}
+.cap .st{margin-left:auto;font-size:11px}
+.cap .st.on{color:var(--accent)}
+.cap .st.off{color:var(--ink3)}
+.cap.off{color:var(--ink3)}
+.cap-note{font-size:11px;color:var(--ink3);margin-top:8px;padding-top:8px;border-top:1px dashed var(--line1);line-height:1.6}
+
+.pn-foot{flex:0 0 auto;background:var(--surface);border-top:1px solid var(--line1);padding:12px 16px;display:flex;flex-direction:column;gap:9px;box-shadow:0 -6px 16px rgba(71,61,47,.05)}
+.pn-guard{font-size:12px;color:var(--cost);background:var(--cost-bg);border:1px solid var(--cost-line);border-radius:var(--r-sm);padding:8px 10px}
+.pn-btns{display:flex;gap:7px}
+.pn-btns .btn{flex:1;justify-content:center}
+
+/* ---------- timeline ---------- */
+.tl-bar{height:40px;flex:0 0 40px;display:flex;align-items:center;gap:6px;padding:0 14px;border-bottom:1px solid var(--dark3)}
+.tl-bar .t{font-size:13px;color:var(--dark-ink);font-weight:500;margin-right:6px}
+.tool{width:28px;height:28px;border-radius:var(--r-sm);color:var(--dark-ink2);display:grid;place-items:center;font-size:13px}
+.tool:hover{background:var(--dark3);color:var(--dark-ink)}
+.tool[aria-pressed=true]{background:var(--dark-ink);color:var(--dark)}
+.tl-sp{width:1px;height:18px;background:var(--dark3);margin:0 5px}
+.tl-r{margin-left:auto;display:flex;align-items:center;gap:9px;font-size:12px;color:var(--dark-ink2)}
+.zoom{display:flex;align-items:center;gap:5px}
+
+.tl-body{flex:1;display:flex;min-height:0;overflow:hidden}
+.heads{width:112px;flex:0 0 112px;border-right:1px solid var(--dark3);padding-top:26px}
+.head{display:flex;align-items:center;gap:7px;padding:0 10px;border-bottom:1px solid var(--dark3);font-size:12px;color:var(--dark-ink2)}
+.head strong{font-weight:400;color:var(--dark-ink);font-size:12px}
+.head .hi{margin-left:auto;display:flex;gap:3px;color:#6d6862;font-size:11px}
+.h-ov{height:56px}.h-mn{height:64px}.h-sb{height:32px}
+.lanes{flex:1;position:relative;min-width:0;overflow-x:auto}
+.ruler{height:26px;border-bottom:1px solid var(--dark3);position:relative}
+.tick{position:absolute;top:0;bottom:0;border-left:1px solid var(--dark3)}
+.tick span{position:absolute;top:6px;left:5px;font-family:var(--mono);font-size:11px;color:#6d6862}
+.lane{position:relative;border-bottom:1px solid var(--dark3)}
+.lane.ov{height:56px}.lane.mn{height:64px}.lane.sb{height:32px}
+.lane-bg{position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0,transparent 59px,rgba(255,255,255,.03) 59px,rgba(255,255,255,.03) 60px)}
+.clip{position:absolute;top:5px;bottom:5px;border-radius:5px;padding:5px 7px;overflow:hidden;border:1px solid;cursor:pointer}
+.clip strong{display:block;font-size:12px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:34px}
+.clip small{position:absolute;top:5px;right:7px;font-family:var(--mono);font-size:11px;opacity:.62}
+.c-a{background:#3c4a52;border-color:#556873;color:#d6e2e8}
+.c-a.sel{border-color:#9fc4d6;box-shadow:0 0 0 1px #9fc4d6 inset}
+.c-b{background:#454e3a;border-color:#5f6b4e;color:#dde5d0}
+.c-s{background:#4a4033;border-color:#6a5a47;color:#e8dbc9;top:4px;bottom:4px}
+.wave{position:absolute;left:0;right:0;bottom:3px;height:13px;opacity:.4;background:repeating-linear-gradient(90deg,currentColor 0,currentColor 1px,transparent 1px,transparent 3px);mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+.trs{position:absolute;top:0;bottom:0;width:0;z-index:3;cursor:pointer}
+.trs i{position:absolute;top:50%;left:-7px;width:14px;height:14px;margin-top:-7px;transform:rotate(45deg);background:#e4b95e;border:1px solid #8a6a2f}
+.lane.ov .clip strong{padding-right:0}
+.lane.ov .clip small{position:static;display:block;margin-top:3px}
+.ph{position:absolute;top:0;bottom:0;width:1px;background:#e4b95e;z-index:5;pointer-events:none}
+.ph::before{content:"";position:absolute;top:0;left:-6px;width:13px;height:11px;background:#e4b95e;clip-path:polygon(0 0,100% 0,50% 100%)}
+.gapmark{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(45deg,rgba(138,83,64,.18) 0,rgba(138,83,64,.18) 4px,transparent 4px,transparent 8px);border-left:1px dashed rgba(227,198,187,.5);border-right:1px dashed rgba(227,198,187,.5)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ================= rail ================= -->
+  <aside class="rail">
+    <div class="brand"><div class="brand-mark">原</div><div class="brand-name">原点</div></div>
+    <div class="ws"><span class="ws-dot"></span><span style="flex:1">本地工作区</span><span style="color:var(--ink3)">↗</span></div>
+    <nav class="nav">
+      <button class="nav-i"><span class="ic">◎</span>今天</button>
+      <button class="nav-i"><span class="ic">◈</span>账号雷达</button>
+      <button class="nav-i"><span class="ic">✦</span>选题库<span class="ct">4</span></button>
+      <button class="nav-i"><span class="ic">☰</span>创作项目<span class="ct">2</span></button>
+      <button class="nav-i"><span class="ic">▣</span>素材库</button>
+      <button class="nav-i" aria-current="page"><span class="ic">▶</span>AI 剪辑</button>
+      <button class="nav-i"><span class="ic">◱</span>发布复盘</button>
+    </nav>
+    <div class="rail-foot">本地优先 · 未上传任何素材</div>
+  </aside>
+
+  <!-- ================= main ================= -->
+  <div class="main">
+    <header class="top">
+      <div class="crumb">工作台 / <b>AI 剪辑</b></div>
+      <div class="proj">
+        <span>越努力越没记忆点?</span>
+        <span class="rev">脚本 r7 · 分镜 r3</span>
+      </div>
+      <div class="top-r">
+        <span style="font-size:12px;color:var(--ink3)">刚刚自动保存</span>
+        <button class="btn btn-2">重新分析</button>
+        <button class="btn btn-1">导出</button>
+      </div>
+    </header>
+
+    <div class="ed">
+
+      <!-- ---------- 脚本 / 转写 ---------- -->
+      <section class="script">
+        <div class="sc-head">
+          <div class="sc-title">
+            <h2>脚本</h2>
+            <div class="seg">
+              <button aria-pressed="true">段落</button>
+              <button aria-pressed="false">分段</button>
+            </div>
+          </div>
+          <div class="sc-meta">
+            <label class="tog"><input type="checkbox" checked>显示停顿</label>
+            <span class="del">已删除 6 词 · 3 处停顿</span>
+            <button class="lnk">全部恢复</button>
+            <span style="margin-left:auto">42.6 秒 · 6 段</span>
+          </div>
+        </div>
+
+        <!-- block 01 -->
+        <article class="blk">
+          <div class="blk-top"><span class="kind">开头</span><span class="blk-t">00:00.0 – 00:04.2</span></div>
+          <p class="blk-body">
+            <span class="w">为什么</span><span class="w">很多人</span><span class="w cut">那个</span><span class="gap cut">停顿 0.9s</span><span class="w">越努力</span><span class="w">表达,</span><span class="w">反而</span><span class="w">越</span><span class="w">没有</span><span class="w">记忆点?</span>
+          </p>
+          <div class="blk-shot">
+            <div class="thumb">T01</div>
+            <div class="shot-i"><strong>正面中景 · 真人口播</strong><small>问题说完后停顿半秒,眼神保持稳定</small></div>
+            <span class="take">Take 2 已选</span>
+          </div>
+        </article>
+
+        <!-- block 02 -->
+        <article class="blk">
+          <div class="blk-top"><span class="kind">观点</span><span class="blk-t">00:04.2 – 00:09.3</span></div>
+          <p class="blk-body">
+            <span class="w">因为</span><span class="w">观点</span><span class="w">一直</span><span class="w">停留在</span><span class="w">同一个</span><span class="w">口播画面里,</span><span class="gap">停顿 0.4s</span><span class="w">观众</span><span class="w">没有</span><span class="w">新的</span><span class="w">视觉证据。</span>
+          </p>
+          <div class="blk-shot">
+            <div class="thumb b">B-roll</div>
+            <div class="shot-i"><strong>桌面俯拍 · 覆盖 2.0 秒</strong><small>拍下能让问题立刻具体化的动作或细节</small></div>
+            <span class="take">Take 1 已选</span>
+          </div>
+        </article>
+
+        <!-- block 03 — missing material -->
+        <article class="blk">
+          <div class="blk-top"><span class="kind">证据</span><span class="blk-t">00:09.3 – 00:15.0</span></div>
+          <p class="blk-body">
+            <span class="w">讲到</span><span class="w">修改</span><span class="w">和</span><span class="w">推翻</span><span class="w">的时候,</span><span class="w">要让</span><span class="w">观众</span><span class="w">真正</span><span class="w cut">呃</span><span class="w">看见</span><span class="w">桌面上</span><span class="w">的</span><span class="w">草稿</span><span class="w">和</span><span class="w">修改痕迹。</span>
+          </p>
+          <div class="miss">
+            <div class="miss-t"><span>▲</span>这一段缺画面证据</div>
+            <p>脚本说「看见草稿和修改痕迹」,但没有任何已选 Take 能证明它。不会用泛化 B-roll 顶替。</p>
+            <div class="q">
+              <span class="q-chip">shotSize=detail</span>
+              <span class="q-chip">cameraMotion=slow_pan</span>
+              <span class="q-chip">subject=paper,handwriting</span>
+              <span class="q-chip">action=turning,marking</span>
+              <span class="q-chip">≥3.0s</span>
+            </div>
+            <div class="miss-act">
+              <button class="btn btn-2 btn-sm">用这些条件搜素材库</button>
+              <button class="btn btn-g btn-sm">生成补拍任务</button>
+            </div>
+          </div>
+        </article>
+
+        <!-- block 04 -->
+        <article class="blk">
+          <div class="blk-top"><span class="kind">例子</span><span class="blk-t">00:15.0 – 00:22.0</span></div>
+          <p class="blk-body">
+            <span class="w">我</span><span class="w">以前</span><span class="w">以为</span><span class="w">只要</span><span class="w">多拍</span><span class="w">几个</span><span class="w">镜头,</span><span class="w cut">就</span><span class="w cut">那个</span><span class="gap cut">停顿 1.2s</span><span class="w">口播</span><span class="w">就会</span><span class="w">更丰富。</span>
+          </p>
+          <div class="blk-shot">
+            <div class="thumb">T06</div>
+            <div class="shot-i"><strong>近景 · 真人口播</strong><small>讲具体经历,保持表达连贯</small></div>
+            <span class="take">Take 3 已选</span>
+          </div>
+        </article>
+      </section>
+
+      <!-- ---------- 预览 ---------- -->
+      <section class="preview">
+        <div class="pv-head">
+          <h2>预览</h2>
+          <label class="pv-tog"><input type="checkbox" checked>安全区</label>
+        </div>
+        <div class="pv-stage">
+          <div class="vid">
+            <span class="badge-9">9:16 · 1080×1920</span>
+            <div class="vid-ph">口播主干 · T01 Take 2<br>00:06.0</div>
+            <div class="safe"></div>
+          </div>
+          <p class="pv-cap">安全区为可配置覆盖层 · 抖音未公开官方像素值</p>
+        </div>
+        <div class="pv-trans">
+          <div class="pv-row">
+            <button class="play" aria-label="播放">▶</button>
+            <span class="tc num">00:06.0<i> / 00:42.6</i></span>
+            <div class="pv-ico">
+              <button aria-label="上一个剪辑点">⇤</button>
+              <button aria-label="下一个剪辑点">⇥</button>
+              <button aria-label="循环播放">↻</button>
+            </div>
+          </div>
+          <div class="keys">
+            <span><kbd>空格</kbd> 播放</span>
+            <span><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> 变速</span>
+            <span><kbd>I</kbd><kbd>O</kbd> 入出点</span>
+            <span><kbd>←</kbd><kbd>→</kbd> 逐帧</span>
+            <span><kbd>⌘K</kbd> 拆分</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- AI 提案 ---------- -->
+      <aside class="panel">
+        <div class="pn-head">
+          <h2>AI 剪辑提案</h2>
+          <div class="pn-sub" style="display:flex;align-items:center;gap:8px">
+            <span class="pill pill-wait">待审阅</span>
+            <span>本地提案器 · 8 个操作</span>
+          </div>
+        </div>
+
+        <div class="pn-scroll">
+        <div class="stale">
+          <strong>脚本在这份提案之后改过</strong>
+          <p>提案基于 脚本 r6 / 分镜 r3,当前是 r7。直接应用可能落错位置。</p>
+          <div class="stale-act">
+            <button class="btn btn-2 btn-sm">重新提案</button>
+            <button class="btn btn-g btn-sm">仍然应用</button>
+          </div>
+        </div>
+
+        <div class="pn-bar">
+          <span class="sel">已选 3 / 8</span>
+          <button class="lnk">全选</button>
+          <button class="lnk">清空</button>
+          <span style="margin-left:auto">影响 5 个镜头</span>
+        </div>
+
+        <div class="op">
+          <input type="checkbox" checked aria-label="采用:删除口头词">
+          <div class="op-b">
+            <div class="op-t"><strong>删除 4 处口头词</strong><span>−2.3s</span></div>
+            <p class="op-why">「那个」「呃」「就」不承载信息,删除后两侧都落在低音量区。</p>
+            <div class="checks"><span class="ck y">边界干净</span><span class="ck y">留 0.2s 余量</span><span class="ck y">加 15ms 交叉淡化</span></div>
+          </div>
+        </div>
+
+        <div class="op">
+          <input type="checkbox" checked aria-label="采用:压缩长停顿">
+          <div class="op-b">
+            <div class="op-t"><strong>压缩 3 处长停顿</strong><span>−1.8s</span></div>
+            <p class="op-why">把 0.9s / 1.2s / 1.0s 的停顿压到 0.35s,保留呼吸感。</p>
+            <div class="checks"><span class="ck y">语义未断</span><span class="ck y">不跨段落</span></div>
+          </div>
+        </div>
+
+        <div class="op">
+          <input type="checkbox" checked aria-label="采用:插入 B-roll 覆盖">
+          <div class="op-b">
+            <div class="op-t"><strong>插入 B-roll 覆盖 · 段落 02</strong><span>2.0s</span></div>
+            <p class="op-why">这一段说「没有新的视觉证据」,用桌面俯拍的草稿特写作为证据画面。</p>
+            <div class="checks"><span class="ck y">画面命中</span><span class="ck y">时长匹配</span><span class="ck y">有语音证据</span></div>
+          </div>
+        </div>
+
+        <div class="op">
+          <input type="checkbox" aria-label="采用:叠化转场">
+          <div class="op-b">
+            <div class="op-t"><strong>段落 02→03 加叠化</strong><span>0.5s</span></div>
+            <p class="op-why">两段之间有时间跳跃,硬切会显得突然。</p>
+            <div class="checks"><span class="ck y">xfade dissolve</span><span class="ck n">未审阅</span></div>
+          </div>
+        </div>
+
+        <div class="op">
+          <input type="checkbox" aria-label="采用:缓推运镜">
+          <div class="op-b">
+            <div class="op-t"><strong>段落 04 加缓推</strong><span>1.12×</span></div>
+            <p class="op-why">讲个人经历时轻微推近,强化注意力。</p>
+            <div class="checks"><span class="ck y">zoompan</span><span class="ck n">未审阅</span></div>
+          </div>
+        </div>
+
+        <div class="op rej">
+          <input type="checkbox" aria-label="已拒绝:白闪转场">
+          <div class="op-b">
+            <div class="op-t"><strong>段落 04→05 加白闪</strong><span>0.4s</span></div>
+            <p class="op-why">你已拒绝 — 口播内容不需要这种强度的节奏点。</p>
+            <div class="checks"><span class="ck n">已拒绝 · 保留可恢复</span></div>
+          </div>
+        </div>
+
+        <div class="caps">
+          <h3>本次可用的剪辑能力</h3>
+          <div class="cap"><span>硬切 / 修剪</span><span class="st on">可用</span></div>
+          <div class="cap"><span>转场 · 58 种</span><span class="st on">可用</span></div>
+          <div class="cap"><span>运镜推拉</span><span class="st on">可用</span></div>
+          <div class="cap"><span>变速(保音高)</span><span class="st on">可用</span></div>
+          <div class="cap"><span>调色 / 3D LUT</span><span class="st on">可用</span></div>
+          <div class="cap off"><span>字幕烧录进画面</span><span class="st off">未实现</span></div>
+          <div class="cap off"><span>音频闪避 ducking</span><span class="st off">未实现</span></div>
+          <p class="cap-note">字幕烧录需要启用 libass 的 FFmpeg 构建,当前构建没有。现在只能导出 SRT 边车文件。</p>
+        </div>
+        </div>
+
+        <div class="pn-foot">
+          <div class="pn-guard">连续跑了 6 轮分析 — 先暂停确认方向。</div>
+          <div class="pn-btns">
+            <button class="btn btn-2">预览结果</button>
+            <button class="btn btn-1">应用 3 个操作</button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ---------- 时间线 ---------- -->
+      <section class="tl">
+        <div class="tl-bar">
+          <span class="t">时间线</span>
+          <button class="tool" aria-pressed="true" aria-label="选择工具">▭</button>
+          <button class="tool" aria-label="刀片工具">⁄</button>
+          <span class="tl-sp"></span>
+          <button class="tool" aria-pressed="true" aria-label="吸附">◧</button>
+          <button class="tool" aria-label="涟漪删除">⇥</button>
+          <span class="tl-sp"></span>
+          <button class="tool" aria-label="静音">♪</button>
+          <div class="tl-r">
+            <span>A-roll 连续 · 无空隙</span>
+            <span class="zoom"><button class="tool" aria-label="缩小">−</button><span class="num">120 px/s</span><button class="tool" aria-label="放大">+</button></span>
+          </div>
+        </div>
+        <div class="tl-body">
+          <div class="heads">
+            <div class="head h-ov"><strong>覆盖</strong><span class="hi">◉ ♪</span></div>
+            <div class="head h-mn"><strong>口播</strong><span class="hi">◉ ♪</span></div>
+            <div class="head h-sb"><strong>字幕</strong><span class="hi">◉</span></div>
+          </div>
+          <div class="lanes">
+            <div class="ruler">
+              <div class="tick" style="left:0"><span>0:00</span></div>
+              <div class="tick" style="left:11.74%"><span>0:05</span></div>
+              <div class="tick" style="left:23.47%"><span>0:10</span></div>
+              <div class="tick" style="left:35.21%"><span>0:15</span></div>
+              <div class="tick" style="left:46.95%"><span>0:20</span></div>
+              <div class="tick" style="left:58.69%"><span>0:25</span></div>
+              <div class="tick" style="left:70.42%"><span>0:30</span></div>
+              <div class="tick" style="left:82.16%"><span>0:35</span></div>
+              <div class="tick" style="left:93.90%"><span>0:40</span></div>
+            </div>
+
+            <!-- 覆盖轨 -->
+            <div class="lane ov">
+              <div class="lane-bg"></div>
+              <div class="clip c-b" style="left:9.86%;width:4.69%"><strong>草稿特写</strong><small>2.0s</small></div>
+              <div class="clip c-b" style="left:25.82%;width:7.04%"><strong>桌面俯拍</strong><small>3.0s</small></div>
+              <div class="clip c-b" style="left:46.95%;width:7.04%"><strong>修改痕迹</strong><small>3.0s</small></div>
+            </div>
+
+            <!-- 口播轨 -->
+            <div class="lane mn">
+              <div class="lane-bg"></div>
+              <div class="clip c-a" style="left:0;width:9.86%"><strong>T01 开场</strong><small>4.2s</small><div class="wave"></div></div>
+              <div class="clip c-a sel" style="left:9.86%;width:11.97%"><strong>T03 观点</strong><small>5.1s</small><div class="wave"></div></div>
+              <div class="clip c-a" style="left:21.83%;width:13.38%"><strong>T04 证据</strong><small>5.7s</small><div class="wave"></div></div>
+              <div class="clip c-a" style="left:35.21%;width:16.43%"><strong>T06 例子</strong><small>7.0s</small><div class="wave"></div></div>
+              <div class="clip c-a" style="left:51.64%;width:21.13%"><strong>T08 反方</strong><small>9.0s</small><div class="wave"></div></div>
+              <div class="clip c-a" style="left:72.77%;width:27.23%"><strong>T09 结论</strong><small>11.6s</small><div class="wave"></div></div>
+              <div class="gapmark" style="left:33.1%;width:2.1%" title="已删除停顿 1.2s"></div>
+              <div class="trs" style="left:21.83%" title="叠化 0.5s · xfade dissolve"><i></i></div>
+            </div>
+
+            <!-- 字幕轨 -->
+            <div class="lane sb">
+              <div class="lane-bg"></div>
+              <div class="clip c-s" style="left:0.4%;width:9%"><strong>为什么很多人越努力表达…</strong></div>
+              <div class="clip c-s" style="left:10.3%;width:11.1%"><strong>因为观点一直停留在…</strong></div>
+              <div class="clip c-s" style="left:22.2%;width:12.6%"><strong>讲到修改和推翻的时候…</strong></div>
+              <div class="clip c-s" style="left:35.6%;width:15.6%"><strong>我以前以为只要多拍…</strong></div>
+              <div class="clip c-s" style="left:52%;width:20.4%"><strong>但真正需要补的不是…</strong></div>
+              <div class="clip c-s" style="left:73.2%;width:26.4%"><strong>所以先想清楚要证明什么…</strong></div>
+            </div>
+
+            <div class="ph" style="left:14.08%"></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

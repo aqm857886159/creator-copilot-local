@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AI 剪辑 · 设计稿 v3</title>
+<style>
+:root{
+  --canvas:#f4f0e8; --rail:#eee9df; --surface:#faf8f3; --raised:#fffdf8;
+  --ink1:#26231e; --ink2:#655f55; --ink3:#8c857a;
+  --line1:#e3ddd2; --line2:#cdc5b8;
+  --accent:#4f6b49; --accent-bg:#edf2e8; --accent-line:#b9cbb3;
+  --danger:#8a5340; --danger-bg:#f8ece7; --danger-line:#e0c3b7;
+  --focus:#a8762c; --focus-bg:#fcf3e4; --focus-line:#e2c896;
+  --dark:#22211f; --dark2:#2a2926; --dark3:#3a3835; --dink:#e8e4db;
+  --serif:Georgia,"Songti SC",serif;
+  --sans:Inter,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--ink1);background:var(--canvas);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+input,textarea{font:inherit}
+.num{font-variant-numeric:tabular-nums}
+.app{display:flex;height:100vh;min-width:1400px;overflow:hidden}
+
+/* rail */
+.rail{width:212px;flex:0 0 212px;background:var(--rail);border-right:1px solid var(--line1);display:flex;flex-direction:column;padding:18px 12px}
+.brand{display:flex;align-items:center;gap:10px;padding:0 10px 20px}
+.brand-mark{width:31px;height:31px;border-radius:9px;background:var(--ink1);color:var(--canvas);display:grid;place-items:center;font-family:var(--serif);font-size:18px}
+.brand-name{font-family:var(--serif);font-size:18px;letter-spacing:.04em}
+.ws{display:flex;align-items:center;gap:9px;margin:0 4px 18px;padding:9px 11px;border:1px solid var(--line2);border-radius:7px;font-size:13px;color:var(--ink2);background:var(--surface)}
+.ws-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav-i{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:7px;color:var(--ink2);font-size:14px;text-align:left;width:100%}
+.nav-i:hover{background:#e5dfd4;color:var(--ink1)}
+.nav-i[aria-current]{background:#dbd5c9;color:var(--ink1);font-weight:500}
+.nav-i .ic{width:16px;text-align:center;opacity:.7;flex:0 0 16px}
+.nav-i .ct{margin-left:auto;font-size:12px;color:var(--accent);background:var(--accent-bg);border-radius:999px;padding:1px 7px}
+.rail-foot{margin-top:auto;padding:13px 10px 0;border-top:1px solid var(--line1);font-size:12px;color:var(--ink3)}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{height:52px;flex:0 0 52px;display:flex;align-items:center;gap:13px;padding:0 18px;border-bottom:1px solid var(--line1);background:var(--surface)}
+.crumb{font-size:13px;color:var(--ink3)}.crumb b{color:var(--ink1);font-weight:500}
+.proj{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--ink2);padding-left:13px;border-left:1px solid var(--line1)}
+.rev{font-family:var(--mono);font-size:12px;color:var(--ink3)}
+.top-r{margin-left:auto;display:flex;align-items:center;gap:9px}
+.save{font-size:12px;color:var(--ink3)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 13px;border-radius:7px;font-size:13px;font-weight:500;border:1px solid transparent;white-space:nowrap}
+.btn-1{background:var(--ink1);color:#fbf8f1}.btn-1:hover{background:#37332b}
+.btn-2{background:var(--surface);border-color:var(--line2);color:var(--ink1)}.btn-2:hover{border-color:#a99f90}
+.btn-g{color:var(--ink2)}.btn-g:hover{background:#eae4d9}
+.btn-sm{padding:6px 11px;font-size:12px;border-radius:6px}
+.work{flex:1;min-height:0;display:flex}
+
+/* 对话 */
+.chat{width:268px;flex:0 0 268px;border-right:1px solid var(--line1);display:flex;flex-direction:column;background:var(--canvas)}
+.chat-h{flex:0 0 auto;padding:13px 15px 10px;border-bottom:1px solid var(--line1);display:flex;align-items:center}
+.chat-h h2{font-size:14px;font-weight:500}
+.chat-h .mode{margin-left:auto;font-size:12px;color:var(--ink2);border:1px solid var(--line2);border-radius:999px;padding:2px 9px;background:var(--surface)}
+.chat-log{flex:1;min-height:0;overflow-y:auto;padding:14px 15px;display:flex;flex-direction:column;gap:14px}
+.m-you{align-self:flex-end;max-width:88%;background:var(--ink1);color:#f6f2ea;border-radius:12px 12px 3px 12px;padding:8px 11px;font-size:13px;line-height:1.65}
+.m-ai{font-size:13px;color:var(--ink2);line-height:1.75}.m-ai b{color:var(--ink1);font-weight:500}
+.m-sys{font-size:12px;color:#8d6220;background:var(--focus-bg);border:1px solid var(--focus-line);border-radius:8px;padding:9px 11px;line-height:1.6}
+.chat-c{flex:0 0 auto;border-top:1px solid var(--line1);padding:11px 13px 13px;background:var(--surface)}
+.chat-in{width:100%;min-height:60px;resize:none;border:1px solid var(--line2);border-radius:8px;padding:9px 10px;font-size:13px;line-height:1.6;background:var(--raised);color:var(--ink1)}
+.chat-in::placeholder{color:var(--ink3)}
+.chat-in:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+.chat-b{display:flex;align-items:center;gap:8px;margin-top:8px}
+.chat-b .hint{font-size:12px;color:var(--ink3)}
+
+/* 成片 */
+.stage{flex:1;min-width:0;background:var(--dark);display:flex;flex-direction:column;border-right:1px solid var(--dark3)}
+.st-h{flex:0 0 auto;padding:12px 18px 11px;border-bottom:1px solid var(--dark3);display:flex;align-items:center;gap:12px}
+.tabs{display:inline-flex;border:1px solid var(--dark3);border-radius:7px;overflow:hidden}
+.tabs button{padding:5px 13px;font-size:13px;color:#9d978c;border-right:1px solid var(--dark3)}
+.tabs button:last-child{border-right:0}
+.tabs button[aria-pressed=true]{background:var(--dink);color:var(--dark);font-weight:500}
+.st-meta{margin-left:auto;font-size:12px;color:#8e887e}
+.st-meta b{color:var(--dink);font-weight:400}
+.st-body{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:18px}
+.vid{position:relative;flex:1;min-height:0;aspect-ratio:9/16;background:#0e0d0c;border-radius:9px;overflow:hidden;display:grid;place-items:center}
+.vid-ph{color:#57534d;font-size:13px;text-align:center;line-height:1.9}
+.vid-ph b{display:block;color:#948e84;font-weight:400;font-size:15px;margin-bottom:4px}
+.safe{position:absolute;inset:9% 7% 17% 7%;border:1px dashed rgba(232,228,219,.22);border-radius:3px}
+.tag9{position:absolute;top:9px;left:9px;font-family:var(--mono);font-size:11px;color:#8e887e;background:rgba(0,0,0,.5);border-radius:4px;padding:2px 6px}
+.st-cap{font-size:11px;color:#6b665f}
+.st-t{flex:0 0 auto;padding:13px 18px 16px;border-top:1px solid var(--dark3)}
+.scrub{position:relative;height:5px;border-radius:3px;background:#3d3b38;margin-bottom:12px;cursor:pointer}
+.scrub i{position:absolute;top:0;bottom:0;left:0;width:29%;background:var(--dink);border-radius:3px}
+.scrub .qm{position:absolute;top:-4px;width:3px;height:13px;border-radius:2px;background:var(--focus)}
+.st-row{display:flex;align-items:center;gap:12px}
+.play{width:36px;height:36px;flex:0 0 36px;border-radius:50%;background:var(--dink);color:var(--dark);display:grid;place-items:center;font-size:13px}
+.tc{font-family:var(--mono);font-size:13px;color:var(--dink)}.tc i{color:#8e887e;font-style:normal}
+.st-i{margin-left:auto;display:flex;gap:3px}
+.st-i button{width:28px;height:28px;border-radius:6px;color:#9d978c;display:grid;place-items:center;font-size:12px}
+.st-i button:hover{background:var(--dark3);color:var(--dink)}
+
+/* 右栏 */
+.side{width:428px;flex:0 0 428px;background:var(--surface);display:flex;flex-direction:column;overflow:hidden}
+.sd-scroll{flex:1;min-height:0;overflow-y:auto}
+.sd-h{padding:15px 20px 6px}
+.sd-h h2{font-family:var(--serif);font-size:22px;font-weight:500}
+.sd-h p{font-size:13px;color:var(--ink3);margin-top:5px;line-height:1.6}
+
+.ask{margin:14px 20px 0;border:1px solid var(--focus-line);border-left:3px solid var(--focus);border-radius:0 10px 10px 0;background:var(--focus-bg);padding:14px 16px}
+.ask.red{border-color:var(--danger-line);border-left-color:var(--danger);background:var(--danger-bg)}
+.ask-n{display:flex;align-items:baseline;gap:9px}
+.ask-n .ix{font-family:var(--mono);font-size:12px;color:#fff;background:var(--focus);border-radius:5px;padding:1px 7px}
+.ask.red .ix{background:var(--danger)}
+.ask-n strong{font-size:16px;font-weight:500}
+.ask-n strong{flex:1 1 auto;min-width:0}
+.ask-n .t{flex:0 0 auto;margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink3);white-space:nowrap}
+.ask q{display:block;font-family:var(--serif);font-size:15px;color:var(--ink1);line-height:1.75;margin:10px 0 0;padding-left:11px;border-left:2px solid var(--line2);quotes:none}
+.ask p{font-size:13px;color:#7d6231;margin-top:9px;line-height:1.7}
+.ask.red p{color:#8a6455}
+.cand{display:flex;align-items:center;gap:11px;margin-top:11px;padding:9px 10px;background:var(--raised);border:1px solid var(--line1);border-radius:8px}
+.cd-t{width:52px;height:31px;flex:0 0 52px;border-radius:5px;background:#4a5340;color:#d9e2cc;display:grid;place-items:center;font-size:11px}
+.cd-i{min-width:0;flex:1}
+.cd-i strong{display:block;font-size:13px;font-weight:500}
+.cd-i small{display:block;font-size:12px;color:var(--ink3);margin-top:2px}
+.ck{display:inline-block;font-size:12px;border-radius:5px;padding:2px 8px;border:1px solid;margin:0 5px 0 0}
+.ck.y{color:var(--accent);background:#eef3e9;border-color:var(--accent-line)}
+.ck.n{color:var(--ink3);background:var(--surface);border-color:var(--line1)}
+.q{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
+.q i{font-family:var(--mono);font-style:normal;font-size:12px;color:#7d5749;background:#fdf5f1;border:1px solid var(--danger-line);border-radius:5px;padding:2px 7px}
+.ask-a{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px;padding-top:12px;border-top:1px solid var(--focus-line)}
+.ask.red .ask-a{border-top-color:var(--danger-line)}
+
+/* 收据 */
+.rc{margin:20px 20px 0;border-top:1px solid var(--line1);padding-top:15px}
+.rc-h{display:flex;align-items:baseline;gap:9px}
+.rc-h h3{font-size:14px;font-weight:500}
+.rc-h span{font-size:12px;color:var(--ink3)}
+.rc-h .all{margin-left:auto;font-size:12px;color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+.rc-l{margin-top:10px;display:flex;flex-direction:column}
+.rc-i{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line1);font-size:13px}
+.rc-i:last-child{border-bottom:0}
+.rc-i .tick{color:var(--accent);flex:0 0 auto}
+.rc-i .tx{min-width:0;flex:1;color:var(--ink2)}
+.rc-i .tx b{color:var(--ink1);font-weight:500}
+.rc-i .sv{font-family:var(--mono);font-size:12px;color:var(--ink3);white-space:nowrap}
+.rc-i .un{font-size:12px;color:var(--ink3);text-decoration:underline;text-underline-offset:2px;white-space:nowrap;opacity:0}
+.rc-i:hover .un{opacity:1}
+
+.caps{margin:18px 20px 22px;padding:12px 14px;background:var(--canvas);border:1px solid var(--line1);border-radius:9px}
+.caps h4{font-size:13px;font-weight:500;margin-bottom:9px}
+.cap-row{display:flex;flex-wrap:wrap;gap:5px}
+.cap{font-size:12px;border-radius:5px;padding:2px 8px;border:1px solid var(--line1);color:var(--ink2);background:var(--surface)}
+.cap.off{color:var(--ink3);border-style:dashed;background:transparent}
+.cap.off::before{content:"未实现 · "}
+.caps p{font-size:12px;color:var(--ink3);margin-top:9px;line-height:1.6}
+
+.sd-f{flex:0 0 auto;border-top:1px solid var(--line1);padding:13px 20px;display:flex;align-items:center;gap:10px;background:var(--surface);box-shadow:0 -6px 16px rgba(71,61,47,.045)}
+.sd-f .st{font-size:13px;color:var(--ink2)}
+.sd-f .st b{color:var(--focus);font-weight:500}
+
+/* 时间线 */
+.tl{flex:0 0 auto;background:var(--dark2);border-top:1px solid var(--dark3);height:54px;display:flex;align-items:center;gap:14px;padding:0 18px}
+.tl-l{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--dink)}
+.tl-l .cv{color:#8e887e;font-size:12px}
+.strip{flex:1;min-width:0;position:relative;height:24px;border-radius:5px;background:#333230;overflow:hidden;cursor:pointer}
+.seg{position:absolute;top:0;bottom:0;background:#3f4a52;border-right:1px solid var(--dark2)}
+.ov{position:absolute;top:0;height:6px;background:#5f6b4e}
+.cutm{position:absolute;top:0;bottom:0;width:1px;background:rgba(224,180,120,.5)}
+.qm2{position:absolute;top:0;bottom:0;width:3px;background:var(--focus)}
+.qm2.red{background:#c2705a}
+.ph2{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--dink)}
+.tl-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid var(--dark3);border-radius:7px;font-size:12px;color:#a8a29a;white-space:nowrap}
+.tl-btn:hover{background:var(--dark3);color:var(--dink)}
+</style>
+</head>
+<body>
+<div class="app">
+
+<aside class="rail">
+  <div class="brand"><div class="brand-mark">原</div><div class="brand-name">原点</div></div>
+  <div class="ws"><span class="ws-dot"></span><span style="flex:1">本地工作区</span><span style="color:var(--ink3)">↗</span></div>
+  <nav class="nav">
+    <button class="nav-i"><span class="ic">◎</span>今天</button>
+    <button class="nav-i"><span class="ic">◈</span>账号雷达</button>
+    <button class="nav-i"><span class="ic">✦</span>选题库<span class="ct">4</span></button>
+    <button class="nav-i"><span class="ic">☰</span>创作项目<span class="ct">2</span></button>
+    <button class="nav-i"><span class="ic">▣</span>素材库</button>
+    <button class="nav-i" aria-current="page"><span class="ic">▶</span>AI 剪辑</button>
+    <button class="nav-i"><span class="ic">◱</span>发布复盘</button>
+  </nav>
+  <div class="rail-foot">本地优先 · 素材未上传</div>
+</aside>
+
+<div class="main">
+  <header class="top">
+    <div class="crumb">工作台 / <b>AI 剪辑</b></div>
+    <div class="proj"><span>越努力越没记忆点?</span><span class="rev">脚本 r7</span></div>
+    <div class="top-r">
+      <span class="save">刚刚自动保存</span>
+      <button class="btn btn-2">导出设置</button>
+      <button class="btn btn-1">导出成片</button>
+    </div>
+  </header>
+
+  <div class="work">
+
+    <!-- 对话 -->
+    <section class="chat">
+      <div class="chat-h"><h2>对话</h2><span class="mode">自动剪,有疑问才问</span></div>
+      <div class="chat-log">
+        <div class="m-ai">读完 6 段口播、12 条 Take,共 <b>2 分 18 秒</b> 素材。</div>
+        <div class="m-ai">已经剪好一版 <b>38.5 秒</b> 的成片:选了 4 条最完整的 Take,删掉口头词和长停顿,配了 2 处 B-roll,生成了字幕。</div>
+        <div class="m-ai">有 <b>2 个地方我判断不了</b>,在右边等你定。其余都做完了,不满意可以整类还原。</div>
+        <div class="m-you">开头再紧一点,结尾那句留长一点。</div>
+        <div class="m-ai">开头又压了 <b>0.8 秒</b>(第二处停顿从 0.35 压到 0.2)。结尾「所以先想清楚要证明什么」后面保留了 <b>1.2 秒</b> 静默。</div>
+        <div class="m-sys">脚本在这一版之后改过(r6 → r7)。后半段的字幕可能对不上,建议重新生成字幕。</div>
+      </div>
+      <div class="chat-c">
+        <textarea class="chat-in" placeholder="想改什么直接说…&#10;例如「B-roll 太多了」「把反方那段删掉」"></textarea>
+        <div class="chat-b">
+          <span class="hint">本轮 0 次付费调用</span>
+          <button class="btn btn-1 btn-sm" style="margin-left:auto">发送</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 成片 -->
+    <section class="stage">
+      <div class="st-h">
+        <div class="tabs"><button aria-pressed="true">成片</button><button aria-pressed="false">脚本</button></div>
+        <span class="st-meta">成片 <b>38.5 秒</b> · 原素材 2 分 18 秒 · 压缩到 <b>28%</b></span>
+      </div>
+      <div class="st-body">
+        <div class="vid">
+          <span class="tag9">9:16 · 1080×1920</span>
+          <div class="vid-ph"><b>成片预览</b>00:11.2 · 第 3 个镜头<br>「讲到修改和推翻的时候…」</div>
+          <div class="safe"></div>
+        </div>
+        <p class="st-cap">安全区为可配置覆盖层 · 抖音未公开官方像素值</p>
+      </div>
+      <div class="st-t">
+        <div class="scrub">
+          <i></i>
+          <span class="qm" style="left:29%" title="待你定 1"></span>
+          <span class="qm" style="left:14%" title="待你定 2"></span>
+        </div>
+        <div class="st-row">
+          <button class="play" aria-label="播放">▶</button>
+          <span class="tc num">00:11.2<i> / 00:38.5</i></span>
+          <div class="st-i">
+            <button aria-label="上一个镜头">⇤</button>
+            <button aria-label="下一个镜头">⇥</button>
+            <button aria-label="跳到下一个待定问题">◆</button>
+            <button aria-label="循环播放">↻</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右栏 -->
+    <aside class="side">
+      <div class="sd-scroll">
+        <div class="sd-h">
+          <h2>有两件事要你定</h2>
+          <p>这两处我拿不到能决定的信息,不替你猜。其余 14 项已经做完了。</p>
+        </div>
+
+        <!-- 问题 1 -->
+        <div class="ask red">
+          <div class="ask-n"><span class="ix">1</span><strong>这段没有画面能证明</strong><span class="t">00:08.7 – 00:14.4</span></div>
+          <q>讲到修改和推翻的时候,要让观众真正看见桌面上的草稿和修改痕迹。</q>
+          <p>你说了「看见草稿和修改痕迹」,但 12 条 Take 里没有任何画面拍到纸张或手写。我不会拿泛化空镜顶替 —— 那等于替你编造证据。</p>
+          <div class="q"><i>细节景别</i><i>缓慢横移</i><i>纸张 / 手写</i><i>翻动 / 圈画</i><i>≥ 3.0 秒</i></div>
+          <div class="ask-a">
+            <button class="btn btn-1 btn-sm">生成补拍任务</button>
+            <button class="btn btn-2 btn-sm">搜素材库</button>
+            <button class="btn btn-g btn-sm">这段就用口播画面</button>
+          </div>
+        </div>
+
+        <!-- 问题 2 -->
+        <div class="ask">
+          <div class="ask-n"><span class="ix">2</span><strong>这个 B-roll 我不确定</strong><span class="t">00:04.9 – 00:06.9</span></div>
+          <q>因为观点一直停留在同一个口播画面里,观众没有新的视觉证据。</q>
+          <p>我挑了「桌面俯拍」盖在这句上,因为它是唯一有画面变化的素材。但它拍的是键盘和水杯,和「视觉证据」这个说法只是气氛相关,不算真的证明。这种判断我容易搞错,你看一眼。</p>
+          <div class="cand">
+            <div class="cd-t">B · T02</div>
+            <div class="cd-i"><strong>桌面俯拍 · 缓慢横移</strong><small>Take 1 · 3.4 秒可用 · 无语音</small></div>
+            <button class="btn btn-2 btn-sm">预览</button>
+          </div>
+          <div style="margin-top:10px">
+            <span class="ck y">时长匹配</span><span class="ck y">画面有变化</span><span class="ck n">语义只是气氛相关</span>
+          </div>
+          <div class="ask-a">
+            <button class="btn btn-1 btn-sm">就用它</button>
+            <button class="btn btn-2 btn-sm">换一个</button>
+            <button class="btn btn-g btn-sm">这里不要覆盖</button>
+          </div>
+        </div>
+
+        <!-- 收据 -->
+        <div class="rc">
+          <div class="rc-h"><h3>我已经做完的</h3><span>14 项 · 共省 21.3 秒</span><button class="all">全部还原</button></div>
+          <div class="rc-l">
+            <div class="rc-i"><span class="tick">✓</span><span class="tx">选了 <b>4 条最完整的 Take</b> · 依据完整度和无重复起头</span><span class="sv">4 处</span><button class="un">改选</button></div>
+            <div class="rc-i"><span class="tick">✓</span><span class="tx">删掉 <b>6 个口头词</b> · 那个 ×2、呃 ×2、就 ×2</span><span class="sv">−3.1s</span><button class="un">还原</button></div>
+            <div class="rc-i"><span class="tick">✓</span><span class="tx">压紧 <b>5 处长停顿</b> · 最长 1.2 秒压到 0.35 秒</span><span class="sv">−4.8s</span><button class="un">还原</button></div>
+            <div class="rc-i"><span class="tick">✓</span><span class="tx">剪掉 <b>1 次重来</b> · 第 4 段前两次讲串了</span><span class="sv">−13.4s</span><button class="un">还原</button></div>
+            <div class="rc-i"><span class="tick">✓</span><span class="tx">加了 <b>1 处叠化</b> · 第 2 到第 3 个镜头有时间跳跃</span><span class="sv">0.5s</span><button class="un">还原</button></div>
+            <div class="rc-i"><span class="tick">✓</span><span class="tx">生成 <b>字幕 6 段</b> · 已按标点断行</span><span class="sv">SRT</span><button class="un">重生成</button></div>
+          </div>
+        </div>
+
+        <div class="caps">
+          <h4>本次可用能力</h4>
+          <div class="cap-row">
+            <span class="cap">硬切</span><span class="cap">修剪</span><span class="cap">转场 58 种</span>
+            <span class="cap">运镜推拉</span><span class="cap">变速</span><span class="cap">调色 / LUT</span>
+            <span class="cap off">字幕烧录</span><span class="cap off">音频闪避</span>
+          </div>
+          <p>字幕烧录需要启用 libass 的 FFmpeg 构建,当前构建没有,现在只导出 SRT 边车文件。</p>
+        </div>
+      </div>
+
+      <div class="sd-f">
+        <span class="st">还剩 <b>2 件</b> 要你定</span>
+        <button class="btn btn-2 btn-sm" style="margin-left:auto">都先跳过</button>
+        <button class="btn btn-1 btn-sm">定完这两件</button>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- 时间线 -->
+  <section class="tl">
+    <div class="tl-l"><span>时间线</span><span class="cv">38.5 秒 · 6 个镜头</span></div>
+    <div class="strip" title="点击展开时间线">
+      <div class="seg" style="left:0;width:9.4%"></div>
+      <div class="seg" style="left:9.4%;width:13.2%"></div>
+      <div class="seg" style="left:22.6%;width:14.8%"></div>
+      <div class="seg" style="left:37.4%;width:18.2%"></div>
+      <div class="seg" style="left:55.6%;width:23.4%"></div>
+      <div class="seg" style="left:79%;width:21%"></div>
+      <div class="ov" style="left:12.7%;width:5.2%"></div>
+      <div class="ov" style="left:60%;width:6.4%"></div>
+      <div class="cutm" style="left:4.2%"></div><div class="cutm" style="left:16.8%"></div>
+      <div class="cutm" style="left:31.5%"></div><div class="cutm" style="left:47.2%"></div>
+      <div class="cutm" style="left:63.9%"></div><div class="cutm" style="left:84.1%"></div>
+      <div class="qm2" style="left:14%"></div>
+      <div class="qm2 red" style="left:29%"></div>
+      <div class="ph2" style="left:29%"></div>
+    </div>
+    <button class="tl-btn">展开精修 ⌃</button>
+  </section>
+
+</div>
+</div>
+</body>
+</html>

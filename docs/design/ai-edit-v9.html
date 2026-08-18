@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AI 剪辑 · 设计稿 v9</title>
+<style>
+:root{
+  /* 暖纸 */
+  --bg:#f4f0e8; --panel:#f9f6ef; --raised:#fdfbf5; --sunk:#ece7dc;
+  --ink1:#26231e; --ink2:#5e584e; --ink3:#8f887c; --ink4:#b5ada0;
+  --line:#e4ded1; --line2:#d3cbba;
+  --accent:#4c6a46; --accent-bg:#eaf0e4; --accent-line:#bacdb2;
+  --danger:#8a5340; --danger-bg:#f8ebe4; --danger-line:#e0c5b6;
+  --focus:#a5742a; --focus-bg:#fbf2e1; --focus-line:#e2c89b;
+  --hot:#c4622f;
+  /* 两种语域 */
+  --serif:Georgia,"Songti SC","Source Han Serif SC","Noto Serif CJK SC",serif;
+  --sans:Inter,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--ink1);background:var(--bg);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+textarea{font:inherit}
+.num{font-variant-numeric:tabular-nums}
+.app{display:flex;height:100vh;min-width:1320px;overflow:hidden}
+
+.rail{width:206px;flex:0 0 206px;border-right:1px solid var(--line);display:flex;flex-direction:column;padding:19px 12px}
+.brand{display:flex;align-items:center;gap:11px;padding:0 10px 22px}
+.brand-mark{width:31px;height:31px;border-radius:9px;background:var(--ink1);color:var(--bg);display:grid;place-items:center;font-family:var(--serif);font-size:18px}
+.brand-name{font-family:var(--serif);font-size:19px;letter-spacing:.06em}
+.ws{display:flex;align-items:center;gap:9px;margin:0 3px 18px;padding:9px 11px;border:1px solid var(--line2);border-radius:8px;font-size:13px;color:var(--ink2);background:var(--panel)}
+.ws-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
+.nav{display:flex;flex-direction:column;gap:1px}
+.nav-i{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:8px;color:var(--ink2);font-size:14px;text-align:left;width:100%}
+.nav-i:hover{background:var(--sunk);color:var(--ink1)}
+.nav-i[aria-current]{background:#e2dbcc;color:var(--ink1);font-weight:500}
+.nav-i .ic{width:16px;text-align:center;opacity:.6;flex:0 0 16px}
+.nav-i .ct{margin-left:auto;font-size:12px;color:var(--accent);background:var(--accent-bg);border-radius:999px;padding:1px 7px}
+.rail-foot{margin-top:auto;padding:14px 10px 0;border-top:1px solid var(--line);font-size:12px;color:var(--ink3)}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{height:52px;flex:0 0 52px;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid var(--line)}
+.crumb{font-size:13px;color:var(--ink3)}.crumb b{color:var(--ink1);font-weight:500}
+.proj{display:flex;align-items:baseline;gap:9px;padding-left:13px;border-left:1px solid var(--line)}
+.proj .nm{font-family:var(--serif);font-size:15px;color:var(--ink1)}
+.rev{font-family:var(--mono);font-size:11.5px;color:var(--ink3)}
+.top-r{margin-left:auto;display:flex;align-items:center;gap:9px}
+.save{font-size:12px;color:var(--ink3)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid transparent;white-space:nowrap}
+.btn-1{background:var(--ink1);color:#faf7f0}.btn-1:hover{background:#3a352c}
+.btn-2{background:var(--raised);border-color:var(--line2);color:var(--ink1)}
+.btn-2:hover{border-color:#aca291}
+.btn-sm{padding:6px 12px;font-size:12px;border-radius:7px}
+.work{flex:1;min-height:0;display:flex}
+
+/* ================= AI ================= */
+.ai{width:400px;flex:0 0 400px;border-right:1px solid var(--line);display:flex;flex-direction:column}
+.ai-h{flex:0 0 auto;padding:13px 18px 11px;display:flex;align-items:baseline;gap:9px;border-bottom:1px solid var(--line)}
+.ai-h h2{font-family:var(--serif);font-size:16px;font-weight:400;letter-spacing:.02em}
+.ai-h .st{margin-left:auto;font-size:12px;color:var(--focus)}
+.log{flex:1;min-height:0;overflow-y:auto;padding:16px 18px 16px}
+
+/* 用户那一轮 */
+.you{display:flex;gap:10px;padding:4px 0;font-family:var(--serif);font-size:15px;line-height:1.8}
+.you .g{flex:0 0 11px;color:var(--hot);font-family:var(--sans);font-size:12px;line-height:1.85}
+.you .t{flex:1;min-width:0}
+.you + .say{margin-top:11px}
+
+/* ① AI 的话 —— 衬线,这是"声音" */
+.say{font-family:var(--serif);font-size:15px;line-height:1.95;color:var(--ink1);letter-spacing:.01em}
+.say + .card{margin-top:11px}
+
+/* ② 产物卡 —— 轻,不要 widget 感 */
+.card{border:1px solid var(--line);border-radius:11px;background:var(--panel);overflow:hidden}
+.card-h{display:flex;align-items:baseline;gap:9px;padding:9px 12px 8px;border-bottom:1px solid var(--line)}
+.vtag{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--accent)}
+.card-h strong{flex:1 1 auto;min-width:0;font-family:var(--serif);font-size:14px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-h .m{flex:0 0 auto;font-family:var(--mono);font-size:11.5px;color:var(--ink3)}
+.card-h .cv{flex:0 0 auto;color:var(--ink4);font-size:11px}
+.card-b{padding:6px 12px 8px}
+
+/* ③ 动作行 —— 无衬线,机器事实,密 */
+.ev{display:flex;align-items:baseline;gap:9px;padding:2px 0;font-size:13px;line-height:1.5}
+.ev + .ev{margin-top:0}
+.g{flex:0 0 10px;width:10px;font-size:9px;line-height:2;text-align:center}
+.g.ok{color:var(--accent)}.g.dim{color:var(--ink4)}.g.warn{color:var(--focus)}
+.ev .t{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink2)}
+.ev .m{flex:0 0 auto;font-family:var(--mono);font-size:11.5px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.ev .m em{font-style:normal;color:var(--accent)}
+.more{padding:4px 0 1px 19px;font-size:12px;color:var(--ink3)}
+.more:hover{color:var(--ink1)}
+
+/* ④ 结果 + 版本行 */
+.res{display:flex;align-items:baseline;gap:8px;padding:7px 12px 0;font-size:12.5px;color:var(--ink2);border-top:1px solid var(--line);margin:6px -12px 0}
+.res .m{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--accent)}
+.ckpt{display:flex;align-items:center;gap:7px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:12px;color:var(--ink3)}
+.ckpt .bm{font-family:var(--mono);font-size:11px}
+.ckpt .sp2{flex:1}
+.ckpt button{font-size:12px;color:var(--ink2);border:1px solid var(--line2);border-radius:6px;padding:3px 9px;background:var(--raised)}
+.ckpt button:hover{border-color:var(--ink2);color:var(--ink1)}
+.ckpt button.star{padding:3px 8px;color:var(--ink4)}
+.card + .say, .card + .you, .card + .pick, .card + .chips, .say + .pick{margin-top:15px}
+
+/* ⑤ 选择器 */
+.pick{border:1px solid var(--danger-line);border-radius:11px;background:var(--danger-bg);overflow:hidden}
+.pick-h{display:flex;align-items:baseline;gap:8px;padding:10px 13px 0}
+.chip-h{font-size:11.5px;color:var(--danger);letter-spacing:.06em}
+.pick-h .at{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--ink3)}
+.pick-q{padding:5px 13px 0;font-family:var(--serif);font-size:16px;line-height:1.65;color:var(--ink1)}
+.ctx{display:flex;gap:10px;margin:10px 13px 0;padding:8px 9px;background:var(--raised);border-radius:8px}
+.ctx-t{width:40px;height:24px;flex:0 0 40px;border-radius:4px;background:#7d5749;color:#f0dcd4;display:grid;place-items:center;font-size:10px}
+.ctx q{flex:1;min-width:0;font-family:var(--serif);font-size:13px;line-height:1.6;color:var(--ink2);quotes:none}
+.opts{padding:11px 13px 0;display:flex;flex-direction:column;gap:6px}
+.opt{display:flex;gap:10px;width:100%;text-align:left;padding:8px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--raised)}
+.opt:hover{border-color:var(--ink2);background:#fff}
+.opt .k{flex:0 0 15px;width:15px;height:15px;margin-top:3px;border-radius:4px;background:var(--sunk);color:var(--ink3);font-family:var(--mono);font-size:10px;display:grid;place-items:center}
+.opt:hover .k{background:var(--ink1);color:#faf7f0}
+.opt .ob{min-width:0;flex:1}
+.opt .ol{display:flex;align-items:baseline;gap:7px}
+.opt .ol b{font-family:var(--serif);font-size:14px;font-weight:400}
+.opt .rec{font-size:11px;color:var(--accent);letter-spacing:.04em}
+.opt .od{display:block;font-size:12px;color:var(--ink3);line-height:1.6;margin-top:2px}
+.pick-f{display:flex;align-items:center;gap:8px;margin-top:11px;padding:8px 13px 10px;border-top:1px solid var(--danger-line)}
+.kbd{flex:1;min-width:0;font-size:11px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbd b{font-family:var(--mono);font-weight:400;color:var(--ink2)}
+.pick-f button{flex:0 0 auto;font-size:12px;color:var(--ink2);border:1px solid var(--line2);border-radius:6px;padding:3px 10px;background:var(--raised)}
+.pick-f button:hover{border-color:var(--ink2);color:var(--ink1)}
+
+/* 已答回执 */
+.dn{display:flex;align-items:baseline;gap:9px;padding:3px 0;font-size:13px}
+.dn .g{flex:0 0 10px;color:var(--accent);font-size:9px;line-height:2}
+.dn .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink2)}
+.dn .t i{font-style:normal;color:var(--ink1)}
+.dn button{flex:0 0 auto;font-size:11.5px;color:var(--ink4)}
+.dn button:hover{color:var(--ink1)}
+.note{padding:1px 0 3px 19px;font-family:var(--serif);font-size:13px;color:var(--ink3);line-height:1.7}
+.nx{display:flex;align-items:baseline;gap:9px;margin-top:11px;padding:3px 0;font-size:13px;cursor:pointer;border-radius:6px}
+.nx:hover{background:var(--sunk)}
+.nx .t{flex:1;color:var(--ink2)}
+.nx .m{font-family:var(--mono);font-size:11.5px;color:var(--ink3)}
+
+/* ⑥ chips */
+.chips{display:flex;gap:7px;margin-top:14px;overflow-x:auto;padding-bottom:2px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;border:1px solid var(--line2);border-radius:999px;padding:5px 13px;font-size:12.5px;color:var(--ink2);background:var(--raised);white-space:nowrap}
+.chip:hover{border-color:var(--ink2);color:var(--ink1)}
+
+/* composer */
+.comp{flex:0 0 auto;padding:11px 15px 13px;border-top:1px solid var(--line)}
+.cbox{border:1px solid var(--line2);border-radius:13px;background:var(--raised);padding:9px 11px 8px}
+.cbox:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
+.skill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink2);background:var(--sunk);border-radius:6px;padding:2px 8px;margin-bottom:7px}
+.skill button{color:var(--ink4);font-size:11px}
+.cin{width:100%;min-height:38px;resize:none;border:0;outline:0;background:transparent;font-family:var(--serif);font-size:14.5px;line-height:1.75;color:var(--ink1)}
+.cin::placeholder{color:var(--ink4)}
+.crow{display:flex;align-items:center;gap:4px;margin-top:5px}
+.mode{display:inline-flex;align-items:center;gap:4px;font-size:12px;border:1px solid var(--line2);border-radius:7px;padding:3px 9px;background:var(--panel)}
+.mdl{font-size:12px;color:var(--ink2);padding:3px 7px;border-radius:6px}
+.mdl:hover{background:var(--sunk)}
+.cico{display:flex;margin-left:3px}
+.cico button{width:25px;height:25px;border-radius:6px;color:var(--ink4);display:grid;place-items:center;font-size:13px}
+.cico button:hover{background:var(--sunk);color:var(--ink1)}
+.send{width:28px;height:28px;border-radius:50%;background:var(--hot);color:#fff;display:grid;place-items:center;font-size:12px;margin-left:auto}
+.cnote{font-size:11px;color:var(--ink4);padding:7px 3px 0}
+
+/* ================= 中右 ================= */
+.rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.upper{flex:1;min-height:0;display:flex}
+.lib{width:296px;flex:0 0 296px;border-right:1px solid var(--line);display:flex;flex-direction:column}
+.tabs{flex:0 0 auto;display:flex;gap:3px;padding:11px 13px 9px;border-bottom:1px solid var(--line)}
+.tab{padding:5px 11px;border-radius:7px;font-size:12.5px;color:var(--ink3)}
+.tab:hover{background:var(--sunk);color:var(--ink1)}
+.tab[aria-selected=true]{background:var(--ink1);color:#faf7f0;font-weight:500}
+.lib-b{flex:1;min-height:0;overflow-y:auto;padding:13px 16px 18px}
+.doc-m{display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--ink3);margin-bottom:14px}
+.doc-m .del{color:var(--danger)}
+.sblk{margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.sblk:last-child{border-bottom:0}
+.sblk-h{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.kind{font-size:11px;color:var(--ink3);letter-spacing:.06em}
+.sblk-t{font-family:var(--mono);font-size:11px;color:var(--ink4);margin-left:auto}
+/* 脚本正文 —— 创作内容,衬线 */
+.sblk-p{font-family:var(--serif);font-size:14.5px;line-height:2.05;letter-spacing:.01em}
+.w.cut{color:var(--ink4);text-decoration:line-through;text-decoration-color:var(--danger);text-decoration-thickness:1.5px}
+.w.mark{background:var(--focus-bg);box-shadow:0 0 0 1px var(--focus-line);border-radius:3px}
+.gp{display:inline-block;margin:0 3px;padding:0 5px;border-radius:999px;border:1px dashed var(--line2);font-family:var(--sans);font-size:10.5px;color:var(--ink4);vertical-align:2px}
+.gp.cut{border-style:solid;border-color:var(--danger-line);background:var(--danger-bg);color:var(--danger);text-decoration:line-through}
+.gp.mark{border-style:solid;border-color:var(--focus-line);background:var(--focus-bg);color:var(--focus)}
+.sh{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:var(--ink3)}
+.sh-t{width:32px;height:19px;flex:0 0 32px;border-radius:4px;background:#414c54;color:#cfdae1;display:grid;place-items:center;font-size:10px}
+.sh-t.b{background:#4a5340;color:#d9e2cc}
+.sh-t.x{background:#7d5749;color:#f0dcd4}
+.sh .tk2{margin-left:auto;color:var(--accent)}
+
+.pv{flex:1;min-width:0;display:flex;flex-direction:column}
+.pv-h{flex:0 0 auto;padding:13px 18px 10px;display:flex;align-items:baseline;gap:10px}
+.pv-h h2{font-family:var(--serif);font-size:16px;font-weight:400;letter-spacing:.02em}
+.pv-h .m{margin-left:auto;font-size:12px;color:var(--ink3)}
+.pv-h .m b{color:var(--ink1);font-weight:500;font-family:var(--serif);font-style:italic}
+.pv-b{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:4px 18px 15px}
+.vid{position:relative;flex:1;min-height:0;aspect-ratio:9/16;background:#1a1917;border-radius:11px;overflow:hidden;display:grid;place-items:center}
+.vid-ph{color:#5e5a52;font-size:12.5px;text-align:center;line-height:1.95}
+.vid-ph b{display:block;font-family:var(--serif);color:#9a9389;font-weight:400;font-size:15px;margin-bottom:4px}
+.safe{position:absolute;inset:9% 7% 17% 7%;border:1px dashed rgba(240,236,228,.18);border-radius:3px}
+.tag9{position:absolute;top:9px;left:9px;font-family:var(--mono);font-size:11px;color:#8b857b;background:rgba(0,0,0,.42);border-radius:4px;padding:2px 6px}
+.pv-cap{font-size:11px;color:var(--ink4)}
+
+.tl{flex:0 0 auto;height:230px;border-top:1px solid var(--line);display:flex;flex-direction:column;background:var(--panel)}
+.tlb{flex:0 0 auto;height:41px;display:flex;align-items:center;gap:3px;padding:0 14px;border-bottom:1px solid var(--line)}
+.tool{width:28px;height:28px;border-radius:7px;color:var(--ink2);display:grid;place-items:center;font-size:13px}
+.tool:hover{background:var(--sunk);color:var(--ink1)}
+.tool[aria-pressed=true]{background:var(--ink1);color:#faf7f0}
+.tool.hot[aria-pressed=true]{background:var(--hot);color:#fff}
+.sp{width:1px;height:16px;background:var(--line2);margin:0 6px}
+.tlb .mid{margin:0 auto;display:flex;align-items:center;gap:9px}
+.tlb .tc{font-family:var(--mono);font-size:12.5px}
+.tlb .rgt{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink3)}
+.zr{width:70px;height:3px;border-radius:2px;background:var(--line2);position:relative}
+.zr i{position:absolute;top:-4px;left:38%;width:11px;height:11px;border-radius:50%;background:var(--raised);border:1px solid var(--ink3)}
+.tlw{flex:1;min-height:0;display:flex;overflow:hidden}
+.heads{width:114px;flex:0 0 114px;border-right:1px solid var(--line);padding-top:22px}
+.hd{display:flex;align-items:center;gap:6px;padding:0 10px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--ink3)}
+.hd .bg{font-size:10.5px;color:#fff;border-radius:4px;padding:1px 5px;font-family:var(--mono)}
+.hd .bg.v{background:#5a7f96}.hd .bg.b{background:#6b7a55}.hd .bg.c{background:#9a7d4e}
+.hd .hi{margin-left:auto;color:var(--line2);font-size:10.5px}
+.h1{height:46px}.h2{height:52px}.h3{height:28px}
+.lanes{flex:1;position:relative;min-width:0;overflow-x:auto}
+.rl{height:22px;border-bottom:1px solid var(--line);position:relative;background:var(--bg)}
+.rtk{position:absolute;top:0;bottom:0;border-left:1px solid var(--line2)}
+.rtk span{position:absolute;top:4px;left:5px;font-family:var(--mono);font-size:10.5px;color:var(--ink4)}
+.ln{position:relative;border-bottom:1px solid var(--line)}
+.ln.a{height:46px}.ln.b{height:52px}.ln.c{height:28px}
+.clip{position:absolute;top:4px;bottom:4px;border-radius:5px;padding:4px 7px;overflow:hidden;border:1px solid;cursor:pointer}
+.clip strong{display:block;font-size:11px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:28px}
+.clip small{position:absolute;top:4px;right:6px;font-family:var(--mono);font-size:10.5px;opacity:.55}
+.c-v{background:#dee6ea;border-color:#b8c9d2;color:#33505f}
+.c-v.sel{border-color:#5a7f96;box-shadow:0 0 0 1px #5a7f96 inset}
+.c-b{background:#e4e8d9;border-color:#c3cdaf;color:#455036}
+.c-c{background:#f1e7d4;border-color:#ddc9a4;color:#6d5730}
+.wv{position:absolute;left:6px;right:6px;bottom:4px;height:10px;opacity:.28;background:repeating-linear-gradient(90deg,currentColor 0,currentColor 1px,transparent 1px,transparent 3px)}
+.qm{position:absolute;top:0;height:148px;width:3px;z-index:3;cursor:pointer}
+.qm.f{background:var(--focus)}.qm.r{background:#bd6c55}
+.ph{position:absolute;top:0;height:148px;width:1px;background:var(--hot);z-index:5}
+.ph::before{content:"";position:absolute;top:0;left:-6px;width:13px;height:10px;background:var(--hot);clip-path:polygon(0 0,100% 0,50% 100%)}
+</style>
+</head>
+<body>
+<div class="app">
+
+<aside class="rail">
+  <div class="brand"><div class="brand-mark">原</div><div class="brand-name">原点</div></div>
+  <div class="ws"><span class="ws-dot"></span><span style="flex:1">本地工作区</span><span style="color:var(--ink4)">↗</span></div>
+  <nav class="nav">
+    <button class="nav-i"><span class="ic">◎</span>今天</button>
+    <button class="nav-i"><span class="ic">◈</span>账号雷达</button>
+    <button class="nav-i"><span class="ic">✦</span>选题库<span class="ct">4</span></button>
+    <button class="nav-i"><span class="ic">☰</span>创作项目<span class="ct">2</span></button>
+    <button class="nav-i"><span class="ic">▣</span>素材库</button>
+    <button class="nav-i" aria-current="page"><span class="ic">▶</span>AI 剪辑</button>
+    <button class="nav-i"><span class="ic">◱</span>发布复盘</button>
+  </nav>
+  <div class="rail-foot">本地优先 · 素材未上传</div>
+</aside>
+
+<div class="main">
+  <header class="top">
+    <div class="crumb">工作台 / <b>AI 剪辑</b></div>
+    <div class="proj"><span class="nm">越努力越没记忆点?</span><span class="rev">脚本 r7</span></div>
+    <div class="top-r">
+      <span class="save">刚刚自动保存</span>
+      <button class="btn btn-2 btn-sm">导出设置</button>
+      <button class="btn btn-1 btn-sm">导出成片</button>
+    </div>
+  </header>
+
+  <div class="work">
+
+    <section class="ai">
+      <div class="ai-h"><h2>让画面替观点工作</h2><span class="st">三处待你定</span></div>
+
+      <div class="log">
+
+        <p class="say">同一段你讲了三遍。我留下最松弛的那条,把犹豫和重来剪掉了。</p>
+
+        <div class="card">
+          <div class="card-h"><span class="vtag">v1</span><strong>粗剪</strong><span class="m">38.5s</span><span class="cv">⌃</span></div>
+          <div class="card-b">
+            <div class="ev"><span class="g ok">●</span><span class="t">选 Take</span><span class="m">4 条</span></div>
+            <div class="ev"><span class="g ok">●</span><span class="t">删口头词 · 那个×2 呃×2 就×2</span><span class="m"><em>−3.1s</em></span></div>
+            <div class="ev"><span class="g ok">●</span><span class="t">压长停顿 · 最长 1.2s → 0.35s</span><span class="m"><em>−4.8s</em></span></div>
+            <div class="ev"><span class="g ok">●</span><span class="t">剪掉重来 · 第 4 段讲串了</span><span class="m"><em>−13.4s</em></span></div>
+            <div class="ev"><span class="g ok">●</span><span class="t">配 B-roll</span><span class="m">2 处</span></div>
+            <button class="more">⋯ 其余四项</button>
+            <div class="res"><span>原 2:18 → 38.5s</span><span class="m">省 21.3s</span></div>
+            <div class="ckpt">
+              <span class="bm">12:04</span><span class="sp2"></span>
+              <button>预览</button><button>还原到这里</button><button class="star" aria-label="标记这一版">☆</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="you"><span class="g">❯</span><span class="t">开头再紧一点,结尾那句留长一点</span></div>
+
+        <p class="say">开头那处停顿还能再收;结尾我留了一秒多的静默,让最后一句落下来。</p>
+
+        <div class="card">
+          <div class="card-h"><span class="vtag">v2</span><strong>收紧</strong><span class="m">37.9s</span><span class="cv">⌃</span></div>
+          <div class="card-b">
+            <div class="ev"><span class="g ok">●</span><span class="t">压开头停顿 · 0.35s → 0.2s</span><span class="m"><em>−0.8s</em></span></div>
+            <div class="ev"><span class="g ok">●</span><span class="t">结尾留白</span><span class="m">+1.2s</span></div>
+            <div class="ckpt">
+              <span class="bm">12:09</span><span class="sp2"></span>
+              <button>预览</button><button>还原到这里</button><button class="star" aria-label="标记这一版">☆</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="say">还有三处我不敢替你决定,一个一个来。</p>
+
+        <div class="dn"><span class="g">●</span><span class="t">开场用哪条 <i>→ Take 2</i></span><button>展开</button></div>
+        <p class="note">「第三条更松,但眼神飘。」</p>
+
+        <div class="pick">
+          <div class="pick-h"><span class="chip-h">缺画面证据</span><span class="at">00:08.7</span></div>
+          <p class="pick-q">这句话需要一个画面撑住,但我没找到。</p>
+          <div class="ctx">
+            <span class="ctx-t">无素材</span>
+            <q>……要让观众真正看见桌面上的草稿和修改痕迹。</q>
+          </div>
+          <div class="opts">
+            <button class="opt">
+              <span class="k">1</span>
+              <span class="ob"><span class="ol"><b>生成补拍任务</b><span class="rec">推荐</span></span>
+              <span class="od">出一条可执行的拍摄清单:细节景别 · 缓慢横移 · 纸张手写 · 三秒以上</span></span>
+            </button>
+            <button class="opt">
+              <span class="k">2</span>
+              <span class="ob"><span class="ol"><b>搜素材库</b></span>
+              <span class="od">用同一组条件,在这十二条之外的旧素材里找</span></span>
+            </button>
+            <button class="opt">
+              <span class="k">3</span>
+              <span class="ob"><span class="ol"><b>就用口播画面</b></span>
+              <span class="od">这段不配 B-roll,接受它没有画面证据</span></span>
+            </button>
+          </div>
+          <div class="pick-f">
+            <span class="kbd"><b>1–3</b> 选择 · <b>Tab</b> 补一句 · <b>Esc</b> 跳过</span>
+            <button>其他…</button>
+          </div>
+        </div>
+
+        <div class="nx"><span class="g warn">○</span><span class="t">下一个 · B-roll 拿不准</span><span class="m">00:04.9</span></div>
+
+        <div class="chips">
+          <button class="chip">换个 B-roll</button>
+          <button class="chip">字幕样式</button>
+          <button class="chip">再紧三秒</button>
+          <button class="chip">导出</button>
+        </div>
+      </div>
+
+      <div class="comp">
+        <div class="cbox">
+          <span class="skill">口播剪辑 <button aria-label="移除">✕</button></span>
+          <textarea class="cin" placeholder="说你想改什么……"></textarea>
+          <div class="crow">
+            <button class="mode">✦ Agent ⌄</button>
+            <button class="mdl">本地提案器 ⌄</button>
+            <div class="cico">
+              <button aria-label="添加素材">＋</button>
+              <button aria-label="风格预设">◐</button>
+              <button aria-label="技能库">▤</button>
+            </div>
+            <button class="send" aria-label="发送">↑</button>
+          </div>
+        </div>
+        <p class="cnote">还原会生成新版本,不会删掉 v2</p>
+      </div>
+    </section>
+
+    <div class="rt">
+      <div class="upper">
+
+        <section class="lib">
+          <div class="tabs">
+            <button class="tab" aria-selected="false">我的素材</button>
+            <button class="tab" aria-selected="false">拍摄任务</button>
+            <button class="tab" aria-selected="true">文字稿</button>
+          </div>
+          <div class="lib-b">
+            <div class="doc-m"><span>六段 · 37.9 秒</span><span class="del">删 6 词 · 5 停顿</span></div>
+
+            <div class="sblk">
+              <div class="sblk-h"><span class="kind">开头</span><span class="sblk-t">00:00.0</span></div>
+              <p class="sblk-p">为什么很多人<span class="w cut">那个</span><span class="gp cut">0.9s</span>越努力表达,反而越没有记忆点?</p>
+              <div class="sh"><span class="sh-t">T01</span><span>正面中景</span><span class="tk2">Take 2</span></div>
+            </div>
+
+            <div class="sblk">
+              <div class="sblk-h"><span class="kind">观点</span><span class="sblk-t">00:03.6</span></div>
+              <p class="sblk-p">因为观点一直停留在同一个口播画面里,<span class="gp">0.4s</span>观众没有新的视觉证据。</p>
+              <div class="sh"><span class="sh-t b">B</span><span>桌面俯拍 · 覆盖</span><span class="tk2" style="color:var(--focus)">待你定</span></div>
+            </div>
+
+            <div class="sblk">
+              <div class="sblk-h"><span class="kind">证据</span><span class="sblk-t">00:08.7</span></div>
+              <p class="sblk-p">讲到修改和推翻的时候,要让观众真正<span class="w mark">呃</span><span class="gp mark">1.2s</span>看见桌面上的草稿和修改痕迹。</p>
+              <div class="sh"><span class="sh-t x">缺</span><span style="color:var(--danger)">没有画面能证明</span></div>
+            </div>
+
+            <div class="sblk">
+              <div class="sblk-h"><span class="kind">例子</span><span class="sblk-t">00:14.4</span></div>
+              <p class="sblk-p">我以前以为只要多拍几个镜头,<span class="w cut">就那个</span><span class="gp cut">1.0s</span>口播就会更丰富。</p>
+              <div class="sh"><span class="sh-t">T06</span><span>近景</span><span class="tk2">Take 3</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="pv">
+          <div class="pv-h"><h2>预览</h2><span class="m"><b>v2</b> · 37.9 秒 · 原素材 2 分 18 秒</span></div>
+          <div class="pv-b">
+            <div class="vid">
+              <span class="tag9">9:16 · 1080×1920</span>
+              <div class="vid-ph"><b>成片预览</b>00:11.2 · 第三个镜头<br>「讲到修改和推翻的时候……」</div>
+              <div class="safe"></div>
+            </div>
+            <p class="pv-cap">安全区为可配置覆盖层 · 抖音未公开官方像素值</p>
+          </div>
+        </section>
+
+      </div>
+
+      <section class="tl">
+        <div class="tlb">
+          <button class="tool" aria-pressed="true" aria-label="选择">▭</button>
+          <button class="tool" aria-label="刀片">✂</button>
+          <button class="tool hot" aria-pressed="true" aria-label="吸附">◨</button>
+          <button class="tool" aria-label="链接">⛓</button>
+          <span class="sp"></span>
+          <button class="tool" aria-label="添加轨道">＋</button>
+          <div class="mid">
+            <button class="tool" aria-label="播放">▶</button>
+            <span class="tc num">00:11.2 / 00:37.9</span>
+          </div>
+          <div class="rgt">
+            <button class="tool" aria-label="缩小">−</button>
+            <span class="zr"><i></i></span>
+            <button class="tool" aria-label="放大">＋</button>
+            <span class="sp"></span>
+            <span>A-roll 连续 · 无空隙</span>
+          </div>
+        </div>
+        <div class="tlw">
+          <div class="heads">
+            <div class="hd h1"><span class="bg b">B1</span>覆盖<span class="hi">◉♪</span></div>
+            <div class="hd h2"><span class="bg v">V1</span>口播<span class="hi">◉♪</span></div>
+            <div class="hd h3"><span class="bg c">C1</span>字幕<span class="hi">◉</span></div>
+          </div>
+          <div class="lanes">
+            <div class="rl">
+              <div class="rtk" style="left:0"><span>0:00</span></div>
+              <div class="rtk" style="left:13%"><span>0:05</span></div>
+              <div class="rtk" style="left:26%"><span>0:10</span></div>
+              <div class="rtk" style="left:39%"><span>0:15</span></div>
+              <div class="rtk" style="left:52%"><span>0:20</span></div>
+              <div class="rtk" style="left:65%"><span>0:25</span></div>
+              <div class="rtk" style="left:78%"><span>0:30</span></div>
+              <div class="rtk" style="left:91%"><span>0:35</span></div>
+            </div>
+            <div class="ln a">
+              <div class="clip c-b" style="left:12.7%;width:5.2%"><strong>桌面俯拍</strong></div>
+              <div class="clip c-b" style="left:60%;width:6.4%"><strong>草稿特写</strong></div>
+            </div>
+            <div class="ln b">
+              <div class="clip c-v" style="left:0;width:9.4%"><strong>T01 开场</strong><small>3.6s</small><div class="wv"></div></div>
+              <div class="clip c-v" style="left:9.4%;width:13.2%"><strong>T03 观点</strong><small>5.1s</small><div class="wv"></div></div>
+              <div class="clip c-v sel" style="left:22.6%;width:14.8%"><strong>T04 证据</strong><small>5.7s</small><div class="wv"></div></div>
+              <div class="clip c-v" style="left:37.4%;width:18.2%"><strong>T06 例子</strong><small>7.0s</small><div class="wv"></div></div>
+              <div class="clip c-v" style="left:55.6%;width:23.4%"><strong>T08 反方</strong><small>9.0s</small><div class="wv"></div></div>
+              <div class="clip c-v" style="left:79%;width:21%"><strong>T09 结论</strong><small>8.1s</small><div class="wv"></div></div>
+            </div>
+            <div class="ln c">
+              <div class="clip c-c" style="left:0.4%;width:8.6%"><strong>为什么很多人越努力…</strong></div>
+              <div class="clip c-c" style="left:9.8%;width:12.4%"><strong>因为观点一直停留…</strong></div>
+              <div class="clip c-c" style="left:23%;width:14%"><strong>讲到修改和推翻…</strong></div>
+              <div class="clip c-c" style="left:37.8%;width:17.4%"><strong>我以前以为只要…</strong></div>
+              <div class="clip c-c" style="left:56%;width:22.6%"><strong>但真正需要补的…</strong></div>
+              <div class="clip c-c" style="left:79.4%;width:20.2%"><strong>所以先想清楚…</strong></div>
+            </div>
+            <div class="qm f" style="left:14%" title="待你定:B-roll 拿不准"></div>
+            <div class="qm r" style="left:29%" title="待你定:缺画面证据"></div>
+            <div class="ph" style="left:29%"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  </div>
+</div>
+</div>
+</body>
+</html>
