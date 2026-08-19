@@ -83,8 +83,10 @@ export function deriveNextAction(project: ProjectLike): NextAction {
       return {
         stageLabel: "剪辑中",
         stages: stagesUpTo("editing"),
-        nextLine: "素材齐了，AI 已备好一版粗剪等你过目",
-        pulsing: true,
+        // 不承诺「已备好」:提案回载是 S2,当前进入剪辑页仍需用户点一次生成。
+        // 红点语义保留给「等你定」(S2),纯进行中状态不亮。
+        nextLine: "素材已导入，进去让 AI 出一版粗剪",
+        pulsing: false,
         actionLabel: "继续剪辑",
         target: "editing",
       };

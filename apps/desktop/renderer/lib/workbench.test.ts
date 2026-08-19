@@ -19,12 +19,13 @@ describe("deriveNextAction", () => {
     expect(action.stages.map((cell) => cell.state)).toEqual(["done", "now", "todo", "todo", "todo"]);
   });
 
-  it("editing 阶段:亮录制红点,继续剪辑", () => {
+  it("editing 阶段:继续剪辑,文案不承诺未回载的粗剪,红点留给等你定", () => {
     const action = deriveNextAction({ stage: "editing", title: "越努力越没记忆点？" });
     expect(action.stageLabel).toBe("剪辑中");
     expect(action.actionLabel).toBe("继续剪辑");
     expect(action.target).toBe("editing");
-    expect(action.pulsing).toBe(true);
+    expect(action.nextLine).toBe("素材已导入，进去让 AI 出一版粗剪");
+    expect(action.pulsing).toBe(false);
     expect(action.stages.map((cell) => cell.state)).toEqual(["done", "done", "now", "todo", "todo"]);
   });
 
