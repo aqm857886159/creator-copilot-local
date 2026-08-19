@@ -15,9 +15,13 @@ const fixtureRoot = join(root, ".data", "desktop-ui-smoke");
 const workspacePath = join(fixtureRoot, "workspace");
 const incomingPath = join(fixtureRoot, "incoming");
 const sourcePath = join(incomingPath, "phone-take.mp4");
+// 截图落到 fixtureRoot 之外,冒烟结束清理 fixture 后仍可对账。
+const shotDir = join(root, ".data", "desktop-ui-smoke-shots");
 await rm(fixtureRoot, { recursive: true, force: true });
+await rm(shotDir, { recursive: true, force: true });
 await mkdir(workspacePath, { recursive: true });
 await mkdir(incomingPath, { recursive: true });
+await mkdir(shotDir, { recursive: true });
 await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=0x546e7a:s=360x640:r=30:d=2.2", "-f", "lavfi", "-i", "sine=frequency=460:sample_rate=48000:duration=2.2", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", sourcePath]);
 
 const appName = "Creator Copilot Local";
@@ -29,7 +33,7 @@ const candidates = process.platform === "darwin"
 const executable = candidates.find((candidate) => existsSync(candidate));
 if (!executable) throw new Error(`未找到打包应用，请先运行 npm run package:desktop：${candidates.join(", ")}`);
 
-const child = spawn(executable, ["--ui-smoke", "--no-sandbox"], { cwd: root, env: { ...process.env, UI_SMOKE_WORKSPACE: workspacePath, UI_SMOKE_SOURCE_PATH: sourcePath, AI_EDIT_PROVIDER: "local-fallback", APPLE_VISION_OCR_SCRIPT: "", ELECTRON_ENABLE_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+const child = spawn(executable, ["--ui-smoke", "--no-sandbox"], { cwd: root, env: { ...process.env, UI_SMOKE_WORKSPACE: workspacePath, UI_SMOKE_SOURCE_PATH: sourcePath, UI_SMOKE_SHOT_DIR: shotDir, AI_EDIT_PROVIDER: "local-fallback", APPLE_VISION_OCR_SCRIPT: "", ELECTRON_ENABLE_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
 let stdout = "";
 let stderr = "";
 child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });

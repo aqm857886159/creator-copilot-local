@@ -142,7 +142,11 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
       setAcceptedProjectId(result.project.id);
       setAcceptedScript(loadedScript);
       setScriptProposal(null);
-      setWorkflow(loadedStoryboard && result.capturePackage ? { ok: true, projectId: result.project.id, script: loadedScript, storyboard: loadedStoryboard, tasks: loadedTasks, capturePackage: result.capturePackage } : null);
+      const restoredWorkflow = loadedStoryboard && result.capturePackage ? { ok: true as const, projectId: result.project.id, script: loadedScript, storyboard: loadedStoryboard, tasks: loadedTasks, capturePackage: result.capturePackage } : null;
+      setWorkflow(restoredWorkflow);
+      // 恢复断点:分镜与拍摄包齐全时,把恢复出的 workflow 上抛到 app 级,
+      // 让工作台/剪辑页能直接进入这条项目,而不是只停在本组件的本地 state。
+      if (restoredWorkflow) onWorkflowReady(restoredWorkflow);
       setTakesByTask(result.takesByTask ?? {});
       setMessageTone("success");
       setMessage(loadedStoryboard && result.capturePackage ? `已从本地工作区恢复“${result.project.title}”的脚本、分镜和拍摄任务。` : `已从本地工作区恢复“${result.project.title}”的脚本，可以继续完善分镜。`);
@@ -176,9 +180,11 @@ export function CreationWorkbench({ workspaceReady, chooseWorkspace, onWorkflowR
     try {
       const result = await desktop.createCaptureWorkflow({ projectTitle, existingProjectId: acceptedProjectId, existingScriptId: acceptedScript?.id, blocks, shots });
       setWorkflow(result);
-      if (result.ok) void refreshProjects();
-      onWorkflowReady(result);
-      if (!result.ok) {
+      if (result.ok) {
+        void refreshProjects();
+        // 只在成功时上抛:失败结果不应覆盖 app 级 captureWorkflow,否则会把剪辑页推进坏态。
+        onWorkflowReady(result);
+      } else {
         setMessageTone("error");
         setMessage(result.message ?? "拍摄包生成失败");
       }

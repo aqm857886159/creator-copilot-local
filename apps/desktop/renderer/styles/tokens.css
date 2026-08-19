@@ -1,0 +1,23 @@
+/*
+ * 设计令牌 · 切片 1
+ * 事实源:docs/design/spec-02-product-shape.md §5、docs/design/01-workbench.html :root
+ * 新壳与工作台组件只引用这些令牌,不写裸 hex。
+ * 旧 styles.css 与旧组件不受影响;本文件独立加载。
+ */
+:root {
+  /* 色(取自蓝本) */
+  --ground: #F4F5F3;   /* 幕布:底,影棚无缝背景冷调灰白 */
+  --card: #FFFFFF;     /* 卡面 */
+  --slate: #22252B;    /* 石板:主墨,场记板黑 */
+  --slate2: #3A3E45;   /* 石板浅:按钮 hover */
+  --ink2: #62666D;     /* 次级文字 */
+  --ink3: #9EA2A8;     /* 三级文字 */
+  --line: #E3E4E1;     /* 界线:分隔 */
+  --marker: #FFD84D;   /* 记号黄:只做记号笔(强调词高亮、当前项标记),不做按钮色 */
+  --record: #E0442E;   /* 录制红:只表「进行中/等你定」 */
+  --text-record: #C93B27; /* 文字红:红色文字场景,比录制红略深以够对比度 */
+
+  /* 字(三役) */
+  --sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

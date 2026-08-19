@@ -11,7 +11,7 @@ npm install
 npm run dev:web
 ```
 
-桌面端入口和 renderer 已迁入 `apps/desktop`；root Vite 仍是过渡构建器，Express 仅保留为历史 scaffold。迁移中的 workspace 入口也可使用 pnpm；当前包级命令只是兼容 wrapper，真实逻辑仍由 root scripts 负责：
+桌面端入口和 renderer 已迁入 `apps/desktop`；root Vite 仍是过渡构建器。旧的 `dev:server` / `start`（指向未实现的 `server/index.ts`）已移除，`npm run dev`（等价 `dev:desktop`）先起 Vite 再拉起 Electron 壳。迁移中的 workspace 入口也可使用 pnpm；当前包级命令只是兼容 wrapper，真实逻辑仍由 root scripts 负责：
 
 ```bash
 pnpm --filter @creator-copilot/desktop typecheck

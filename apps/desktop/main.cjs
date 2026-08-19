@@ -2123,7 +2123,13 @@ app.whenReady().then(() => {
   if (process.argv.includes("--ui-smoke")) {
     window.webContents.once("did-finish-load", async () => {
       const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+      const shotDirectory = process.env.UI_SMOKE_SHOT_DIR || null;
+      const captureSmokeShot = async (targetWindow, filePath) => {
+        const image = await targetWindow.webContents.capturePage();
+        await writeFile(filePath, image.toPNG());
+      };
       try {
+        if (shotDirectory) await makeDirectory(shotDirectory, { recursive: true });
         await wait(700);
         const result = await window.webContents.executeJavaScript(`(async () => {
           const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -2143,7 +2149,9 @@ app.whenReady().then(() => {
             }
             throw new Error("等待超时：" + label);
           };
-          clickText("创作项目");
+          if (!document.querySelector(".wb-app")) throw new Error("新壳没有渲染；body=" + (document.body?.innerText ?? "").slice(0, 300));
+          if (!document.querySelector(".wb-sec")?.textContent?.includes("接着做")) throw new Error("工作台没有渲染「接着做」区块");
+          clickText("想从头规划一条");
           await wait(300);
           if (!document.querySelector("h1")?.textContent?.includes("脚本、分镜与拍摄包")) throw new Error("没有进入创作项目页面");
           clickText("生成脚本提案");
@@ -2207,13 +2215,6 @@ app.whenReady().then(() => {
             if (!blockShots.some((shot) => shot.mode === "talking_head")) throw new Error("脚本段落缺少连续口播主干：" + block.id);
             if (block.visualNeed !== "none" && !blockShots.some((shot) => shot.mode !== "talking_head")) throw new Error("需要画面支持的脚本段落缺少补充镜头：" + block.id);
           }
-          clickText("创作项目");
-          await waitFor(() => document.querySelector(".project-resume-row"), "本地项目恢复列表");
-          const continueButton = [...document.querySelectorAll(".project-resume-row button")].find((button) => !button.disabled && button.textContent?.includes("继续编辑"));
-          if (!continueButton) throw new Error("UI smoke 没有找到继续编辑入口");
-          continueButton.click();
-          await waitFor(() => document.querySelector(".creation-message.success")?.textContent?.includes("已从本地工作区恢复"), "项目恢复成功反馈");
-          if (!document.querySelector(".capture-result") || document.querySelectorAll(".capture-task").length !== loaded.tasks.length) throw new Error("UI smoke 点击继续编辑后没有恢复拍摄任务和拍摄包");
           return { ok: true, title: renderTitle, proposalRows: proposalRowCount, projectId, scriptStageRecovered: true, analysisFactCount: analyzedAssets.facts?.length ?? 0, persistedProjectCount: persistedProjects.projects.length, loadedTaskCount: loaded.tasks.length };
         })()`);
         if (!result?.ok) throw new Error("UI smoke 没有返回成功结果");
@@ -2221,7 +2222,44 @@ app.whenReady().then(() => {
         if (!result.projectId) throw new Error("UI smoke 没有返回项目 ID");
         const renderRuns = workspace.catalog.listRenderRunsForProject(result.projectId);
         if (!renderRuns.some((run) => run.state === "succeeded")) throw new Error("UI smoke 的 SQLite 没有成功 render run");
-        console.log(JSON.stringify({ ok: true, smoke: "electron-ui-creation-import-proposal-render", ui: result, workspace: workspace.workspacePath, renderRuns: renderRuns.map((run) => ({ id: run.id, state: run.state, manifestHash: run.manifestHash })) }));
+        // 当前构建里项目 stage 止于 capture(没有 stage 推进逻辑,editing/rendered/published 尚无写入方)。
+        // 为验证「editing 阶段卡 → AI 剪辑非空」这条真实路由,在 SQLite 里把这条已带完整分镜/拍摄包的
+        // 项目 stage 直接种为 editing(仅冒烟种子,不改产品的 stage 机;后续切片补 stage 推进时可去掉)。
+        const seedProject = workspace.catalog.getProject(result.projectId);
+        if (!seedProject) throw new Error("UI smoke 找不到用于种入 editing 阶段的项目");
+        if (!workspace.catalog.updateProject(seedProject.id, seedProject.revision, { stage: "editing" })) throw new Error("UI smoke 无法把项目种为 editing 阶段");
+        // 新壳:回到工作台,断言真实项目卡按 editing 阶段渲染。
+        const workbenchCheck = await window.webContents.executeJavaScript(`(async () => {
+          const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+          const waitFor = async (predicate, label) => { for (let attempt = 0; attempt < 80; attempt += 1) { if (predicate()) return; await wait(250); } throw new Error("等待超时：" + label); };
+          const nav = [...document.querySelectorAll(".wb-nav button")].find((button) => button.textContent?.includes("工作台"));
+          if (!nav) throw new Error("新壳没有工作台导航项");
+          nav.click();
+          await waitFor(() => document.querySelector(".wb-sec")?.textContent?.includes("接着做"), "工作台接着做区块");
+          await waitFor(() => document.querySelector(".wb-proj:not(.wb-new)"), "工作台真实项目卡");
+          const card = document.querySelector(".wb-proj:not(.wb-new)");
+          const stageTag = card.querySelector(".wb-tag")?.textContent ?? "";
+          const actionLabel = card.querySelector(".wb-go")?.textContent ?? "";
+          if (stageTag !== "剪辑中" || actionLabel !== "继续剪辑") throw new Error("editing 阶段卡片阶段标或行动按钮不正确：" + stageTag + " / " + actionLabel);
+          if (!card.querySelector(".wb-stages i.wb-now")) throw new Error("项目卡没有点亮当前阶段条");
+          return { ok: true, stageTag, actionLabel, cardCount: document.querySelectorAll(".wb-proj:not(.wb-new)").length };
+        })()`);
+        if (!workbenchCheck?.ok) throw new Error("UI smoke 工作台真实项目卡断言失败");
+        if (shotDirectory) await captureSmokeShot(window, path.join(shotDirectory, "workbench.png"));
+        // 点击 editing 阶段卡 → 载入并适配 → 进入 AI 剪辑视图,断言非空(不是「先准备一组真实素材」空态)。
+        const editCheck = await window.webContents.executeJavaScript(`(async () => {
+          const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+          const waitFor = async (predicate, label) => { for (let attempt = 0; attempt < 80; attempt += 1) { if (predicate()) return; await wait(250); } throw new Error("等待超时：" + label); };
+          document.querySelector(".wb-proj:not(.wb-new)").click();
+          await waitFor(() => document.querySelector(".edit-workbench"), "AI 剪辑视图");
+          if (document.querySelector(".empty-edit-workbench")) throw new Error("editing 卡进入后 AI 剪辑仍是空态");
+          const projectIdShown = document.querySelector(".edit-workbench .workspace-state")?.textContent ?? "";
+          if (!projectIdShown.includes("project-")) throw new Error("AI 剪辑视图没有显示恢复的项目 ID");
+          return { ok: true, projectIdShown: projectIdShown.trim() };
+        })()`);
+        if (!editCheck?.ok) throw new Error("UI smoke editing 卡进入 AI 剪辑断言失败");
+        if (shotDirectory) await captureSmokeShot(window, path.join(shotDirectory, "ai-edit.png"));
+        console.log(JSON.stringify({ ok: true, smoke: "electron-ui-creation-import-proposal-render", ui: result, workbench: workbenchCheck, aiEdit: editCheck, shots: shotDirectory ?? null, workspace: workspace.workspacePath, renderRuns: renderRuns.map((run) => ({ id: run.id, state: run.state, manifestHash: run.manifestHash })) }));
         app.exit(0);
       } catch (error) {
         console.error(JSON.stringify({ ok: false, smoke: "electron-ui-creation-import-proposal-render", message: error instanceof Error ? error.message : "Electron UI smoke 失败" }));
