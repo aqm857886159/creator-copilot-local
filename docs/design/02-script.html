@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>脚本 · 设计样张</title>
+<style>
+:root{
+  --ground:#F4F5F3; --card:#FFFFFF; --slate:#22252B; --slate2:#3A3E45;
+  --ink2:#62666D; --ink3:#9EA2A8; --line:#E3E4E1;
+  --marker:#FFD84D; --record:#E0442E; --record-text:#C93B27;
+  --sans:"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--ground)}
+body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--slate);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+:focus-visible{outline:2px solid var(--slate);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ===== 项目壳 ===== */
+.top{height:56px;display:flex;align-items:center;gap:18px;padding:0 24px;border-bottom:1px solid var(--line)}
+.back{display:flex;align-items:center;gap:7px;color:var(--ink2);font-size:14px;padding:6px 10px;border-radius:8px}
+.back:hover{background:#eaebe8;color:var(--slate)}
+.ttl{font-size:15px;font-weight:700;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stages{display:flex;gap:3px;margin-left:14px}
+.stages button{padding:6px 13px;border-radius:8px;font-size:13.5px;color:var(--ink2)}
+.stages button:hover{background:#eaebe8;color:var(--slate)}
+.stages button[aria-current]{color:var(--slate);font-weight:600;box-shadow:inset 0 -2px 0 var(--marker)}
+.stages .handoff{border:1px dashed #C9CBC6;color:var(--ink2)}
+.top-r{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:13px;color:var(--ink2)}
+.ai-btn{padding:7px 13px;border-radius:8px;border:1px solid var(--line);background:var(--card);font-size:13px;color:var(--slate)}
+.ai-btn:hover{border-color:var(--ink3)}
+
+.page{max-width:880px;margin:0 auto;padding:30px 28px 80px}
+
+/* 立场 + 时长 */
+.head{display:flex;gap:14px;align-items:stretch;margin-bottom:26px}
+.stance{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 17px}
+.stance .lb{font-size:12px;color:var(--ink2);letter-spacing:.1em}
+.stance p{margin-top:5px;font-size:15px;font-weight:600;line-height:1.6}
+.stance button{margin-top:4px;font-size:12.5px;color:var(--ink2)}
+.stance button:hover{color:var(--slate);text-decoration:underline;text-underline-offset:3px}
+.dur{flex:0 0 224px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 17px;display:flex;flex-direction:column;justify-content:center;gap:8px}
+.dur .lb{font-size:12px;color:var(--ink2);letter-spacing:.1em}
+.dur .v{font-size:15px;font-weight:600}
+.dur .v i{font-style:normal;color:var(--ink3);font-weight:400}
+.bar{height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;width:77%;background:var(--slate)}
+
+/* ===== 台词文档:旁注即合同 ===== */
+.doc{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.blk{display:grid;grid-template-columns:86px minmax(0,1fr) 156px;gap:18px;padding:22px 22px 20px;border-bottom:1px solid var(--line)}
+.blk:last-of-type{border-bottom:0}
+.blk:hover{background:#FCFCFB}
+.rail{padding-top:5px}
+.kind{display:inline-block;font-size:12px;font-weight:600;color:var(--ink2);background:var(--ground);border-radius:6px;padding:2px 8px}
+.rail .t{display:block;margin-top:7px;font-family:var(--mono);font-size:12px;color:var(--ink2)}
+.words{font-size:17px;line-height:2.05;letter-spacing:.01em}
+.words mark{background:linear-gradient(transparent 58%,var(--marker) 58%);color:inherit;padding:0 1px}
+.words:focus-within{outline:none;box-shadow:inset 3px 0 0 var(--marker);background:#FCFAF3}
+
+/* 视觉需求:AI 预标,一枚 chip,点击轮换 */
+.need{display:flex;flex-direction:column;gap:6px;align-items:flex-end;padding-top:4px}
+.chip{padding:5px 13px;border-radius:999px;border:1px solid var(--line);font-size:12.5px;color:var(--ink2);background:var(--card);white-space:nowrap}
+.chip:hover{border-color:var(--ink3);color:var(--slate)}
+.chip.must{background:var(--slate);border-color:var(--slate);color:#fff;font-weight:600;box-shadow:inset 3px 0 0 var(--marker)}
+.need .why{font-size:11.5px;color:var(--ink2);text-align:right;line-height:1.5}
+/* 例外:AI 拿不准才发问 */
+.need.q .qq{font-size:12.5px;color:var(--record-text);text-align:right;line-height:1.55;max-width:150px}
+.need.q .qa{display:flex;gap:6px}
+.need.q .qa .chip{border-color:#EFC7BF;color:var(--slate)}
+.need.q .qa .chip:hover{border-color:var(--record)}
+/* 文档头说明,只说一次 */
+.doc-note{display:flex;align-items:center;gap:8px;padding:11px 22px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--ink2)}
+
+/* 底部闸门 */
+.gate{display:flex;align-items:center;gap:14px;margin-top:18px;padding:15px 18px;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.gate p{flex:1;font-size:13.5px;color:var(--ink2)}
+.gate p b{color:var(--record-text);font-weight:600}
+.gate .cta{padding:9px 18px;border-radius:9px;background:var(--slate);color:#fff;font-size:14px;font-weight:600}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <button class="back">← 工作台</button>
+  <span class="ttl">越努力，越没记忆点？</span>
+  <nav class="stages" aria-label="阶段">
+    <button aria-current="page">脚本</button>
+    <button>分镜</button>
+    <button class="handoff" title="拍摄不是页面：手机扫码逐镜拍，这里看回流进度">拍摄</button>
+    <button>剪辑</button>
+  </nav>
+  <div class="top-r">
+    <span>刚刚保存</span>
+    <button class="ai-btn">让 AI 提结构建议</button>
+  </div>
+</header>
+
+<main class="page">
+
+  <div class="head">
+    <section class="stance">
+      <span class="lb">核心立场 · 已确认</span>
+      <p>记忆点来自表达结构，不来自努力程度。</p>
+      <button>改立场（全文会跟着改）</button>
+    </section>
+    <section class="dur">
+      <span class="lb">时长</span>
+      <span class="v num">预计 46s <i>/ 目标 60s</i></span>
+      <span class="bar"><i></i></span>
+    </section>
+  </div>
+
+  <section class="doc" aria-label="台词，右边是每段的画面需求">
+
+    <div class="doc-note">右边的画面需求 AI 已按内容标好 —— 点一下就能改，拿不准的它会直接问你</div>
+
+    <div class="blk">
+      <div class="rail"><span class="kind">开头</span><span class="t num">~6s</span></div>
+      <p class="words" contenteditable="true">为什么很多人越努力表达，反而越没有<mark>记忆点</mark>？</p>
+      <div class="need">
+        <button class="chip">不配画面</button>
+      </div>
+    </div>
+
+    <div class="blk">
+      <div class="rail"><span class="kind">观点</span><span class="t num">~9s</span></div>
+      <p class="words" contenteditable="true">因为你的<mark>观点</mark>一直停留在同一个口播画面里，观众没有得到新的<mark>视觉证据</mark>。</p>
+      <div class="need">
+        <button class="chip">配画面更好</button>
+      </div>
+    </div>
+
+    <div class="blk">
+      <div class="rail"><span class="kind">证据</span><span class="t num">~10s</span></div>
+      <p class="words" contenteditable="true">讲到修改和推翻的时候，要让观众真正<mark>看见</mark>桌面上的草稿和修改痕迹。</p>
+      <div class="need">
+        <button class="chip must">必须配画面</button>
+        <span class="why">你承诺了「看见」—— 拍不到，剪辑会来问你</span>
+      </div>
+    </div>
+
+    <div class="blk">
+      <div class="rail"><span class="kind">例子</span><span class="t num">~11s</span></div>
+      <p class="words" contenteditable="true">我以前以为只要多拍几个镜头，口播就会更丰富 —— 结果只是更乱。</p>
+      <div class="need q">
+        <span class="qq">提到「多拍几个镜头」—— 把乱的素材摆出来看，还是光讲？</span>
+        <span class="qa"><button class="chip">配画面</button><button class="chip">光讲</button></span>
+      </div>
+    </div>
+
+    <div class="blk">
+      <div class="rail"><span class="kind">结论</span><span class="t num">~7s</span></div>
+      <p class="words" contenteditable="true">所以先想清楚要<mark>证明什么</mark>，再决定拍什么。</p>
+      <div class="need">
+        <button class="chip">不配画面</button>
+      </div>
+    </div>
+
+    <div class="blk">
+      <div class="rail"><span class="kind">号召</span><span class="t num">~3s</span></div>
+      <p class="words" contenteditable="true">如果这条对你有用，转给那个还在瞎拍的朋友。</p>
+      <div class="need">
+        <button class="chip">不配画面</button>
+      </div>
+    </div>
+
+  </section>
+
+  <div class="gate">
+    <p>画面需求已标好 5 段，<b>1 段等你拿主意</b> —— 不答也能生成，先按 AI 的判断走，之后随时能改。</p>
+    <button class="cta">生成分镜</button>
+  </div>
+
+</main>
+
+</body>
+</html>
