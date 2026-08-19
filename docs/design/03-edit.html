@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>剪辑 · 设计样张</title>
+<style>
+:root{
+  --ground:#F4F5F3; --card:#FFFFFF; --slate:#22252B; --slate2:#3A3E45;
+  --ink2:#62666D; --ink3:#9EA2A8; --line:#E3E4E1;
+  --marker:#FFD84D; --record:#E0442E; --record-text:#C93B27;
+  --sans:"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--ground)}
+body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--slate);-webkit-font-smoothing:antialiased}
+:where(body) button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+:focus-visible{outline:2px solid var(--slate);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ===== 项目壳(同 02) ===== */
+.top{height:56px;display:flex;align-items:center;gap:18px;padding:0 24px;border-bottom:1px solid var(--line)}
+.back{display:flex;align-items:center;gap:7px;color:var(--ink2);font-size:14px;padding:6px 10px;border-radius:8px}
+.back:hover{background:#eaebe8;color:var(--slate)}
+.ttl{font-size:15px;font-weight:700;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stages{display:flex;gap:3px;margin-left:14px}
+.stages button{padding:6px 13px;border-radius:8px;font-size:13.5px;color:var(--ink2)}
+.stages button:hover{background:#eaebe8;color:var(--slate)}
+.stages button[aria-current]{color:var(--slate);font-weight:600;box-shadow:inset 0 -2px 0 var(--marker)}
+.stages .handoff{border:1px dashed #C9CBC6;color:var(--ink2)}
+.top-r{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:13px;color:var(--ink2)}
+
+.page{max-width:880px;margin:0 auto;padding:30px 28px 80px}
+
+/* ===== 粗剪头行 ===== */
+.head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
+.head h1{font-size:19px;font-weight:700}
+.head .sum{font-size:13px;color:var(--ink2)}
+.head .re{margin-left:auto;font-size:13px;color:var(--ink2)}
+.head .re:hover{color:var(--slate);text-decoration:underline;text-underline-offset:3px}
+
+/* ===== 镜头行 ===== */
+.cut{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.row{display:grid;grid-template-columns:40px 96px minmax(0,1fr) 128px;gap:14px;padding:16px 18px;border-bottom:1px solid var(--line);align-items:start}
+.row:last-of-type{border-bottom:0}
+.row:hover{background:#FCFCFB}
+.idx{font-family:var(--mono);font-size:12px;color:var(--ink3);padding-top:3px}
+.tc{font-family:var(--mono);font-size:12.5px;color:var(--ink2);padding-top:2px;white-space:nowrap}
+.tc i{display:block;font-style:normal;color:var(--ink2);margin-top:2px;font-size:11.5px}
+.what b{display:block;font-size:14px;font-weight:600}
+.what p{margin-top:2px;font-size:13.5px;color:var(--ink2)}
+/* 证据句可点试听:最小可供性,不放常驻播放器 */
+.ev{display:block;margin-top:6px;font-size:12px;color:var(--ink2);text-align:left;font-family:var(--mono)}
+.ev:hover{color:var(--slate);text-decoration:underline;text-underline-offset:3px}
+.acts{display:flex;gap:6px;justify-content:flex-end;padding-top:2px}
+.acts .keep{padding:5px 12px;border-radius:8px;background:var(--slate);color:#fff;font-size:12.5px;font-weight:600}
+.acts .keep[aria-pressed="false"]{background:transparent;color:var(--ink2);border:1px solid var(--line);font-weight:400}
+.acts .drop{padding:5px 12px;border-radius:8px;border:1px solid var(--line);font-size:12.5px;color:var(--ink2)}
+.acts .drop:hover{border-color:var(--record);color:var(--record-text)}
+.acts .drop[aria-pressed="true"]{border-color:var(--record);color:var(--record-text);background:#FDF4F2}
+/* 弃用态:整行压暗 + 结论划除(禁用内容,ink3 允许) */
+.row.dropped .what b{text-decoration:line-through;color:var(--ink3)}
+.row.dropped .what p,.row.dropped .ev,.row.dropped .tc{color:var(--ink3)}
+
+/* 缺口行:must 没素材,例外才要用户拿主意 */
+.row.gap{box-shadow:inset 3px 0 0 var(--record)}
+.gap .what b{color:var(--record-text)}
+.gap .fix{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.gap .fix .chip{padding:5px 12px;border-radius:999px;border:1px solid #EFC7BF;font-size:12.5px;color:var(--slate)}
+.gap .fix .chip:hover{border-color:var(--record)}
+/* AI 先填默认出路,选中态实心;用户点另一枚即改(决策预算:例外也有默认值) */
+.gap .fix .chip[aria-pressed="true"]{background:var(--slate);border-color:var(--slate);color:#fff;font-weight:600}
+.gap .cand{margin-top:6px;font-size:12px;color:var(--ink2)}
+.gap .cand button{margin-left:6px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);font-size:12px}
+.gap .cand button:hover{border-color:var(--ink3)}
+
+/* ===== 底部闸门 ===== */
+.gate{display:flex;align-items:center;gap:14px;margin-top:16px;padding:15px 18px;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.gate-text{flex:1;min-width:0}
+.gate-text p{font-size:13.5px;color:var(--ink2)}
+.cta{padding:9px 18px;border-radius:9px;background:var(--slate);color:#fff;font-size:14px;font-weight:600}
+.cta:hover{background:var(--slate2)}
+
+/* ===== 另两个状态(样张附:空态 / 已出片) ===== */
+.alt{margin-top:44px;padding-top:18px;border-top:1px dashed #C9CBC6}
+.alt-lb{font-size:12px;color:var(--ink3);letter-spacing:.1em;margin-bottom:14px}
+.empty{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:44px 24px;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
+.empty .cta{font-size:15px;padding:11px 22px}
+.empty p{font-size:13px;color:var(--ink2)}
+.done{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-top:14px}
+.done b{font-size:14px}
+.done span{font-size:12.5px;color:var(--ink2)}
+.done .ops{margin-left:auto;display:flex;gap:8px}
+.done .ops button{padding:7px 13px;border-radius:8px;border:1px solid var(--line);font-size:13px}
+.done .ops button:hover{border-color:var(--ink3)}
+.done .ops .main{background:var(--slate);border-color:var(--slate);color:#fff;font-weight:600}
+.done .ops .main:hover{background:var(--slate2)}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <button class="back">← 工作台</button>
+  <span class="ttl">越努力，越没记忆点？</span>
+  <nav class="stages" aria-label="阶段">
+    <button>脚本</button>
+    <button>分镜</button>
+    <button class="handoff" title="拍摄不是页面：手机扫码逐镜拍，这里看回流进度">拍摄</button>
+    <button aria-current="page">剪辑</button>
+  </nav>
+  <div class="top-r"><span>在本机分析，不联网</span></div>
+</header>
+
+<main class="page">
+
+  <div class="head">
+    <h1>粗剪</h1>
+    <span class="sum num">5 个镜头 · 共 38s · 12 条素材</span>
+    <button class="re" title="会重新选一遍镜头，替换这版粗剪">重新分析</button>
+  </div>
+
+  <section class="cut" aria-label="粗剪镜头，逐条可采用或不用">
+
+    <div class="row">
+      <span class="idx num">01</span>
+      <span class="tc num">00:00–00:06<i>口播主干</i></span>
+      <span class="what">
+        <b>开头的提问完整保留</b>
+        <p>三条里这条语气最稳，结尾停顿干净，适合直接开场。</p>
+        <button class="ev num" title="点一下试听这段">▸ take-02 00:00『为什么很多人越努力表达，反而越没有记忆点？』</button>
+      </span>
+      <span class="acts"><button class="keep" aria-pressed="true">采用</button><button class="drop">不用</button></span>
+    </div>
+
+    <div class="row">
+      <span class="idx num">02</span>
+      <span class="tc num">00:06–00:15<i>口播主干</i></span>
+      <span class="what">
+        <b>观点段用第二条</b>
+        <p>第一条把「视觉证据」说成了「视觉根据」，这条没有口误。</p>
+        <button class="ev num" title="点一下试听这段">▸ take-03 00:04『因为你的观点一直停留在同一个口播画面里…』</button>
+      </span>
+      <span class="acts"><button class="keep" aria-pressed="true">采用</button><button class="drop">不用</button></span>
+    </div>
+
+    <div class="row gap">
+      <span class="idx num">03</span>
+      <span class="tc num">00:15–00:18<i>该配画面</i></span>
+      <span class="what">
+        <b>这句没拍到画面：『让观众真正看见桌面上的草稿』</b>
+        <p>脚本里标了必须配画面，但 12 条素材里没有拍到草稿的镜头。</p>
+        <span class="fix">
+          <button class="chip" aria-pressed="true">先用口播带过</button>
+          <button class="chip" aria-pressed="false">记进补拍清单</button>
+        </span>
+        <span class="cand">接近的素材：<button class="num" title="点一下预览这条">▸ 桌面俯拍-0812 00:32</button><button>用这条</button></span>
+      </span>
+      <span class="acts"></span>
+    </div>
+
+    <div class="row dropped">
+      <span class="idx num">04</span>
+      <span class="tc num">00:18–00:29<i>口播主干</i></span>
+      <span class="what">
+        <b>例子段保留自嘲那条</b>
+        <p>『结果只是更乱』后面的笑声留住了，比重录的那条自然。</p>
+        <button class="ev num" title="点一下试听这段">▸ take-05 00:11『我以前以为只要多拍几个镜头…』</button>
+      </span>
+      <span class="acts"><button class="keep" aria-pressed="false">采用</button><button class="drop" aria-pressed="true">不用</button></span>
+    </div>
+
+    <div class="row">
+      <span class="idx num">05</span>
+      <span class="tc num">00:29–00:38<i>口播主干</i></span>
+      <span class="what">
+        <b>结论和号召连着用一条</b>
+        <p>中间不切，情绪是连贯的；号召句后面留了两秒黑场收尾。</p>
+        <button class="ev num" title="点一下试听这段">▸ take-06 00:00『所以先想清楚要证明什么…』</button>
+      </span>
+      <span class="acts"><button class="keep" aria-pressed="true">采用</button><button class="drop">不用</button></span>
+    </div>
+
+  </section>
+
+  <div class="gate">
+    <div class="gate-text">
+      <p>3 个镜头采用、1 个不用，缺口先用口播带过 —— 出片不改你的素材，随时能重出一版。</p>
+    </div>
+    <button class="cta">确认，出这一版粗剪</button>
+  </div>
+
+  <!-- ===== 附:另两个状态 ===== -->
+  <div class="alt">
+    <div class="alt-lb">状态样张 · 还没有粗剪时（页面中央）</div>
+    <div class="empty">
+      <button class="cta">让 AI 出一版粗剪</button>
+      <p>在本机分析你的 12 条素材和台词，不联网、不花钱，大约一分钟。</p>
+    </div>
+
+    <div class="alt-lb" style="margin-top:24px">状态样张 · 出片之后（闸门位置）</div>
+    <div class="done">
+      <b>这一版粗剪已经出片</b>
+      <span class="num">38s · 已保存到本机 output/rough-cut-01.mp4</span>
+      <span class="ops">
+        <button class="main">打开成片</button>
+        <button>导出到剪映</button>
+        <button>去发布</button>
+      </span>
+    </div>
+  </div>
+
+</main>
+
+</body>
+</html>

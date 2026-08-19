@@ -7,3 +7,6 @@ release
 .DS_Store
 npm-debug.log*
 *.tsbuildinfo
+
+# playwright MCP 会话截图(本地查看临时物)
+.playwright-mcp/

@@ -1,0 +1,235 @@
+/*
+ * 剪辑页样式 · 切片 3(粗剪审阅台)
+ * 视觉蓝本:docs/design/03-edit.html(已过四问验收)
+ * 规则、尺寸、颜色逐条取自蓝本;类名一律 ep- 前缀,与 styles.css / sp- / wb- 零冲突。
+ * 语义色只用 tokens.css 令牌;少量蓝本专有的中性 hover/边框底色(无对应令牌)
+ * 沿用 script-page.css 先例逐字取蓝本值(#eaebe8 / #C9CBC6 / #FCFCFB 等)。
+ * 令牌名差异:蓝本 --record-text 对应 tokens.css 的 --text-record。
+ */
+
+.ep-root {
+  min-height: 100vh;
+  background: var(--ground);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--slate);
+  -webkit-font-smoothing: antialiased;
+}
+/* :where() 让 reset 特异度为 (0,0,1),否则 .ep-root button (0,1,1) 会压过所有单类样式(见 renderer/AGENTS)。 */
+:where(.ep-root) button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+.ep-root :focus-visible { outline: 2px solid var(--slate); outline-offset: 2px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { .ep-root * { transition: none !important; } }
+.ep-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ===== 项目壳(同 02/03) ===== */
+.ep-top {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+.ep-back {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink2);
+  font-size: 14px;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.ep-back:hover { background: #eaebe8; color: var(--slate); }
+.ep-ttl {
+  font-size: 15px;
+  font-weight: 700;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ep-stages { display: flex; gap: 3px; margin-left: 14px; }
+.ep-stages button { padding: 6px 13px; border-radius: 8px; font-size: 13.5px; color: var(--ink2); }
+.ep-stages button:hover:not([aria-current]) { background: #eaebe8; color: var(--slate); }
+.ep-stages button[aria-current] { color: var(--slate); font-weight: 600; box-shadow: inset 0 -2px 0 var(--marker); }
+.ep-stages .ep-handoff { border: 1px dashed #C9CBC6; color: var(--ink2); }
+.ep-top-r { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 13px; color: var(--ink2); }
+
+.ep-page { max-width: 880px; margin: 0 auto; padding: 30px 28px 80px; }
+.ep-loading { color: var(--ink2); font-size: 14px; }
+.ep-error {
+  padding: 12px 15px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text-record);
+  font-size: 13px;
+}
+
+/* ===== 状态提示条(操作结果) ===== */
+.ep-flash {
+  margin-bottom: 14px;
+  padding: 11px 15px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ep-flash-ok { color: var(--ink2); }
+.ep-flash-bad { color: var(--text-record); border-color: #EFC7BF; background: #FDF4F2; }
+
+/* ===== 恢复横幅(提交状态未知 / 上次未出完) ===== */
+.ep-recovery {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 13px 16px;
+  border: 1px solid #EFC7BF;
+  border-radius: 11px;
+  background: #FDF4F2;
+}
+.ep-recovery div { flex: 1; min-width: 0; }
+.ep-recovery strong { font-size: 13px; color: var(--text-record); }
+.ep-recovery p { margin-top: 3px; font-size: 12.5px; color: var(--ink2); line-height: 1.5; }
+.ep-recovery small { display: block; margin-top: 4px; font-size: 11.5px; color: var(--ink3); }
+.ep-recovery-btn {
+  padding: 8px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  font-size: 13px;
+  color: var(--slate);
+  white-space: nowrap;
+}
+.ep-recovery-btn:hover:not(:disabled) { border-color: var(--ink3); }
+.ep-recovery-btn:disabled { color: var(--ink3); cursor: default; }
+
+/* ===== 粗剪头行 ===== */
+.ep-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+.ep-head h1 { font-size: 19px; font-weight: 700; }
+.ep-head .ep-sum { font-size: 13px; color: var(--ink2); }
+.ep-re { margin-left: auto; font-size: 13px; color: var(--ink2); }
+.ep-re:hover:not(:disabled) { color: var(--slate); text-decoration: underline; text-underline-offset: 3px; }
+.ep-re:disabled { color: var(--ink3); cursor: default; }
+
+/* ===== 镜头行 ===== */
+.ep-cut { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.ep-row {
+  display: grid;
+  grid-template-columns: 40px 96px minmax(0, 1fr) 128px;
+  gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  align-items: start;
+}
+.ep-row:last-of-type { border-bottom: 0; }
+.ep-row:hover { background: #FCFCFB; }
+.ep-idx { font-family: var(--mono); font-size: 12px; color: var(--ink3); padding-top: 3px; }
+.ep-tc { font-family: var(--mono); font-size: 12.5px; color: var(--ink2); padding-top: 2px; white-space: nowrap; }
+.ep-tc i { display: block; font-style: normal; color: var(--ink2); margin-top: 2px; font-size: 11.5px; }
+.ep-what b { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.ep-what p { margin-top: 2px; font-size: 13.5px; color: var(--ink2); }
+.ep-flag {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+/* 证据句可点试听:最小可供性,不放常驻播放器。 */
+.ep-ev { display: block; margin-top: 6px; font-size: 12px; color: var(--ink2); text-align: left; font-family: var(--mono); }
+button.ep-ev:hover { color: var(--slate); text-decoration: underline; text-underline-offset: 3px; }
+/* 静态证据行(素材文件路径未知,不能试听):不给可点暗示。 */
+.ep-ev-static { cursor: default; }
+.ep-acts { display: flex; gap: 6px; justify-content: flex-end; padding-top: 2px; }
+.ep-keep { padding: 5px 12px; border-radius: 8px; background: var(--slate); color: #fff; font-size: 12.5px; font-weight: 600; }
+.ep-keep[aria-pressed="false"] { background: transparent; color: var(--ink2); border: 1px solid var(--line); font-weight: 400; }
+.ep-drop { padding: 5px 12px; border-radius: 8px; border: 1px solid var(--line); font-size: 12.5px; color: var(--ink2); }
+.ep-drop:hover { border-color: var(--record); color: var(--text-record); }
+.ep-drop[aria-pressed="true"] { border-color: var(--record); color: var(--text-record); background: #FDF4F2; }
+/* 弃用态:整行压暗 + 结论划除(禁用内容,ink3 允许)。 */
+.ep-dropped .ep-what b { text-decoration: line-through; color: var(--ink3); }
+.ep-dropped .ep-what p, .ep-dropped .ep-ev, .ep-dropped .ep-tc { color: var(--ink3); }
+
+/* 缺口行:must 没素材,例外才要用户拿主意。 */
+.ep-gap { box-shadow: inset 3px 0 0 var(--record); }
+.ep-gap .ep-what b { color: var(--text-record); }
+.ep-fix { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ep-fix .ep-chip { padding: 5px 12px; border-radius: 999px; border: 1px solid #EFC7BF; font-size: 12.5px; color: var(--slate); }
+.ep-fix .ep-chip:hover { border-color: var(--record); }
+/* AI 先填默认出路,选中态实心(决策预算:例外也有默认值)。 */
+.ep-fix .ep-chip[aria-pressed="true"] { background: var(--slate); border-color: var(--slate); color: #fff; font-weight: 600; }
+.ep-cand { margin-top: 6px; display: block; font-size: 12px; color: var(--ink2); }
+.ep-cand-item { margin-left: 6px; white-space: nowrap; }
+.ep-cand-item .ep-num:hover { color: var(--slate); text-decoration: underline; text-underline-offset: 3px; }
+.ep-use { margin-left: 6px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
+.ep-use:hover:not(:disabled) { border-color: var(--ink3); }
+.ep-use:disabled { color: var(--ink3); cursor: default; }
+
+/* ===== 底部闸门 ===== */
+.ep-gate {
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
+  box-shadow: 0 -6px 18px rgba(34, 37, 43, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 15px 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.ep-gate-text { flex: 1; min-width: 0; }
+.ep-gate-text p { font-size: 13.5px; color: var(--ink2); }
+.ep-cta { padding: 9px 18px; border-radius: 9px; background: var(--slate); color: #fff; font-size: 14px; font-weight: 600; }
+.ep-cta:hover:not(:disabled) { background: var(--slate2); }
+.ep-cta:disabled { cursor: default; opacity: .7; }
+
+/* ===== 空态(还没有粗剪时,页面中央) ===== */
+.ep-empty {
+  margin-top: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 44px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.ep-empty .ep-cta { font-size: 15px; padding: 11px 22px; }
+.ep-empty p { font-size: 13px; color: var(--ink2); }
+
+/* ===== 出片后状态条 ===== */
+.ep-done {
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
+  box-shadow: 0 -6px 18px rgba(34, 37, 43, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-top: 16px;
+}
+.ep-done b { font-size: 14px; }
+.ep-done > span.ep-num { font-size: 12.5px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+.ep-ops { margin-left: auto; display: flex; gap: 8px; }
+.ep-ops button { padding: 7px 13px; border-radius: 8px; border: 1px solid var(--line); font-size: 13px; }
+.ep-ops button:hover:not(:disabled) { border-color: var(--ink3); }
+.ep-ops button:disabled { color: var(--ink3); cursor: default; }
+.ep-op-main { background: var(--slate); border-color: var(--slate) !important; color: #fff; font-weight: 600; }
+.ep-op-main:hover:not(:disabled) { background: var(--slate2); }
+.ep-done-note { flex-basis: 100%; margin-top: 2px; font-size: 11.5px; color: var(--ink3); }

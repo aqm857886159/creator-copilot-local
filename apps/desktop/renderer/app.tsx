@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { deriveNextAction, workflowFromLoadedProject } from "./lib/workbench";
+import { deriveNextAction } from "./lib/workbench";
 import { Workbench } from "./components/workbench";
 import { CreationWorkbench } from "./components/creation-workbench";
 import { ScriptPage } from "./components/script-page";
-import { AiEditWorkbench } from "./components/ai-edit-workbench";
+import { EditPage } from "./components/edit-page";
 import { AssetLibraryWorkbench } from "./components/asset-library-workbench";
 import { AccountRadarWorkbench } from "./components/account-radar-workbench";
 import { ReviewWorkbench } from "./components/review-workbench";
@@ -24,11 +24,11 @@ const NAV: Array<{ id: View; label: string }> = [
 export function App() {
   const [view, setView] = useState<View>("workbench");
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
-  const [captureWorkflow, setCaptureWorkflow] = useState<CaptureWorkflowResult | null>(null);
+  // 剪辑页(切片 3)按 projectId 自行 loadProject(含已存粗剪回读),不再需要预先适配的 workflow。
+  const [editProjectId, setEditProjectId] = useState<string | null>(null);
   const [mediaImporting, setMediaImporting] = useState(false);
   const [mediaFeedback, setMediaFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const [projectsReloadKey, setProjectsReloadKey] = useState(0);
-  const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
   // 脚本页(切片 2):从工作台 script 阶段卡进入,承载真实脚本编辑与生成分镜。
   const [scriptProjectId, setScriptProjectId] = useState<string | null>(null);
   // 选题视图内的二级切换:热点雷达(TopicRadar)⇄ 账号雷达(AccountRadar),账号雷达能力不丢。
@@ -77,24 +77,12 @@ export function App() {
     }
   }
 
-  // 工作台点卡:editing/rendered 载入并适配后进 AI 剪辑;script/capture 进创作流;published 看数据。
-  async function openProject(project: ProjectSummaryView) {
+  // 工作台点卡:editing/rendered 进新剪辑页(自行 loadProject + 已存粗剪回读);script/capture 进创作流;published 看数据。
+  function openProject(project: ProjectSummaryView) {
     const target = deriveNextAction(project).target;
     if (target === "editing" || target === "rendered") {
-      if (!window.desktop || openingProjectId) return;
-      setOpeningProjectId(project.id);
-      try {
-        const loaded = await window.desktop.loadProject({ projectId: project.id });
-        const workflow = workflowFromLoadedProject(loaded);
-        if (!workflow.ok) {
-          setMediaFeedback({ ok: false, text: loaded.message ?? "这条项目暂时打不开，稍后再试。" });
-          return;
-        }
-        setCaptureWorkflow(workflow);
-        setView("edit");
-      } finally {
-        setOpeningProjectId(null);
-      }
+      setEditProjectId(project.id);
+      setView("edit");
       return;
     }
     if (target === "published") {
@@ -111,23 +99,12 @@ export function App() {
     setView("creation");
   }
 
-  // 脚本页阶段页签(过渡期):有 storyboard 时,分镜/拍摄进旧 creation-workbench,剪辑载入并进 AI 剪辑。
-  async function openScriptStage(stage: "storyboard" | "capture" | "editing") {
+  // 脚本页阶段页签(过渡期):有 storyboard 时,分镜/拍摄进旧 creation-workbench,剪辑进新剪辑页。
+  function openScriptStage(stage: "storyboard" | "capture" | "editing") {
     if (stage === "editing") {
-      if (!window.desktop || !scriptProjectId || openingProjectId) return;
-      setOpeningProjectId(scriptProjectId);
-      try {
-        const loaded = await window.desktop.loadProject({ projectId: scriptProjectId });
-        const workflow = workflowFromLoadedProject(loaded);
-        if (!workflow.ok) {
-          setMediaFeedback({ ok: false, text: loaded.message ?? "这条项目暂时打不开，稍后再试。" });
-          return;
-        }
-        setCaptureWorkflow(workflow);
-        setView("edit");
-      } finally {
-        setOpeningProjectId(null);
-      }
+      if (!scriptProjectId) return;
+      setEditProjectId(scriptProjectId);
+      setView("edit");
       return;
     }
     // 分镜 / 拍摄:进旧创作流的恢复列表。
@@ -183,7 +160,8 @@ export function App() {
             workspaceReady={workspaceReady}
             chooseWorkspace={chooseWorkspace}
             onWorkflowReady={(workflow) => {
-              setCaptureWorkflow(workflow);
+              // 创作流拍摄包就位后:记住 projectId,供「进入 AI 剪辑」按钮进新剪辑页(自行回读粗剪)。
+              if (workflow.ok && workflow.projectId) setEditProjectId(workflow.projectId);
               setProjectsReloadKey((key) => key + 1);
             }}
             openEdit={() => setView("edit")}
@@ -195,10 +173,20 @@ export function App() {
           onBackToWorkbench={() => setView("workbench")}
           onOpenStage={openScriptStage}
         />
-      ) : view === "edit" ? (
-        <div className="wb-page">
-          <AiEditWorkbench workflow={captureWorkflow} openProjects={() => setView("creation")} />
-        </div>
+      ) : view === "edit" && editProjectId ? (
+        <EditPage
+          projectId={editProjectId}
+          onBackToWorkbench={() => setView("workbench")}
+          onOpenStage={(stage) => {
+            if (stage === "script") {
+              setScriptProjectId(editProjectId);
+              setView("script");
+              return;
+            }
+            // 分镜 / 拍摄:进旧创作流恢复列表(过渡期)。
+            setView("creation");
+          }}
+        />
       ) : view === "topics" ? (
         <div className="wb-page">
           <div className="wb-subtabs" role="tablist" aria-label="选题来源">

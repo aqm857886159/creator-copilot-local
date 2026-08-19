@@ -5,6 +5,7 @@ import { App } from "./app";
 import "./styles/tokens.css";
 import "./styles/shell.css";
 import "./styles/script-page.css";
+import "./styles/edit-page.css";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(

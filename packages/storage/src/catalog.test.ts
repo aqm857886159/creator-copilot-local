@@ -336,6 +336,12 @@ describe("SqliteCatalog", () => {
     const proposal = EditProposalSchema.parse({ schemaVersion: 1, id: "proposal-creation", projectId: "project-creation", basedOn: { scriptRevision: 1, storyboardRevision: 1 }, durationMs: 1000, operations: [{ id: "operation-creation", shotId: "shot-creation", sourceAssetId: "artifact-take-2", sourceSegment: { startMs: 0, endMs: 1000 }, timeline: { startMs: 0, endMs: 1000 }, role: "a_roll", reason: "保持口播连续", evidenceIds: ["shot-creation"], confidence: 0.9, status: "suggested" }], subtitles: [{ id: "subtitle-creation", timeline: { startMs: 0, endMs: 1000 }, text: "表达需要画面变化。" }], outputProfile: DEFAULT_VERTICAL_PROFILE, rationale: [{ operationId: "operation-creation", shotId: "shot-creation", reason: "对应口播主线", confidence: 0.9 }], status: "previewed", createdAt: now, updatedAt: now });
     expect(catalog.saveEditProposal(proposal)).toBe(true);
     expect(catalog.getEditProposal(proposal.id)?.operations[0].shotId).toBe("shot-creation");
+    // getLatestEditProposal:同项目按 updated_at DESC 取最新一条(剪辑页挂载回读用)。
+    expect(catalog.getLatestEditProposal("project-creation")?.id).toBe(proposal.id);
+    expect(catalog.getLatestEditProposal("project-no-proposal")).toBeUndefined();
+    const laterProposal = EditProposalSchema.parse({ ...proposal, id: "proposal-creation-later", updatedAt: "2026-08-14T00:05:00.000Z" });
+    expect(catalog.saveEditProposal(laterProposal)).toBe(true);
+    expect(catalog.getLatestEditProposal("project-creation")?.id).toBe("proposal-creation-later");
     const frozen = freezeEditProposal({ proposal, assetLocks: [{ assetId: "artifact-take-2", contentHash: "sha256:take-2" }], now });
     expect(catalog.saveFrozenEditSpec(frozen)).toBe(true);
     expect(catalog.getFrozenEditSpec(frozen.id)?.authoredSpecHash).toBe(frozen.authoredSpecHash);
@@ -343,6 +349,11 @@ describe("SqliteCatalog", () => {
     catalog.saveRenderRun({ schemaVersion: 1, id: "render-run-creation", projectId: "project-creation", frozenEditSpecId: frozen.id, state: "succeeded", manifestRelativePath: "exports/render.manifest.json", manifestHash: "sha256:manifest", createdAt: now, updatedAt: now });
     expect(catalog.getRenderRun("render-run-creation")).toMatchObject({ state: "succeeded", manifestHash: "sha256:manifest" });
     expect(catalog.listRenderRunsForProject("project-creation").map((run) => run.id)).toEqual(["render-run-creation"]);
+    // getLatestSucceededRenderRun:只取成功的最新一次(剪辑页重开回水合「已出片」条用)。
+    expect(catalog.getLatestSucceededRenderRun("project-creation")?.id).toBe("render-run-creation");
+    expect(catalog.getLatestSucceededRenderRun("project-no-proposal")).toBeUndefined();
+    catalog.saveRenderRun({ schemaVersion: 1, id: "render-run-creation-failed", projectId: "project-creation", frozenEditSpecId: frozen.id, state: "failed", createdAt: now, updatedAt: "2026-08-14T00:10:00.000Z" });
+    expect(catalog.getLatestSucceededRenderRun("project-creation")?.id).toBe("render-run-creation");
     const publication = catalog.savePublication({ schemaVersion: 1, id: "publication-creation", projectId: "project-creation", packageId: "publish-render-run-creation", platform: "抖音", status: "published", publishedAt: now, createdAt: now, updatedAt: now });
     const metrics = MetricSnapshotSchema.parse({ schemaVersion: 1, id: "metric-creation", publicationId: publication.id, capturedAt: now, window: "24h", source: "manual", metrics: { views: 1200, likes: 90, comments: 12, shares: 8, saves: 11, completionRate: 0.38, averageWatchSeconds: 16, newFollowers: 5 }, notes: "手动录入" });
     catalog.saveMetricSnapshot(metrics);

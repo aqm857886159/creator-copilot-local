@@ -1,8 +1,9 @@
 /*
  * 工作台纯函数 · 切片 1
  * - deriveNextAction:真实 stage 枚举 → 卡片阶段条 + 一句人话下一步 + 行动按钮文案
- * - workflowFromLoadedProject:LoadProjectResult → CaptureWorkflowResult 适配(恢复断点)
- * 两者都是纯函数,无 IPC、无 DOM,便于单测。文案语气取自 docs/design/01-workbench.html。
+ * 纯函数,无 IPC、无 DOM,便于单测。文案语气取自 docs/design/01-workbench.html。
+ * (切片 3:退役旧 AI 剪辑页后,原 workflowFromLoadedProject 适配器随最后调用方一并移除;
+ *  新剪辑页按 projectId 自行 loadProject。)
  */
 
 // 真实项目 stage 枚举(来自 SQLite):script / capture / editing / rendered / published
@@ -83,9 +84,9 @@ export function deriveNextAction(project: ProjectLike): NextAction {
       return {
         stageLabel: "剪辑中",
         stages: stagesUpTo("editing"),
-        // 不承诺「已备好」:提案回载是 S2,当前进入剪辑页仍需用户点一次生成。
-        // 红点语义保留给「等你定」(S2),纯进行中状态不亮。
-        nextLine: "素材已导入，进去让 AI 出一版粗剪",
+        // 阶段推进后(S3c):项目进 editing 意味着 AI 已出过一版粗剪并落库,
+        // 剪辑页挂载即回读显示(latestEditProposal)。文案据此:进去过一遍就能出片。
+        nextLine: "粗剪已备好，点开过一遍就能出片",
         pulsing: false,
         actionLabel: "继续剪辑",
         target: "editing",
@@ -111,31 +112,4 @@ export function deriveNextAction(project: ProjectLike): NextAction {
     default:
       return unknownStageAction();
   }
-}
-
-// 恢复断点适配:把 loadProject 的结果整成 AiEditWorkbench 认得的 CaptureWorkflowResult。
-// AiEditWorkbench 只以 workflow.projectId 判空(约 212 行),因此只要 project 存在就必须带上
-// projectId,让剪辑页进入真实态而非「先准备一组真实素材」空态。
-// storyboard / tasks / capturePackage 缺失时按可选处理:tasks 缺失退化为空数组,
-// storyboard / capturePackage 缺失则不带该字段(剪辑页会据缺口继续引导)。
-export function workflowFromLoadedProject(
-  loaded: LoadProjectResult,
-): CaptureWorkflowResult {
-  if (!loaded.ok || !loaded.project) {
-    return { ok: false, errorCode: loaded.errorCode, message: loaded.message ?? "项目载入失败" };
-  }
-  return {
-    ok: true,
-    projectId: loaded.project.id,
-    script: loaded.script,
-    storyboard: loaded.storyboard,
-    tasks: loaded.tasks ?? [],
-    capturePackage: loaded.capturePackage
-      ? {
-          id: loaded.capturePackage.id,
-          relativePath: loaded.capturePackage.relativePath,
-          status: loaded.capturePackage.status,
-        }
-      : undefined,
-  };
 }

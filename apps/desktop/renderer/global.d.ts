@@ -37,6 +37,10 @@ interface LoadProjectResult {
   tasks?: CaptureShootTask[];
   capturePackage?: { id: string; projectId: string; storyboardRevision: number; format: "html"; relativePath: string; taskIds: string[]; status: string; createdAt: string; updatedAt: string };
   takesByTask?: Record<string, CaptureTake[]>;
+  // 剪辑页挂载即回读的最近一次已存粗剪(向后兼容的新增字段);没有提案时缺省。
+  latestEditProposal?: EditProposal;
+  // 最新一次成功渲染(出片条回水合);manifest 缺失时后端降级为不带此字段
+  latestRender?: { renderRunId: string; files: { video: string; subtitle: string | null; manifest: string } };
 }
 
 interface ImportMediaResult {

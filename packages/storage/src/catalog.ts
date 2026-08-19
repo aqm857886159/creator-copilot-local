@@ -769,6 +769,13 @@ export class SqliteCatalog {
     return row ? EditProposalSchema.parse(parseJson(row.payload_json, "edit proposal")) : undefined;
   }
 
+  // 取项目最近一次剪辑提案:命中 edit_proposals_project_idx(project_id, updated_at)。
+  // 剪辑页挂载即回读用它显示已存粗剪,不再让用户误以为「还没生成」。updated_at 相同再按 id 兜底稳定排序。
+  getLatestEditProposal(projectId: string): EditProposal | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM edit_proposals WHERE project_id = ? ORDER BY updated_at DESC, id DESC LIMIT 1").get(projectId) as { payload_json: string } | undefined;
+    return row ? EditProposalSchema.parse(parseJson(row.payload_json, "edit proposal")) : undefined;
+  }
+
   saveFrozenEditSpec(raw: FrozenEditSpec) {
     const spec = FrozenEditSpecSchema.parse(raw);
     const current = this.db.prepare("SELECT revision, authored_spec_hash AS authoredSpecHash FROM frozen_edit_specs WHERE id = ?").get(spec.id) as { revision: number; authoredSpecHash: string } | undefined;
@@ -811,6 +818,12 @@ export class SqliteCatalog {
       const run = this.getRenderRun(row.id);
       return run ? [run] : [];
     });
+  }
+
+  // 剪辑页重开时回水合「已出片」状态:同项目按 updated_at DESC 取最新一次成功渲染。
+  getLatestSucceededRenderRun(projectId: string): RenderRunRecord | undefined {
+    const row = this.db.prepare("SELECT id FROM render_runs WHERE project_id = ? AND state = 'succeeded' ORDER BY updated_at DESC, id DESC LIMIT 1").get(projectId) as { id: string } | undefined;
+    return row ? this.getRenderRun(row.id) : undefined;
   }
 
   saveAnalysisFacts(rawFacts: AnalysisFact[]) {

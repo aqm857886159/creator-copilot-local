@@ -395,6 +395,26 @@ function configuredEditModel() {
   return configuredEditProvider() === "apimart" ? process.env.AI_EDIT_MODEL ?? "gpt-5-nano" : undefined;
 }
 
+// 项目阶段顺序(与 renderer/lib/workbench.ts 的 STAGE_ORDER 一致):只前进不回退。
+const PROJECT_STAGE_ORDER = ["script", "capture", "editing", "rendered", "published"];
+
+// 阶段推进(S3c):把项目 stage 推到 targetStage,仅当目标下标严格更高时才写。
+// 读到最新 project 再比较,避免用陈旧 revision 覆盖;成功即写 updatedAt(updateProject 内部处理)。
+// 返回是否发生推进;失败(阶段已达/更高、项目消失、并发写冲突)都安静跳过,不影响主操作结果。
+function advanceProjectStage(workspace, projectId, targetStage) {
+  try {
+    const project = workspace.catalog.getProject(projectId);
+    if (!project || project.workspaceId !== workspace.workspaceId) return false;
+    const currentIndex = PROJECT_STAGE_ORDER.indexOf(project.stage);
+    const targetIndex = PROJECT_STAGE_ORDER.indexOf(targetStage);
+    if (targetIndex < 0 || currentIndex < 0 || targetIndex <= currentIndex) return false;
+    return workspace.catalog.updateProject(project.id, project.revision, { stage: targetStage });
+  } catch {
+    // 阶段推进是主操作成功后的附带写入,不能因它失败而让用户看到主操作报错。
+    return false;
+  }
+}
+
 function proposalFailure(error, providerKey) {
   const message = error instanceof Error ? error.message.slice(0, 500) : "AI 剪辑提案请求失败";
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : "PROPOSAL_FAILED";
@@ -769,7 +789,28 @@ ipcMain.handle("desktop:load-project", async (_event, raw) => {
     if (typeof payload.capturePackageId === "string" && !capturePackage) throw new Error("项目已保存，但拍摄包引用缺失");
     if (tasks.length !== taskIds.length) throw new Error("项目已保存，但部分拍摄任务引用缺失");
     const takesByTask = Object.fromEntries(tasks.map((task) => [task.id, workspace.catalog.listTakes(task.id)]));
-    return { ok: true, project, script, storyboard, tasks, capturePackage, takesByTask };
+    // 剪辑页挂载即回读已存粗剪:附加最近一次剪辑提案(向后兼容的新增字段,缺失时为 undefined)。
+    const latestEditProposal = workspace.catalog.getLatestEditProposal(project.id);
+    // 出片条回水合:最新一次成功渲染的成片信息以 manifest 为准;manifest 缺失/损坏按无成片降级,不拦项目载入。
+    let latestRender;
+    const latestRun = workspace.catalog.getLatestSucceededRenderRun(project.id);
+    if (latestRun?.manifestRelativePath) {
+      try {
+        const manifestPath = path.resolve(workspace.workspacePath, latestRun.manifestRelativePath);
+        const root = realpathSync(workspace.workspacePath);
+        const canonicalManifestPath = realpathSync(manifestPath);
+        if (canonicalManifestPath === root || canonicalManifestPath.startsWith(`${root}${path.sep}`)) {
+          const renderManifest = JSON.parse(await readFile(canonicalManifestPath, "utf8"));
+          const outputs = Array.isArray(renderManifest?.outputs) ? renderManifest.outputs : [];
+          const video = outputs.find((output) => output?.kind === "video" && typeof output.relativePath === "string");
+          const subtitle = outputs.find((output) => output?.kind === "subtitle" && typeof output.relativePath === "string");
+          if (video) latestRender = { renderRunId: latestRun.id, files: { video: video.relativePath, subtitle: subtitle ? subtitle.relativePath : null, manifest: latestRun.manifestRelativePath } };
+        }
+      } catch {
+        latestRender = undefined;
+      }
+    }
+    return { ok: true, project, script, storyboard, tasks, capturePackage, takesByTask, latestEditProposal, latestRender };
   } catch (error) {
     return { ok: false, errorCode: "project_load_failed", message: error instanceof Error ? error.message : "无法载入本地项目" };
   }
@@ -1475,6 +1516,8 @@ ipcMain.handle("desktop:propose-edit", async (_event, request) => {
         events: [{ id: `event-${command.correlationId}-completed`, aggregateType: "project", aggregateId: projectId, aggregateRevision: project.revision, type: "edit.proposal.completed", payload: { jobId, proposalId: result.proposal?.id, status: result.status, provider: result.provider }, actorType: "system", idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, occurredAt: new Date().toISOString() }],
       };
     });
+    // 阶段推进(S3c):粗剪已备好并落库 → 若还在 script/capture,推进到 editing(只前进不回退)。
+    if (result.status === "ready" && result.proposal) advanceProjectStage(workspace, projectId, "editing");
     return { ok: true, ...result, analysisFacts: Object.values(analysisFactsByAsset).flat(), assetCandidates, receipt: completed, idempotencyScope: workspace.workspaceId, idempotencyKey: command.idempotencyKey, jobId, project: { id: project.id, title: project.title } };
   } catch (error) {
     return { ok: false, errorCode: "edit_proposal_failed", message: error instanceof Error ? error.message : "AI 剪辑提案生成失败" };
@@ -1682,6 +1725,8 @@ ipcMain.handle("desktop:render-edit", async (_event, raw) => {
     const outputArtifactIds = outputArtifacts.map((artifact) => artifact.artifactId);
     if (!workspace.catalog.transitionJob(renderJobId, "running", "succeeded", renderJobLeaseToken, { artifactIds: outputArtifactIds, checkpoint: { renderRunId, manifestHash: result.manifestHash, outputCount: outputArtifactIds.length } })) throw new Error("渲染任务完成状态未能持久化");
     workspace.catalog.saveRenderRun({ schemaVersion: 1, id: renderRunId, projectId: raw.projectId, frozenEditSpecId: frozen.id, state: "succeeded", manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/"), manifestHash: result.manifestHash, createdAt: renderNow, updatedAt: new Date().toISOString() });
+    // 阶段推进(S3c):成片已落本地 → 推进到 rendered(只前进不回退)。
+    advanceProjectStage(workspace, raw.projectId, "rendered");
     return { ok: true, freezeReceipt, frozenEditSpecId: frozen.id, renderId, renderRunId, jobId: renderJobId, artifactIds: outputArtifactIds, manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
   } catch (error) {
     if (renderJobId && renderJobLeaseToken && renderWorkspace) {
@@ -1770,6 +1815,8 @@ ipcMain.handle("desktop:retry-render", async (_event, raw) => {
     workspace.catalog.insertArtifacts(outputArtifacts);
     if (!workspace.catalog.transitionJob(job.id, "running", "succeeded", leaseToken, { artifactIds: outputArtifacts.map((artifact) => artifact.artifactId), checkpoint: { renderRunId: renderRun.id, renderId, manifestHash: result.manifestHash, outputCount: outputArtifacts.length } })) throw new Error("渲染重试完成状态未能持久化");
     workspace.catalog.saveRenderRun({ ...renderRun, state: "succeeded", manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/"), manifestHash: result.manifestHash, updatedAt: new Date().toISOString() });
+    // 阶段推进(S3c):按已冻结方案重出成功也算成片落地 → 推进到 rendered(只前进不回退)。
+    advanceProjectStage(workspace, raw.projectId, "rendered");
     return { ok: true, frozenEditSpecId: frozen.id, renderId, renderRunId: renderRun.id, jobId: job.id, artifactIds: outputArtifacts.map((artifact) => artifact.artifactId), manifest: result.manifest, files: { video: path.relative(workspace.workspacePath, result.outputPath).split(path.sep).join("/"), subtitle: result.subtitlePath ? path.relative(workspace.workspacePath, result.subtitlePath).split(path.sep).join("/") : null, manifest: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") } };
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI 剪辑重试失败";
@@ -1885,6 +1932,8 @@ ipcMain.handle("desktop:create-publish-package", async (_event, raw) => {
     ]);
     const now = new Date().toISOString();
     const publication = workspace.catalog.savePublication({ schemaVersion: 1, id: `publication-${raw.renderRunId}`, projectId: run.projectId, packageId, platform: result.manifest.platform, status: "draft", createdAt: now, updatedAt: now });
+    // 阶段推进(S3c):发布包已生成 → 推进到 published(只前进不回退)。
+    advanceProjectStage(workspace, run.projectId, "published");
     return { ok: true, packageId, publicationId: publication.id, manifest: result.manifest, packageRelativePath: path.relative(workspace.workspacePath, result.packageDir).split(path.sep).join("/"), manifestRelativePath: path.relative(workspace.workspacePath, result.manifestPath).split(path.sep).join("/") };
   } catch (error) {
     return { ok: false, errorCode: "publish_package_failed", message: error instanceof Error ? error.message : "发布包生成失败" };
@@ -2237,44 +2286,49 @@ app.whenReady().then(() => {
           const analyzedAssets = await window.desktop.searchAssets("");
           if (!analyzedAssets.facts?.some((fact) => fact.kind === "shot" && fact.artifactId === sourceArtifact.artifactId)) throw new Error("UI smoke 没有回写镜头事实");
           clickText("进入 AI 剪辑");
-          await wait(350);
-          clickText("生成 AI 剪辑提案");
-          await wait(1_000);
-          if (!document.querySelector(".proposal-list")) throw new Error("AI 提案没有出现在页面；body=" + (document.body?.innerText ?? "").slice(-1200));
-          if (!document.querySelector(".proposal-intent")) throw new Error("AI 提案没有显示原拍摄意图");
-          if (!document.querySelector(".proposal-row.overlay") || !document.querySelector(".proposal-row.primary")) throw new Error("AI 提案没有同时生成口播主干和画面覆盖");
-          await waitFor(() => buttons().some((button) => !button.disabled && button.textContent?.includes("作为 Take")), "候选素材采用按钮");
-          clickText("作为 Take");
-          await waitFor(() => (document.body?.innerText ?? "").includes("已复用已有 Take") || (document.body?.innerText ?? "").includes("已创建 Take"), "候选素材写入 Take");
-          clickText("确认并导出");
-          await wait(2_500);
-          if (!document.querySelector(".render-success")) throw new Error("AI 剪辑没有成功导出");
-          const renderTitle = document.querySelector(".render-success h3")?.textContent ?? null;
-          const proposalRowCount = document.querySelectorAll(".proposal-row").length;
-          const workspaceText = document.querySelector(".workspace-state")?.textContent ?? "";
-          const projectId = workspaceText.match(/project-[a-z0-9-]+/i)?.[0] ?? null;
-          const persistedProjects = await window.desktop.listProjects();
-          const loaded = projectId ? await window.desktop.loadProject({ projectId }) : null;
-          if (!persistedProjects.ok || !persistedProjects.projects?.some((project) => project.id === projectId) || !loaded?.ok || loaded.project?.id !== projectId || !loaded.script || !loaded.storyboard || !loaded.tasks?.length || !loaded.capturePackage) throw new Error("UI smoke 没有从 SQLite 恢复已保存项目的脚本、分镜和拍摄包");
+          // 新剪辑页:自行 loadProject。粗剪还没生成 → 空态主 CTA。
+          await waitFor(() => document.querySelector(".ep-root"), "剪辑页渲染");
+          await waitFor(() => buttons().some((button) => !button.disabled && button.textContent?.includes("让 AI 出一版粗剪")), "空态主 CTA「让 AI 出一版粗剪」");
+          clickText("让 AI 出一版粗剪");
+          // 生成后进入粗剪审阅态:镜头行出现。
+          await waitFor(() => document.querySelectorAll(".ep-cut .ep-row").length > 0, "粗剪镜头行");
+          const rowCount = document.querySelectorAll(".ep-cut .ep-row").length;
+          const placementLabels = [...document.querySelectorAll(".ep-cut .ep-row .ep-what b")].map((node) => node.textContent ?? "");
+          if (!placementLabels.some((label) => label.includes("口播主干"))) throw new Error("粗剪镜头行缺少 placement 短标「口播主干」");
+          if (!document.querySelector(".ep-cut .ep-row .ep-ev")) throw new Error("粗剪镜头行缺少证据试听行");
+          // 项目 ID 从 listProjects 取(新页标题栏显示项目名,不再暴露 UUID)。
+          const projectsForEdit = await window.desktop.listProjects();
+          const projectId = projectsForEdit.projects?.[0]?.id ?? null;
+          const loadedAfterPropose = projectId ? await window.desktop.loadProject({ projectId }) : null;
+          // 阶段推进(S3c):粗剪落库后 stage 应为 editing;并已回读到 latestEditProposal。
+          if (loadedAfterPropose?.project?.stage !== "editing") throw new Error("生成粗剪后项目 stage 没有推进到 editing：" + (loadedAfterPropose?.project?.stage ?? "无"));
+          if (!loadedAfterPropose?.latestEditProposal) throw new Error("load-project 没有回读到已存粗剪(latestEditProposal)");
+          // 确认出片:进入出片后状态条。
+          clickText("确认，出这一版粗剪");
+          await waitFor(() => document.querySelector(".ep-done"), "出片后状态条");
+          if (!buttons().some((button) => button.textContent?.includes("打开成片"))) throw new Error("出片后状态条缺少「打开成片」");
+          if (!buttons().some((button) => button.textContent?.includes("导出到剪映"))) throw new Error("出片后状态条缺少「导出到剪映」");
+          if (!buttons().some((button) => button.textContent?.includes("去发布"))) throw new Error("出片后状态条缺少「去发布」");
+          const loadedAfterRender = projectId ? await window.desktop.loadProject({ projectId }) : null;
+          // 阶段推进(S3c):出片后 stage 应为 rendered。
+          if (loadedAfterRender?.project?.stage !== "rendered") throw new Error("出片后项目 stage 没有推进到 rendered：" + (loadedAfterRender?.project?.stage ?? "无"));
+          const loaded = loadedAfterRender;
+          if (!loaded?.ok || loaded.project?.id !== projectId || !loaded.script || !loaded.storyboard || !loaded.tasks?.length || !loaded.capturePackage) throw new Error("UI smoke 没有从 SQLite 恢复已保存项目的脚本、分镜和拍摄包");
           for (const block of loaded.script.blocks) {
             const blockShots = loaded.storyboard.shots.filter((shot) => shot.scriptBlockIds.includes(block.id));
             if (!blockShots.some((shot) => shot.mode === "talking_head")) throw new Error("脚本段落缺少连续口播主干：" + block.id);
             if (block.visualNeed !== "none" && !blockShots.some((shot) => shot.mode !== "talking_head")) throw new Error("需要画面支持的脚本段落缺少补充镜头：" + block.id);
           }
-          return { ok: true, title: renderTitle, proposalRows: proposalRowCount, projectId, scriptStageRecovered: true, analysisFactCount: analyzedAssets.facts?.length ?? 0, persistedProjectCount: persistedProjects.projects.length, loadedTaskCount: loaded.tasks.length };
+          return { ok: true, roughCutRows: rowCount, projectId, stageAfterPropose: loadedAfterPropose.project.stage, stageAfterRender: loadedAfterRender.project.stage, analysisFactCount: analyzedAssets.facts?.length ?? 0, loadedTaskCount: loaded.tasks.length };
         })()`);
         if (!result?.ok) throw new Error("UI smoke 没有返回成功结果");
         const workspace = requireWorkspace();
         if (!result.projectId) throw new Error("UI smoke 没有返回项目 ID");
         const renderRuns = workspace.catalog.listRenderRunsForProject(result.projectId);
         if (!renderRuns.some((run) => run.state === "succeeded")) throw new Error("UI smoke 的 SQLite 没有成功 render run");
-        // 当前构建里项目 stage 止于 capture(没有 stage 推进逻辑,editing/rendered/published 尚无写入方)。
-        // 为验证「editing 阶段卡 → AI 剪辑非空」这条真实路由,在 SQLite 里把这条已带完整分镜/拍摄包的
-        // 项目 stage 直接种为 editing(仅冒烟种子,不改产品的 stage 机;后续切片补 stage 推进时可去掉)。
-        const seedProject = workspace.catalog.getProject(result.projectId);
-        if (!seedProject) throw new Error("UI smoke 找不到用于种入 editing 阶段的项目");
-        if (!workspace.catalog.updateProject(seedProject.id, seedProject.revision, { stage: "editing" })) throw new Error("UI smoke 无法把项目种为 editing 阶段");
-        // 新壳:回到工作台,断言真实项目卡按 editing 阶段渲染。
+        if (workspace.catalog.getProject(result.projectId)?.stage !== "rendered") throw new Error("UI smoke 的 SQLite 出片后 stage 不是 rendered");
+        if (shotDirectory) await captureSmokeShot(window, path.join(shotDirectory, "edit-page.png"));
+        // 出片后回到工作台:断言真实项目卡按 rendered 阶段渲染(已出片 / 去发布)。
         const workbenchCheck = await window.webContents.executeJavaScript(`(async () => {
           const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
           const waitFor = async (predicate, label) => { for (let attempt = 0; attempt < 80; attempt += 1) { if (predicate()) return; await wait(250); } throw new Error("等待超时：" + label); };
@@ -2286,25 +2340,43 @@ app.whenReady().then(() => {
           const card = document.querySelector(".wb-proj:not(.wb-new)");
           const stageTag = card.querySelector(".wb-tag")?.textContent ?? "";
           const actionLabel = card.querySelector(".wb-go")?.textContent ?? "";
-          if (stageTag !== "剪辑中" || actionLabel !== "继续剪辑") throw new Error("editing 阶段卡片阶段标或行动按钮不正确：" + stageTag + " / " + actionLabel);
+          if (stageTag !== "已出片" || actionLabel !== "去发布") throw new Error("rendered 阶段卡片阶段标或行动按钮不正确：" + stageTag + " / " + actionLabel);
           if (!card.querySelector(".wb-stages i.wb-now")) throw new Error("项目卡没有点亮当前阶段条");
           return { ok: true, stageTag, actionLabel, cardCount: document.querySelectorAll(".wb-proj:not(.wb-new)").length };
         })()`);
         if (!workbenchCheck?.ok) throw new Error("UI smoke 工作台真实项目卡断言失败");
         if (shotDirectory) await captureSmokeShot(window, path.join(shotDirectory, "workbench.png"));
-        // 点击 editing 阶段卡 → 载入并适配 → 进入 AI 剪辑视图,断言非空(不是「先准备一组真实素材」空态)。
+        // 恢复进剪辑页:点 rendered 阶段卡 → 剪辑页挂载即回读已存粗剪,不点生成即有镜头行。
         const editCheck = await window.webContents.executeJavaScript(`(async () => {
           const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
           const waitFor = async (predicate, label) => { for (let attempt = 0; attempt < 80; attempt += 1) { if (predicate()) return; await wait(250); } throw new Error("等待超时：" + label); };
           document.querySelector(".wb-proj:not(.wb-new)").click();
-          await waitFor(() => document.querySelector(".edit-workbench"), "AI 剪辑视图");
-          if (document.querySelector(".empty-edit-workbench")) throw new Error("editing 卡进入后 AI 剪辑仍是空态");
-          const projectIdShown = document.querySelector(".edit-workbench .workspace-state")?.textContent ?? "";
-          if (!projectIdShown.includes("project-")) throw new Error("AI 剪辑视图没有显示恢复的项目 ID");
-          return { ok: true, projectIdShown: projectIdShown.trim() };
+          await waitFor(() => document.querySelector(".ep-root"), "剪辑页渲染");
+          // 关键回读断言:不点任何「生成」,粗剪镜头行必须已存在(latestEditProposal 回读生效)。
+          await waitFor(() => document.querySelectorAll(".ep-cut .ep-row").length > 0, "回读已存粗剪镜头行");
+          const restoredRows = document.querySelectorAll(".ep-cut .ep-row").length;
+          const restoredLabels = [...document.querySelectorAll(".ep-cut .ep-row .ep-what b")].map((node) => node.textContent ?? "");
+          if (!restoredLabels.some((label) => label.includes("口播主干"))) throw new Error("回读的粗剪镜头行缺少 placement 短标");
+          if (document.querySelector(".ep-empty")) throw new Error("已有粗剪的项目进剪辑页仍显示空态");
+          // 出片条回水合:该项目已渲染成功,重开必须直接见「已出片」条,不能再让用户点「确认出片」。
+          await waitFor(() => document.querySelector(".ep-done"), "重开显示已出片状态条");
+          if (!document.querySelector(".ep-done b")?.textContent?.includes("已经出片")) throw new Error("已出片条文案缺失");
+          if (document.querySelector(".ep-gate")) throw new Error("已渲染项目重开仍显示确认出片闸门");
+          const restoredDone = Boolean(document.querySelector(".ep-done"));
+          return { ok: true, restoredRows, restoredDone };
         })()`);
-        if (!editCheck?.ok) throw new Error("UI smoke editing 卡进入 AI 剪辑断言失败");
-        if (shotDirectory) await captureSmokeShot(window, path.join(shotDirectory, "ai-edit.png"));
+        if (!editCheck?.ok) throw new Error("UI smoke 恢复进剪辑页回读断言失败");
+        if (editCheck.restoredRows <= 0) throw new Error("UI smoke 恢复进剪辑页回读镜头行数不大于 0");
+        if (!editCheck.restoredDone) throw new Error("UI smoke 已渲染项目重开没有回水合出片条");
+        // 阶段推进(S3c):发布包生成 → published。用真实 renderRunId 走 create-publish-package IPC(不经 prompt UI)。
+        const publishRenderRunId = renderRuns.find((run) => run.state === "succeeded")?.id ?? null;
+        if (!publishRenderRunId) throw new Error("UI smoke 找不到用于发布的成功 render run");
+        const publishCheck = await window.webContents.executeJavaScript(`(async () => {
+          const result = await window.desktop.createPublishPackage({ renderRunId: ${JSON.stringify(publishRenderRunId)}, platform: "抖音", title: "把观点讲清楚" });
+          return { ok: Boolean(result?.ok), message: result?.message ?? null, packageId: result?.packageId ?? null };
+        })()`);
+        if (!publishCheck?.ok) throw new Error("UI smoke 发布包没有生成成功：" + (publishCheck?.message ?? "unknown"));
+        if (workspace.catalog.getProject(result.projectId)?.stage !== "published") throw new Error("UI smoke 生成发布包后 stage 没有推进到 published");
 
         // ===== 切片 2:脚本页真实化断言 =====
         // 独立种一个 script 阶段项目(带选题、visualSuggestions、shotPlans),不搅动上面的渲染流。
@@ -2382,7 +2454,8 @@ app.whenReady().then(() => {
         const seededStoryboard = seededProjectAfter && typeof seededProjectAfter.payload.storyboardId === "string" ? workspace.catalog.getStoryboard(seededProjectAfter.payload.storyboardId) : undefined;
         if (!seededStoryboard || seededStoryboard.scriptId !== scriptSeedScriptId) throw new Error("脚本页生成分镜后 storyboard 没有落库");
 
-        console.log(JSON.stringify({ ok: true, smoke: "electron-ui-creation-import-proposal-render", ui: result, workbench: workbenchCheck, aiEdit: editCheck, scriptPage: { ...scriptPageCheck, revisionAfterEdit: scriptAfterEdit.revision, storyboardShotCount: seededStoryboard.shots.length }, shots: shotDirectory ?? null, workspace: workspace.workspacePath, renderRuns: renderRuns.map((run) => ({ id: run.id, state: run.state, manifestHash: run.manifestHash })) }));
+        const stageAfterPublish = workspace.catalog.getProject(result.projectId)?.stage ?? null;
+        console.log(JSON.stringify({ ok: true, smoke: "electron-ui-creation-import-proposal-render", ui: result, workbench: workbenchCheck, editPage: editCheck, publish: publishCheck, stageProgression: { afterPropose: result.stageAfterPropose, afterRender: result.stageAfterRender, afterPublish: stageAfterPublish }, scriptPage: { ...scriptPageCheck, revisionAfterEdit: scriptAfterEdit.revision, storyboardShotCount: seededStoryboard.shots.length }, shots: shotDirectory ?? null, workspace: workspace.workspacePath, renderRuns: renderRuns.map((run) => ({ id: run.id, state: run.state, manifestHash: run.manifestHash })) }));
         app.exit(0);
       } catch (error) {
         console.error(JSON.stringify({ ok: false, smoke: "electron-ui-creation-import-proposal-render", message: error instanceof Error ? error.message : "Electron UI smoke 失败" }));
