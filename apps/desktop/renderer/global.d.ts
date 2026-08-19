@@ -182,6 +182,14 @@ interface ScriptAcceptResult {
   script?: { id: string; projectId: string; topicId?: string; topicRevision?: number; revision: number; blocks: Array<{ id: string; order: number; kind: string; text: string; emphasis: string[]; evidenceIds: string[]; visualNeed: "none" | "support" | "must_show" }>; estimatedDurationMs: number };
 }
 
+interface ScriptUpdateResult {
+  ok: boolean;
+  errorCode?: string;
+  message?: string;
+  // 成功返回新脚本；revision 冲突时回传库中当前脚本，供 UI 重新载入。
+  script?: ScriptAcceptResult["script"];
+}
+
 interface AccountMetricsQuoteView {
   schemaVersion: 1;
   id: string;
@@ -554,6 +562,7 @@ interface Window {
     analyzeResearchMedia: (input: { reportId: string; awemeIds: string[] }) => Promise<AnalyzeResearchMediaResult>;
     proposeScript: (input: { brief: string; voiceProfile?: string; topicId?: string; sourceEvidence?: Array<{ id: string; text: string; source?: string }> }) => Promise<ScriptProposalResult>;
     acceptScriptProposal: (input: { proposalId: string; projectTitle: string }) => Promise<ScriptAcceptResult>;
+    updateScript: (input: { projectId: string; scriptId: string; expectedRevision: number; blocks: Array<{ id: string; kind: "hook" | "claim" | "evidence" | "example" | "counterpoint" | "transition" | "conclusion" | "cta"; text: string; emphasis: string[]; visualNeed: "none" | "support" | "must_show" }> }) => Promise<ScriptUpdateResult>;
     quoteTopicRadar: (input: TopicRadarQueryView) => Promise<TopicRadarQuoteResult>;
     runTopicRadar: (quoteId: string) => Promise<TopicRadarRunResult>;
     listTopicRadarReports: () => Promise<TopicRadarRunResult>;

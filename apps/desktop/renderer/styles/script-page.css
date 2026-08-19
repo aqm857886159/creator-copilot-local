@@ -1,0 +1,205 @@
+/*
+ * 脚本页样式 · 切片 2
+ * 视觉蓝本:docs/design/02-script.html(已过独立验收)
+ * 规则、尺寸、颜色逐条取自蓝本;类名一律 sp- 前缀,与旧 styles.css / wb- 零冲突。
+ * 语义色只用 tokens.css 令牌;少量蓝本专有的中性 hover/边框底色(无对应令牌)
+ * 沿用切片 1 shell.css 的先例逐字取蓝本值(#eaebe8 / #C9CBC6 等),保证与样张一致。
+ * 令牌名差异:蓝本 --record-text 对应 tokens.css 的 --text-record。
+ */
+
+.sp-root {
+  min-height: 100vh;
+  background: var(--ground);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--slate);
+  -webkit-font-smoothing: antialiased;
+}
+/* :where() 让 reset 特异度为 (0,0,1),否则 .sp-root button (0,1,1) 会压过 .sp-cta/.sp-chip 等单类样式 */
+:where(.sp-root) button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+.sp-root :focus-visible { outline: 2px solid var(--slate); outline-offset: 2px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { .sp-root * { transition: none !important; } }
+.sp-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ===== 项目壳 ===== */
+.sp-top {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+.sp-back {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink2);
+  font-size: 14px;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.sp-back:hover { background: #eaebe8; color: var(--slate); }
+.sp-ttl {
+  font-size: 15px;
+  font-weight: 700;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-stages { display: flex; gap: 3px; margin-left: 14px; }
+.sp-stages button {
+  padding: 6px 13px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--ink2);
+}
+.sp-stages button:hover:not(:disabled) { background: #eaebe8; color: var(--slate); }
+.sp-stages button[aria-current] {
+  color: var(--slate);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--marker);
+}
+.sp-stages button:disabled { color: var(--ink3); cursor: default; }
+.sp-stages .sp-handoff { border: 1px dashed #C9CBC6; color: var(--ink2); }
+.sp-top-r { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 13px; color: var(--ink2); }
+.sp-save { font-size: 13px; color: var(--ink2); }
+.sp-save-error { color: var(--text-record); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+.sp-page { max-width: 880px; margin: 0 auto; padding: 30px 28px 80px; }
+.sp-loading { color: var(--ink2); font-size: 14px; }
+.sp-error {
+  padding: 12px 15px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text-record);
+  font-size: 13px;
+}
+
+/* ===== 立场 + 时长 ===== */
+.sp-head { display: flex; gap: 14px; align-items: stretch; margin-bottom: 26px; }
+.sp-stance {
+  flex: 1;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 17px;
+}
+.sp-stance .sp-lb { font-size: 12px; color: var(--ink2); letter-spacing: .1em; }
+.sp-stance p { margin-top: 5px; font-size: 15px; font-weight: 600; line-height: 1.6; }
+.sp-dur {
+  flex: 0 0 224px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 17px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+.sp-dur .sp-lb { font-size: 12px; color: var(--ink2); letter-spacing: .1em; }
+.sp-dur .sp-v { font-size: 15px; font-weight: 600; }
+.sp-dur .sp-v i { font-style: normal; color: var(--ink3); font-weight: 400; }
+.sp-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.sp-bar i { display: block; height: 100%; background: var(--slate); }
+
+/* 当立场卡隐藏时,时长卡靠右,不占满整行 */
+.sp-head:not(:has(.sp-stance)) { justify-content: flex-end; }
+
+/* ===== 台词文档:旁注即合同 ===== */
+.sp-doc {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.sp-doc-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 22px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--ink2);
+}
+.sp-blk {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr) 156px;
+  gap: 18px;
+  padding: 22px 22px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.sp-blk:last-of-type { border-bottom: 0; }
+.sp-blk:hover { background: #FCFCFB; }
+.sp-rail { padding-top: 5px; }
+.sp-kind {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink2);
+  background: var(--ground);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.sp-rail .sp-t { display: block; margin-top: 7px; font-family: var(--mono); font-size: 12px; color: var(--ink2); }
+.sp-words { font-size: 17px; line-height: 2.05; letter-spacing: .01em; cursor: text; }
+.sp-words mark { background: linear-gradient(transparent 58%, var(--marker) 58%); color: inherit; padding: 0 1px; }
+.sp-words:focus-within, .sp-words:focus { outline: none; box-shadow: inset 3px 0 0 var(--marker); background: #FCFAF3; }
+
+/* 视觉需求:AI 预标,一枚 chip,点击轮换 */
+.sp-need { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; padding-top: 4px; }
+.sp-chip {
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--ink2);
+  background: var(--card);
+  white-space: nowrap;
+}
+.sp-chip:hover { border-color: var(--ink3); color: var(--slate); }
+.sp-chip-must {
+  background: var(--slate);
+  border-color: var(--slate);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--marker);
+}
+.sp-chip-must:hover { color: #fff; }
+.sp-why { font-size: 11.5px; color: var(--ink2); text-align: right; line-height: 1.5; }
+
+/* ===== 底部闸门 ===== */
+.sp-gate {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 15px 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.sp-gate-text { flex: 1; min-width: 0; }
+.sp-gate-text p { font-size: 13.5px; color: var(--ink2); }
+.sp-gate-warn { margin-top: 3px; font-size: 12.5px; color: var(--text-record); }
+.sp-gate-note { font-size: 12.5px; line-height: 1.5; max-width: 260px; text-align: right; }
+.sp-cta-quiet { padding: 9px 12px; border-radius: 9px; font-size: 13px; color: var(--ink2); white-space: nowrap; }
+.sp-cta-quiet:hover:not(:disabled) { color: var(--slate); text-decoration: underline; text-underline-offset: 3px; }
+.sp-cta-quiet:disabled { color: var(--ink3); cursor: default; }
+.sp-gate-ok { color: var(--ink2); }
+.sp-gate-bad { color: var(--text-record); }
+.sp-cta {
+  padding: 9px 18px;
+  border-radius: 9px;
+  background: var(--slate);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+.sp-cta:hover:not(:disabled) { background: var(--slate2); }
+.sp-cta:disabled { cursor: default; opacity: .7; }

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ScriptSchema, assertLayeredStoryboardCoverage, attachTake, createShootTasks, createStoryboard, exportCapturePackage, selectTake, type Take } from "./index";
+import { MIN_BLOCK_DURATION_MS, MS_PER_CHARACTER, ScriptSchema, assertLayeredStoryboardCoverage, attachTake, createShootTasks, createStoryboard, estimateBlockDurationMs, estimateScriptDurationMs, exportCapturePackage, selectTake, type Take } from "./index";
 
 const now = "2026-08-14T00:00:00.000Z";
 const script = ScriptSchema.parse({
@@ -67,5 +67,33 @@ describe("creation workflow contracts", () => {
     expect(() => assertLayeredStoryboardCoverage(script, missingSupplement)).toThrow("至少一个补充画面");
     const duplicatePrimary = { ...valid, shots: [...valid.shots, { ...valid.shots[0], id: "primary-duplicate", order: 4 }] };
     expect(() => assertLayeredStoryboardCoverage(script, duplicatePrimary)).toThrow("只能有一个口播主干");
+  });
+});
+
+describe("estimateScriptDurationMs", () => {
+  it("单段按字符数 × 260ms 折算", () => {
+    // 10 个字符 → 2600ms（高于底垫）
+    expect(estimateBlockDurationMs("零一二三四五六七八九")).toBe(2_600);
+  });
+
+  it("短句给 1500ms 底垫，不会低于 MIN_BLOCK_DURATION_MS", () => {
+    expect(estimateBlockDurationMs("好")).toBe(MIN_BLOCK_DURATION_MS);
+    expect(estimateBlockDurationMs("")).toBe(MIN_BLOCK_DURATION_MS);
+    // 5 个字符 × 260 = 1300 < 1500，取底垫
+    expect(estimateBlockDurationMs("一二三四五")).toBe(MIN_BLOCK_DURATION_MS);
+  });
+
+  it("整稿是各段之和，与 accept 处原内联公式逐字一致", () => {
+    const blocks = [{ text: "零一二三四五六七八九" }, { text: "一二三四五" }, { text: "好" }];
+    // 2600 + 1500(底垫) + 1500(底垫) = 5600
+    expect(estimateScriptDurationMs(blocks)).toBe(5_600);
+    // 与原内联 reduce 公式对账
+    const inlined = blocks.reduce((total, block) => total + Math.max(1_500, Math.round(block.text.length * 260)), 0);
+    expect(estimateScriptDurationMs(blocks)).toBe(inlined);
+  });
+
+  it("导出的常量与既有硬编码一致（防止将来漂移）", () => {
+    expect(MS_PER_CHARACTER).toBe(260);
+    expect(MIN_BLOCK_DURATION_MS).toBe(1_500);
   });
 });

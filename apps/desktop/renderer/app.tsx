@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { deriveNextAction, workflowFromLoadedProject } from "./lib/workbench";
 import { Workbench } from "./components/workbench";
 import { CreationWorkbench } from "./components/creation-workbench";
+import { ScriptPage } from "./components/script-page";
 import { AiEditWorkbench } from "./components/ai-edit-workbench";
 import { AssetLibraryWorkbench } from "./components/asset-library-workbench";
 import { AccountRadarWorkbench } from "./components/account-radar-workbench";
@@ -10,8 +11,8 @@ import { TopicRadarWorkbench } from "./components/topic-radar-workbench";
 import { SettingsWorkbench } from "./components/settings-workbench";
 
 // 导航四项(+设置),对齐 spec-02 产品形状:比旧七标签少。
-// edit / creation 是内部视图(从工作台卡片进入),不进主导航。
-type View = "workbench" | "topics" | "assets" | "memory" | "settings" | "edit" | "creation";
+// edit / creation / script 是内部视图(从工作台卡片进入),不进主导航。
+type View = "workbench" | "topics" | "assets" | "memory" | "settings" | "edit" | "creation" | "script";
 
 const NAV: Array<{ id: View; label: string }> = [
   { id: "workbench", label: "工作台" },
@@ -28,6 +29,8 @@ export function App() {
   const [mediaFeedback, setMediaFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const [projectsReloadKey, setProjectsReloadKey] = useState(0);
   const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
+  // 脚本页(切片 2):从工作台 script 阶段卡进入,承载真实脚本编辑与生成分镜。
+  const [scriptProjectId, setScriptProjectId] = useState<string | null>(null);
   // 选题视图内的二级切换:热点雷达(TopicRadar)⇄ 账号雷达(AccountRadar),账号雷达能力不丢。
   const [topicsTab, setTopicsTab] = useState<"radar" | "account">("radar");
 
@@ -98,7 +101,36 @@ export function App() {
       setView("memory");
       return;
     }
-    // script / capture:进入手动创作流,从其本地恢复列表一键继续。
+    if (target === "script") {
+      // 切片 2:script 阶段进新脚本页(真实脚本编辑 + 生成分镜)。
+      setScriptProjectId(project.id);
+      setView("script");
+      return;
+    }
+    // capture:进入手动创作流,从其本地恢复列表一键继续(过渡期仍用旧 creation-workbench)。
+    setView("creation");
+  }
+
+  // 脚本页阶段页签(过渡期):有 storyboard 时,分镜/拍摄进旧 creation-workbench,剪辑载入并进 AI 剪辑。
+  async function openScriptStage(stage: "storyboard" | "capture" | "editing") {
+    if (stage === "editing") {
+      if (!window.desktop || !scriptProjectId || openingProjectId) return;
+      setOpeningProjectId(scriptProjectId);
+      try {
+        const loaded = await window.desktop.loadProject({ projectId: scriptProjectId });
+        const workflow = workflowFromLoadedProject(loaded);
+        if (!workflow.ok) {
+          setMediaFeedback({ ok: false, text: loaded.message ?? "这条项目暂时打不开，稍后再试。" });
+          return;
+        }
+        setCaptureWorkflow(workflow);
+        setView("edit");
+      } finally {
+        setOpeningProjectId(null);
+      }
+      return;
+    }
+    // 分镜 / 拍摄:进旧创作流的恢复列表。
     setView("creation");
   }
 
@@ -157,6 +189,12 @@ export function App() {
             openEdit={() => setView("edit")}
           />
         </div>
+      ) : view === "script" && scriptProjectId ? (
+        <ScriptPage
+          projectId={scriptProjectId}
+          onBackToWorkbench={() => setView("workbench")}
+          onOpenStage={openScriptStage}
+        />
       ) : view === "edit" ? (
         <div className="wb-page">
           <AiEditWorkbench workflow={captureWorkflow} openProjects={() => setView("creation")} />

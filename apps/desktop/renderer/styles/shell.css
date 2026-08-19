@@ -15,7 +15,8 @@
   color: var(--slate);
   -webkit-font-smoothing: antialiased;
 }
-.wb-app button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+/* :where() 让 reset 特异度为 (0,0,1),不与 .wb-* 单类按钮样式打架(教训来自脚本页 .sp-root button) */
+:where(.wb-app) button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
 .wb-app :focus-visible { outline: 2px solid var(--slate); outline-offset: 2px; border-radius: 4px; }
 @media (prefers-reduced-motion: reduce) { .wb-app * { transition: none !important; } }
 .wb-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }

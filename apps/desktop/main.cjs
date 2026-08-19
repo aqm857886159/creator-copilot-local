@@ -1257,12 +1257,53 @@ ipcMain.handle("desktop:accept-script-proposal", async (_event, raw) => {
     const runtime = await getDesktopRuntime();
     const now = new Date().toISOString();
     const projectId = `project-${randomUUID()}`;
-    const script = runtime.creation.ScriptSchema.parse({ schemaVersion: 1, id: `script-${randomUUID()}`, projectId, topicId: proposal.topicId, topicRevision: proposal.topicRevision, revision: 1, status: "approved", blocks: proposal.blocks.map((block) => ({ schemaVersion: 1, id: block.id, order: block.order, kind: block.kind, text: block.text, emphasis: block.emphasis, evidenceIds: block.evidenceIds, visualNeed: block.visualNeed })), estimatedDurationMs: proposal.blocks.reduce((total, block) => total + Math.max(1_500, Math.round(block.text.length * 260)), 0), createdAt: now, updatedAt: now });
+    const script = runtime.creation.ScriptSchema.parse({ schemaVersion: 1, id: `script-${randomUUID()}`, projectId, topicId: proposal.topicId, topicRevision: proposal.topicRevision, revision: 1, status: "approved", blocks: proposal.blocks.map((block) => ({ schemaVersion: 1, id: block.id, order: block.order, kind: block.kind, text: block.text, emphasis: block.emphasis, evidenceIds: block.evidenceIds, visualNeed: block.visualNeed })), estimatedDurationMs: runtime.creation.estimateScriptDurationMs(proposal.blocks), createdAt: now, updatedAt: now });
     const project = { id: projectId, workspaceId: workspace.workspaceId, title: raw.projectTitle.trim(), stage: "script", revision: 1, payload: { scriptId: script.id, scriptProposalId: proposal.id, topicId: proposal.topicId, topicRevision: proposal.topicRevision, visualSuggestions: Object.fromEntries(proposal.blocks.map((block) => [block.id, block.visualSuggestion])), shotPlans: Object.fromEntries(proposal.blocks.filter((block) => block.shotPlan).map((block) => [block.id, block.shotPlan])) }, createdAt: now, updatedAt: now };
     const accepted = workspace.catalog.acceptScriptProposal({ proposalId: proposal.id, workspaceId: workspace.workspaceId, project, script });
     return { ok: true, proposal: accepted.proposal, project: accepted.project, script: accepted.script };
   } catch (error) {
     return { ok: false, errorCode: "script_accept_failed", message: error instanceof Error ? error.message : "脚本确认失败" };
+  }
+});
+
+ipcMain.handle("desktop:update-script", async (_event, raw) => {
+  try {
+    const workspace = requireWorkspace();
+    if (!raw || typeof raw.projectId !== "string" || !raw.projectId.trim()) throw new Error("项目 ID 无效");
+    if (typeof raw.scriptId !== "string" || !raw.scriptId.trim()) throw new Error("脚本 ID 无效");
+    if (!Number.isInteger(raw.expectedRevision) || raw.expectedRevision < 1) throw new Error("脚本修订号无效");
+    if (!Array.isArray(raw.blocks) || raw.blocks.length === 0 || raw.blocks.length > 30) throw new Error("脚本段落数量必须在 1–30 之间");
+    const runtime = await getDesktopRuntime();
+    const project = workspace.catalog.getProject(raw.projectId.trim());
+    if (!project || project.workspaceId !== workspace.workspaceId) throw new Error("项目不存在或不属于当前工作区");
+    if (project.payload.scriptId !== raw.scriptId.trim()) throw new Error("脚本不属于这个项目");
+    const current = workspace.catalog.getScript(raw.scriptId.trim());
+    if (!current || current.projectId !== project.id) throw new Error("脚本不存在或项目归属不一致");
+    // 乐观锁：期望修订号必须与库中当前一致，冲突时回传当前脚本让 UI 重新载入。
+    if (current.revision !== raw.expectedRevision) return { ok: false, errorCode: "script_revision_conflict", message: "脚本已被其他改动更新，请重新载入后再改。", script: current };
+    // 保留既有段落的 evidenceIds（按 id 对齐）；text/kind/emphasis/visualNeed 取用户改后的值，order 顺序重排。
+    const currentById = new Map(current.blocks.map((block) => [block.id, block]));
+    const now = new Date().toISOString();
+    const blocks = raw.blocks.map((block, index) => {
+      const text = String(block.text ?? "").trim();
+      if (!text) throw new Error(`第 ${index + 1} 段台词不能为空`);
+      const previous = typeof block.id === "string" ? currentById.get(block.id) : undefined;
+      return {
+        schemaVersion: 1,
+        id: typeof block.id === "string" && block.id ? block.id : `${current.id}-block-${String(index + 1).padStart(2, "0")}`,
+        order: index,
+        kind: block.kind,
+        text,
+        emphasis: Array.isArray(block.emphasis) ? block.emphasis.filter((item) => typeof item === "string" && item.length > 0).slice(0, 12) : [],
+        evidenceIds: previous ? previous.evidenceIds : [],
+        visualNeed: block.visualNeed,
+      };
+    });
+    const next = runtime.creation.ScriptSchema.parse({ ...current, revision: current.revision + 1, blocks, estimatedDurationMs: runtime.creation.estimateScriptDurationMs(blocks), updatedAt: now });
+    if (!workspace.catalog.saveScript(next)) return { ok: false, errorCode: "script_revision_conflict", message: "脚本已被其他改动更新，请重新载入后再改。", script: workspace.catalog.getScript(raw.scriptId.trim()) };
+    return { ok: true, script: next };
+  } catch (error) {
+    return { ok: false, errorCode: "script_update_failed", message: error instanceof Error ? error.message : "脚本保存失败" };
   }
 });
 
@@ -1284,17 +1325,22 @@ ipcMain.handle("desktop:create-capture-workflow", async (_event, raw) => {
     const scriptId = existingScript?.id ?? `script-${randomUUID()}`;
     const storyboardId = `storyboard-${randomUUID()}`;
     const capturePackageId = `capture-${randomUUID()}`;
-    const blocks = raw.blocks.map((block, index) => ({
-      schemaVersion: 1,
-      id: existingScript?.blocks[index]?.id ?? `${scriptId}-block-${String(index + 1).padStart(2, "0")}`,
-      order: index,
-      kind: block.kind,
-      text: String(block.text ?? "").trim(),
-      emphasis: [],
-      evidenceIds: [],
-      visualNeed: block.visualNeed,
-    }));
-    const estimatedDurationMs = blocks.reduce((total, block) => total + Math.max(1500, Math.round(block.text.length * 260)), 0);
+    const blocks = raw.blocks.map((block, index) => {
+      // 生成分镜会落新脚本修订,但它不是重写脚本:emphasis 取调用方最新值(没给则保留既有段落的),
+      // evidenceIds 同理——此前两者被硬编码为空数组,每次生成分镜都会清掉高亮与证据链。
+      const previous = existingScript?.blocks[index];
+      return {
+        schemaVersion: 1,
+        id: previous?.id ?? `${scriptId}-block-${String(index + 1).padStart(2, "0")}`,
+        order: index,
+        kind: block.kind,
+        text: String(block.text ?? "").trim(),
+        emphasis: Array.isArray(block.emphasis) ? block.emphasis.filter((item) => typeof item === "string" && item.length > 0).slice(0, 12) : (previous?.emphasis ?? []),
+        evidenceIds: Array.isArray(block.evidenceIds) ? block.evidenceIds.filter((item) => typeof item === "string" && item.length > 0) : (previous?.evidenceIds ?? []),
+        visualNeed: block.visualNeed,
+      };
+    });
+    const estimatedDurationMs = runtime.creation.estimateScriptDurationMs(blocks);
     const script = existingScript
       ? runtime.creation.ScriptSchema.parse({ ...existingScript, revision: existingScript.revision + 1, blocks, estimatedDurationMs, updatedAt: now })
       : runtime.creation.ScriptSchema.parse({ schemaVersion: 1, id: scriptId, projectId, revision: 1, status: "approved", blocks, estimatedDurationMs, createdAt: now, updatedAt: now });
@@ -2259,7 +2305,84 @@ app.whenReady().then(() => {
         })()`);
         if (!editCheck?.ok) throw new Error("UI smoke editing 卡进入 AI 剪辑断言失败");
         if (shotDirectory) await captureSmokeShot(window, path.join(shotDirectory, "ai-edit.png"));
-        console.log(JSON.stringify({ ok: true, smoke: "electron-ui-creation-import-proposal-render", ui: result, workbench: workbenchCheck, aiEdit: editCheck, shots: shotDirectory ?? null, workspace: workspace.workspacePath, renderRuns: renderRuns.map((run) => ({ id: run.id, state: run.state, manifestHash: run.manifestHash })) }));
+
+        // ===== 切片 2:脚本页真实化断言 =====
+        // 独立种一个 script 阶段项目(带选题、visualSuggestions、shotPlans),不搅动上面的渲染流。
+        // 工作台点「继续写脚本」→ 断言段落数=blocks、chip 三档之一、编辑后 revision+1、生成分镜后 storyboard 落库。
+        const scriptSmokeRuntime = await getDesktopRuntime();
+        const scriptSeedNow = new Date().toISOString();
+        const scriptSeedTopic = scriptSmokeRuntime.domain.createTopic({ id: "topic-script-page-smoke", workspaceId: workspace.workspaceId, title: "表达为什么需要画面变化", audienceProblem: "越努力表达越没记忆点。", thesis: "记忆点来自表达结构。", angle: "记忆点来自表达结构，不来自努力程度。", evidenceIds: [], benchmarkVideoIds: [], visualOpportunities: [], riskNotes: [], source: { kind: "topic_radar", reportId: "report-script-page-smoke", opportunityId: "opportunity-script-page-smoke" }, status: "selected", createdAt: scriptSeedNow, updatedAt: scriptSeedNow });
+        workspace.catalog.saveTopic(scriptSeedTopic);
+        const scriptSeedProjectId = "project-script-page-smoke";
+        const scriptSeedScriptId = "script-script-page-smoke";
+        const scriptSeedBlocks = [
+          { schemaVersion: 1, id: `${scriptSeedScriptId}-block-01`, order: 0, kind: "hook", text: "为什么越努力表达，反而越没有记忆点？", emphasis: ["记忆点"], evidenceIds: [], visualNeed: "none" },
+          { schemaVersion: 1, id: `${scriptSeedScriptId}-block-02`, order: 1, kind: "claim", text: "因为观点停留在同一个口播画面里。", emphasis: ["观点"], evidenceIds: [], visualNeed: "support" },
+          { schemaVersion: 1, id: `${scriptSeedScriptId}-block-03`, order: 2, kind: "evidence", text: "讲到修改时，要让观众真正看见桌面上的草稿。", emphasis: ["看见"], evidenceIds: [], visualNeed: "must_show" },
+        ];
+        const scriptSeedScript = scriptSmokeRuntime.creation.ScriptSchema.parse({ schemaVersion: 1, id: scriptSeedScriptId, projectId: scriptSeedProjectId, topicId: scriptSeedTopic.id, topicRevision: scriptSeedTopic.revision, revision: 1, status: "approved", blocks: scriptSeedBlocks, estimatedDurationMs: scriptSmokeRuntime.creation.estimateScriptDurationMs(scriptSeedBlocks), createdAt: scriptSeedNow, updatedAt: scriptSeedNow });
+        // 先建项目再存脚本:scripts.project_id 有指向 projects(id) 的外键。
+        workspace.catalog.createProject({ id: scriptSeedProjectId, workspaceId: workspace.workspaceId, title: "越努力，越没记忆点？", stage: "script", revision: 1, payload: { scriptId: scriptSeedScriptId, topicId: scriptSeedTopic.id, topicRevision: scriptSeedTopic.revision, visualSuggestions: { [`${scriptSeedScriptId}-block-03`]: "你承诺了「看见」—— 拍不到，剪辑会来问你" }, shotPlans: { [`${scriptSeedScriptId}-block-03`]: { purpose: "prove", mode: "broll", framing: "detail", actionDescription: "拍桌面上带修改痕迹的草稿。", cameraDirection: "手机俯拍，缓慢横移。", targetMs: 3000, sourceRequirement: "shoot_task", deviceHint: "phone", orientation: "portrait", checklist: ["主体清晰"] } } }, createdAt: scriptSeedNow, updatedAt: scriptSeedNow });
+        if (!workspace.catalog.saveScript(scriptSeedScript)) throw new Error("脚本页 smoke 无法种入脚本");
+
+        const scriptPageCheck = await window.webContents.executeJavaScript(`(async () => {
+          const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+          const waitFor = async (predicate, label) => { for (let attempt = 0; attempt < 80; attempt += 1) { const value = predicate(); if (value) return value; await wait(250); } throw new Error("等待超时：" + label); };
+          const nav = [...document.querySelectorAll(".wb-nav button")].find((button) => button.textContent?.includes("工作台"));
+          if (!nav) throw new Error("脚本页 smoke 没有工作台导航项");
+          nav.click();
+          await waitFor(() => document.querySelector(".wb-sec")?.textContent?.includes("接着做"), "工作台接着做区块");
+          // 找到脚本阶段项目卡(阶段标「脚本中」)并点「继续写脚本」。
+          const scriptCard = await waitFor(() => [...document.querySelectorAll(".wb-proj:not(.wb-new)")].find((card) => card.querySelector(".wb-tag")?.textContent === "脚本中"), "脚本阶段项目卡");
+          if (scriptCard.querySelector(".wb-go")?.textContent !== "继续写脚本") throw new Error("脚本阶段卡行动按钮不是「继续写脚本」");
+          scriptCard.click();
+          await waitFor(() => document.querySelector(".sp-root"), "脚本页渲染");
+          // 段落数 = 真实 blocks 数(3)。
+          const paragraphs = [...document.querySelectorAll(".sp-words")];
+          if (paragraphs.length !== 3) throw new Error("脚本页段落数与 blocks 不一致：" + paragraphs.length);
+          // 立场卡显示选题 angle。
+          const stanceText = document.querySelector(".sp-stance p")?.textContent ?? "";
+          if (!stanceText.includes("记忆点来自表达结构")) throw new Error("立场卡没有显示选题 angle：" + stanceText);
+          // 每个 chip 文案是三档之一;必须配画面的段带 .why 行。
+          const chipLabels = [...document.querySelectorAll(".sp-chip")].map((chip) => chip.textContent?.trim());
+          const allowed = ["不配画面", "配画面更好", "必须配画面"];
+          if (chipLabels.length !== 3 || !chipLabels.every((label) => allowed.includes(label))) throw new Error("chip 文案不是三档之一：" + chipLabels.join("/"));
+          if (!document.querySelector(".sp-chip-must")) throw new Error("must_show 段没有渲染必须配画面 chip");
+          if (!document.querySelector(".sp-why")?.textContent?.includes("看见")) throw new Error("must chip 下没有 .why 行");
+          // emphasis 高亮:命中的词包 <mark>。
+          if (![...document.querySelectorAll(".sp-words mark")].some((mark) => mark.textContent === "记忆点")) throw new Error("emphasis 词没有高亮");
+          // 编辑第二段:直接改 textContent 并派发 input 事件(非 IME 路径),等保存回到「刚刚保存」。
+          const target = paragraphs[1];
+          target.focus();
+          target.textContent = "因为观点停留在同一个口播画面里，观众得不到新的视觉证据，所以记不住。";
+          target.dispatchEvent(new InputEvent("input", { bubbles: true }));
+          await waitFor(() => document.querySelector(".sp-save")?.textContent?.includes("保存中"), "进入保存中态");
+          await waitFor(() => document.querySelector(".sp-save")?.textContent?.includes("刚刚保存"), "保存回到刚刚保存");
+          const savedText = document.querySelector(".sp-save")?.textContent ?? "";
+          // 生成分镜:点闸门,等页签「分镜」可点(hasStoryboard)与成功反馈。
+          const gateButton = [...document.querySelectorAll(".sp-cta")][0];
+          if (!gateButton || !/生成分镜/.test(gateButton.textContent ?? "")) throw new Error("闸门没有「生成分镜」按钮");
+          gateButton.click();
+          await waitFor(() => document.querySelector(".sp-gate-ok")?.textContent?.includes("分镜已生成"), "生成分镜成功反馈");
+          const storyboardTabEnabled = [...document.querySelectorAll(".sp-stages button")].some((button) => button.textContent?.includes("分镜") && !button.disabled);
+          // 回归守卫:生成分镜(会落新脚本修订并重载)后,emphasis 高亮必须仍在。
+          await waitFor(() => [...document.querySelectorAll(".sp-words mark")].some((mark) => mark.textContent === "记忆点"), "生成分镜后 emphasis 高亮仍在");
+          return { ok: true, paragraphCount: paragraphs.length, chipLabels, stanceText: stanceText.trim(), savedLabel: savedText.trim(), storyboardTabEnabled };
+        })()`);
+        if (!scriptPageCheck?.ok) throw new Error("UI smoke 脚本页断言失败");
+        if (shotDirectory) await captureSmokeShot(window, path.join(shotDirectory, "script-page.png"));
+        // SQLite 对账:编辑后 revision 应 +1;生成分镜后 storyboard 应落库。
+        const scriptAfterEdit = workspace.catalog.getScript(scriptSeedScriptId);
+        // 生成分镜会再 +1(create-capture-workflow 里 revision+1),所以编辑后至少到 2。
+        if (!scriptAfterEdit || scriptAfterEdit.revision < 2) throw new Error("脚本页编辑后 SQLite revision 没有 +1：" + (scriptAfterEdit?.revision ?? "无"));
+        if (!scriptAfterEdit.blocks[1].text.includes("视觉证据")) throw new Error("脚本页编辑内容没有落库");
+        // 回归守卫:编辑与生成分镜各落一次修订后,emphasis 不得被清掉(create-capture-workflow 曾硬编码空数组)。
+        if (!Array.isArray(scriptAfterEdit.blocks[0].emphasis) || !scriptAfterEdit.blocks[0].emphasis.includes("记忆点")) throw new Error("生成分镜后 SQLite 里 emphasis 丢失：" + JSON.stringify(scriptAfterEdit.blocks[0].emphasis));
+        const seededProjectAfter = workspace.catalog.getProject(scriptSeedProjectId);
+        const seededStoryboard = seededProjectAfter && typeof seededProjectAfter.payload.storyboardId === "string" ? workspace.catalog.getStoryboard(seededProjectAfter.payload.storyboardId) : undefined;
+        if (!seededStoryboard || seededStoryboard.scriptId !== scriptSeedScriptId) throw new Error("脚本页生成分镜后 storyboard 没有落库");
+
+        console.log(JSON.stringify({ ok: true, smoke: "electron-ui-creation-import-proposal-render", ui: result, workbench: workbenchCheck, aiEdit: editCheck, scriptPage: { ...scriptPageCheck, revisionAfterEdit: scriptAfterEdit.revision, storyboardShotCount: seededStoryboard.shots.length }, shots: shotDirectory ?? null, workspace: workspace.workspacePath, renderRuns: renderRuns.map((run) => ({ id: run.id, state: run.state, manifestHash: run.manifestHash })) }));
         app.exit(0);
       } catch (error) {
         console.error(JSON.stringify({ ok: false, smoke: "electron-ui-creation-import-proposal-render", message: error instanceof Error ? error.message : "Electron UI smoke 失败" }));

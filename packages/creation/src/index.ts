@@ -34,6 +34,20 @@ export const ScriptSchema = z.object({
 
 export type Script = z.infer<typeof ScriptSchema>;
 
+// 领域规则（只实现一次）：口播稿的粗略时长估计。
+// 每段按字符数 × 每字 260ms 折算，单段至少给 1500ms 底垫（短句也有开口和停顿）。
+// accept-script-proposal、update-script 与脚本页时长卡三处共用，避免各写一份漂移。
+export const MS_PER_CHARACTER = 260;
+export const MIN_BLOCK_DURATION_MS = 1_500;
+
+export function estimateBlockDurationMs(text: string): number {
+  return Math.max(MIN_BLOCK_DURATION_MS, Math.round(text.length * MS_PER_CHARACTER));
+}
+
+export function estimateScriptDurationMs(blocks: Array<{ text: string }>): number {
+  return blocks.reduce((total, block) => total + estimateBlockDurationMs(block.text), 0);
+}
+
 export const ScriptProposalShotPlanSchema = z.object({
   schemaVersion: z.literal(1),
   purpose: z.enum(["explain", "prove", "transition", "emotion", "reset", "brand"]),
